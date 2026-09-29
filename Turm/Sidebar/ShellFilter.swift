@@ -36,7 +36,8 @@ extension Workspace {
 
     func shells(matching query: String) -> [ShellTab] {
         tabs.filter { tab in
-            ShellFilter.matches(query, fields: sessions(in: tab).flatMap(\.searchFields))
+            let fields = tab.isSettings ? ["Settings"] : sessions(in: tab).flatMap(\.searchFields)
+            return ShellFilter.matches(query, fields: fields)
         }
     }
 }

@@ -17,6 +17,8 @@ struct TopBar: View {
     static let defaultHeight: CGFloat = 28
 
     @Binding var isSidebarVisible: Bool
+    let placement: SidebarPlacement
+    let onOpenSettings: () -> Void
     @State private var height = TopBar.defaultHeight
 
     var body: some View {
@@ -24,7 +26,7 @@ struct TopBar: View {
             .frame(height: height)
             .frame(maxWidth: .infinity)
             .background(Theme.topBar.color)
-            .background(TitlebarChrome(height: $height, isSidebarVisible: $isSidebarVisible))
+            .background(TitlebarChrome(height: $height, isSidebarVisible: $isSidebarVisible, placement: placement, onOpenSettings: onOpenSettings))
             .overlay(alignment: .bottom) {
                 Rectangle().fill(Theme.divider.color).frame(height: 1)
             }
@@ -35,6 +37,8 @@ struct TopBar: View {
 private struct TitlebarChrome: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var isSidebarVisible: Bool
+    let placement: SidebarPlacement
+    let onOpenSettings: () -> Void
 
     func makeNSView(context: Context) -> ChromeView {
         let view = ChromeView()
@@ -49,29 +53,41 @@ private struct TitlebarChrome: NSViewRepresentable {
     private func update(_ view: ChromeView) {
         view.onHeight = { height = $0 }
         view.onToggle = { withAnimation(.easeInOut(duration: 0.18)) { isSidebarVisible.toggle() } }
-        view.setSidebarVisible(isSidebarVisible)
+        view.onSettings = onOpenSettings
+        view.setSidebar(visible: isSidebarVisible, placement: placement)
     }
 
     final class ChromeView: NSView {
         var onHeight: (CGFloat) -> Void = { _ in }
         var onToggle: () -> Void = {}
+        var onSettings: () -> Void = {}
 
         private static let buttonSize = NSSize(width: 30, height: 24)
         private static let trafficLightGap: CGFloat = 12
+        private static let buttonGap: CGFloat = 2
 
         private let toggle = NSButton()
+        private let settings = NSButton()
         private var observers: [NSObjectProtocol] = []
 
         override init(frame: NSRect) {
             super.init(frame: frame)
-            toggle.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Toggle Sidebar")
             toggle.imagePosition = .imageOnly
             toggle.bezelStyle = .texturedRounded
             toggle.showsBorderOnlyWhileMouseInside = true
             toggle.contentTintColor = .secondaryLabelColor
             toggle.target = self
             toggle.action = #selector(pressed)
-            toggle.setAccessibilityLabel("Toggle Sidebar")
+
+            settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+            settings.imagePosition = .imageOnly
+            settings.bezelStyle = .texturedRounded
+            settings.showsBorderOnlyWhileMouseInside = true
+            settings.contentTintColor = .secondaryLabelColor
+            settings.target = self
+            settings.action = #selector(openSettings)
+            settings.toolTip = "Settings"
+            settings.setAccessibilityLabel("Settings")
         }
 
         @available(*, unavailable)
@@ -85,12 +101,18 @@ private struct TitlebarChrome: NSViewRepresentable {
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-        func setSidebarVisible(_ visible: Bool) {
-            toggle.toolTip = visible ? "Hide Sidebar" : "Show Sidebar"
+        func setSidebar(visible: Bool, placement: SidebarPlacement) {
+            toggle.image = NSImage(systemSymbolName: placement.symbol, accessibilityDescription: "Toggle \(placement.noun)")
+            toggle.toolTip = visible ? "Hide \(placement.noun)" : "Show \(placement.noun)"
+            toggle.setAccessibilityLabel("Toggle \(placement.noun)")
         }
 
         @objc private func pressed() {
             onToggle()
+        }
+
+        @objc private func openSettings() {
+            onSettings()
         }
 
         override func viewDidMoveToWindow() {
@@ -98,6 +120,7 @@ private struct TitlebarChrome: NSViewRepresentable {
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
             toggle.removeFromSuperview()
+            settings.removeFromSuperview()
             guard let window else { return }
             let names: [Notification.Name] = [
                 NSWindow.didResizeNotification,
@@ -123,6 +146,7 @@ private struct TitlebarChrome: NSViewRepresentable {
             if target > 0 { onHeight(target) }
 
             if toggle.superview !== container { container.addSubview(toggle) }
+            if settings.superview !== container { container.addSubview(settings) }
             let anchor = window.standardWindowButton(.zoomButton)?.frame.maxX ?? close.frame.maxX
             toggle.frame = NSRect(
                 x: anchor + Self.trafficLightGap,
@@ -130,6 +154,7 @@ private struct TitlebarChrome: NSViewRepresentable {
                 width: Self.buttonSize.width,
                 height: Self.buttonSize.height
             )
+            settings.frame = toggle.frame.offsetBy(dx: Self.buttonSize.width + Self.buttonGap, dy: 0)
         }
     }
 }

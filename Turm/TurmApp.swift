@@ -7,7 +7,7 @@ struct TurmApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(updater: updater)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -18,6 +18,10 @@ struct TurmApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppearancePreference.stored.apply()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         CloseCoordinator.shared.shouldQuit() ? .terminateNow : .terminateCancel
     }

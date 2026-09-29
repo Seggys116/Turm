@@ -5,6 +5,7 @@ nonisolated struct ShellTab: Identifiable, Equatable, Sendable {
     let id = UUID()
     var layout: PaneNode
     var focusedPane: PaneID
+    var isSettings = false
 }
 
 @Observable
@@ -47,7 +48,8 @@ final class Workspace {
     }
 
     var focusedTitle: String {
-        sessions[focusedPane]?.title ?? "Turm"
+        if tabs[activeIndex].isSettings { return "Settings" }
+        return sessions[focusedPane]?.title ?? "Turm"
     }
 
     var focusedSession: TerminalSession? {
@@ -89,6 +91,17 @@ final class Workspace {
         activeTabID = tab.id
     }
 
+    func openSettings() {
+        if let existing = tabs.first(where: \.isSettings) {
+            activeTabID = existing.id
+            return
+        }
+        let pane = PaneID()
+        let tab = ShellTab(layout: .leaf(pane), focusedPane: pane, isSettings: true)
+        tabs.append(tab)
+        activeTabID = tab.id
+    }
+
     func selectTab(_ id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         activeTabID = id
@@ -111,6 +124,10 @@ final class Workspace {
 
     func closeTab(_ id: UUID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        if tab.isSettings {
+            removeTab(at: tabs.firstIndex(where: { $0.id == id }) ?? 0)
+            return
+        }
         let panes = tab.layout.leaves
         let needsConfirmation = panes.contains { pane in
             guard let session = sessions[pane] else { return false }

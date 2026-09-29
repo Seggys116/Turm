@@ -8,14 +8,18 @@ extension FocusedValues {
 struct PaneCommands: Commands {
     @FocusedValue(\.workspace) private var workspace
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
+    @AppStorage(SidebarPlacement.key) private var placement = SidebarPlacement.left
 
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {}
         CommandGroup(replacing: .sidebar) {
-            Button(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+            Button(isSidebarVisible ? "Hide \(placement.noun)" : "Show \(placement.noun)") {
                 withAnimation(.easeInOut(duration: 0.18)) { isSidebarVisible.toggle() }
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+            Picker("Sidebar Position", selection: $placement.animation(.easeInOut(duration: 0.18))) {
+                ForEach(SidebarPlacement.allCases) { Text($0.title).tag($0) }
+            }
         }
         CommandGroup(after: .textEditing) {
             Menu("Find") {
