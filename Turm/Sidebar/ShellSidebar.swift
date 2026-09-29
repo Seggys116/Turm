@@ -1,18 +1,28 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct ShellSidebar: View {
     static let width: CGFloat = 240
-    static let stripHeight: CGFloat = 36
+    static let stripHeight: CGFloat = 32
     private static let gap: CGFloat = 6
-    private static let chipWidth: CGFloat = 180
-    private static let stripSearchWidth: CGFloat = 170
+    private static let rowHeight: CGFloat = 28
+    private static let chipHeight: CGFloat = 24
+    private static let chipWidthRange: ClosedRange<CGFloat> = 72...200
+    /// Row padding, indicator and the spacing after it.
+    private static let chipChrome: CGFloat = 34
+    private static let chipFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private static let countFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+    private static let stripSearchWidth: CGFloat = 150
 
     let workspace: Workspace
     let placement: SidebarPlacement
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var dropTargetID: UUID?
+    @State private var stripPosition = ScrollPosition(edge: .leading)
+    @State private var stripOffset: CGFloat = 0
+    @State private var stripOverflow: CGFloat = 0
 
     var body: some View {
         Group {
@@ -37,7 +47,7 @@ struct ShellSidebar: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background(Theme.sidebar.color)
-        .overlay(alignment: placement == .right ? .leading : .trailing) {
+        .overlay(alignment: .trailing) {
             Rectangle().fill(Theme.divider.color).frame(width: 1)
         }
     }
@@ -146,7 +156,6 @@ struct ShellSidebar: View {
                     LazyHStack(spacing: Self.gap) {
                         ForEach(shells) { tab in
                             row(for: tab)
-                                .frame(width: Self.chipWidth)
                                 .id(tab.id)
                         }
                     }
@@ -154,6 +163,14 @@ struct ShellSidebar: View {
                     .padding(.vertical, 4)
                 }
                 .scrollIndicators(.never)
+                .scrollPosition($stripPosition)
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
+                    stripOffset = x
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { max($0.contentSize.width - $0.containerSize.width, 0) } action: { _, overflow in
+                    stripOverflow = overflow
+                }
+                .background(VerticalWheelMonitor(onScroll: scrollStrip))
                 .onAppear { proxy.scrollTo(workspace.activeTabID) }
                 .onChange(of: workspace.activeTabID) { _, id in
                     withAnimation { proxy.scrollTo(id) }
@@ -162,32 +179,58 @@ struct ShellSidebar: View {
         }
     }
 
+    private func scrollStrip(by delta: CGFloat) {
+        let target = min(max(stripOffset - delta, 0), stripOverflow)
+        guard target != stripOffset else { return }
+        stripOffset = target
+        stripPosition.scrollTo(x: target)
+    }
+
+    private func chipWidth(for title: String, paneCount: Int = 1) -> CGFloat? {
+        guard placement == .top else { return nil }
+        var width = Self.chipChrome + Self.textWidth(title, font: Self.chipFont)
+        if paneCount > 1 {
+            width += 8 + Self.textWidth("\(paneCount)", font: Self.countFont)
+        }
+        return min(max(width, Self.chipWidthRange.lowerBound), Self.chipWidthRange.upperBound)
+    }
+
+    private static func textWidth(_ text: String, font: NSFont) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: font]).width)
+    }
+
     @ViewBuilder
     private func row(for tab: ShellTab) -> some View {
+        let height = placement == .top ? Self.chipHeight : Self.rowHeight
         if tab.isSettings {
             reorderable(
                 SettingsRow(
+                    height: height,
                     isSelected: workspace.activeTabID == tab.id,
                     isDropTarget: dropTargetID == tab.id,
                     select: { workspace.selectTab(tab.id) },
                     close: { workspace.closeTab(tab.id) }
-                ),
+                )
+                .frame(width: chipWidth(for: "Settings")),
                 tab: tab,
                 title: "Settings"
             )
         } else if let session = workspace.representative(of: tab) {
+            let title = session.customTitle ?? Block.abbreviate(session.directory)
             reorderable(
                 ShellRow(
                     session: session,
+                    height: height,
                     paneCount: tab.layout.leaves.count,
                     isRunning: workspace.sessions(in: tab).contains(where: \.isRunning),
                     isSelected: workspace.activeTabID == tab.id,
                     isDropTarget: dropTargetID == tab.id,
                     select: { workspace.selectTab(tab.id) },
                     close: { workspace.closeTab(tab.id) }
-                ),
+                )
+                .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count)),
                 tab: tab,
-                title: session.customTitle ?? Block.abbreviate(session.directory)
+                title: title
             )
         }
     }
@@ -232,6 +275,7 @@ private nonisolated struct DraggedShell: Codable, Transferable {
 
 private struct ShellRow: View {
     let session: TerminalSession
+    let height: CGFloat
     let paneCount: Int
     let isRunning: Bool
     let isSelected: Bool
@@ -261,33 +305,22 @@ private struct ShellRow: View {
             } else {
                 MarqueeText(
                     text: session.customTitle ?? Block.abbreviate(session.directory),
-                    isActive: isHovered
+                    isActive: isHovered,
+                    trailingInset: HoverClose.coveredWidth
                 )
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.text.color)
             }
-            Spacer(minLength: 0)
             if paneCount > 1, !isHovered {
                 Text("\(paneCount)")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Theme.secondaryText.color)
                     .help("\(paneCount) panes")
             }
-            if isHovered {
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.secondaryText.color)
-                .help("Close Shell")
-                .accessibilityLabel("Close Shell")
-            }
         }
+        .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
         .padding(.horizontal, 8)
-        .frame(height: 28)
+        .frame(height: height)
         .help(Block.abbreviate(session.directory))
         .background(
             RoundedRectangle(cornerRadius: 6)
@@ -353,6 +386,7 @@ private struct ShellRow: View {
 }
 
 private struct SettingsRow: View {
+    let height: CGFloat
     let isSelected: Bool
     let isDropTarget: Bool
     let select: () -> Void
@@ -369,22 +403,11 @@ private struct SettingsRow: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.text.color)
                 .lineLimit(1)
-            Spacer(minLength: 0)
-            if isHovered {
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.secondaryText.color)
-                .help("Close Settings")
-                .accessibilityLabel("Close Settings")
-            }
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .modifier(HoverClose(isVisible: isHovered, label: "Close Settings", close: close))
         .padding(.horizontal, 8)
-        .frame(height: 28)
+        .frame(height: height)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
@@ -402,9 +425,99 @@ private struct SettingsRow: View {
     }
 }
 
+/// Turns vertical mouse-wheel scrolling over the view into horizontal scrolling, which a horizontal ScrollView ignores.
+private struct VerticalWheelMonitor: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> MonitorView {
+        let view = MonitorView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ view: MonitorView, context: Context) {
+        view.onScroll = onScroll
+    }
+
+    final class MonitorView: NSView {
+        private static let lineScale: CGFloat = 10
+
+        var onScroll: (CGFloat) -> Void = { _ in }
+        private var monitor: Any?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let consumed = MainActor.assumeIsolated { self?.consume(event) ?? false }
+                return consumed ? nil : event
+            }
+        }
+
+        private func consume(_ event: NSEvent) -> Bool {
+            guard event.window === window,
+                  abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+                  bounds.contains(convert(event.locationInWindow, from: nil))
+            else { return false }
+            onScroll(event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * Self.lineScale)
+            return true
+        }
+    }
+}
+
+/// Fades the trailing end of a row's content and shows a close button there, without reserving layout width for it.
+private struct HoverClose: ViewModifier {
+    private static let buttonWidth: CGFloat = 16
+    private static let fadeWidth: CGFloat = 14
+    static let coveredWidth = buttonWidth + fadeWidth
+
+    let isVisible: Bool
+    let label: String
+    let close: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .mask {
+                ZStack {
+                    Color.black.opacity(isVisible ? 0 : 1)
+                    HStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: Self.fadeWidth)
+                        Color.clear.frame(width: Self.buttonWidth)
+                    }
+                    .opacity(isVisible ? 1 : 0)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: Self.buttonWidth, height: Self.buttonWidth)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.secondaryText.color)
+                .help(label)
+                .accessibilityLabel(label)
+                .opacity(isVisible ? 1 : 0)
+                .allowsHitTesting(isVisible)
+                .accessibilityHidden(!isVisible)
+            }
+            .animation(.easeOut(duration: 0.12), value: isVisible)
+    }
+}
+
 private struct MarqueeText: View {
     let text: String
     let isActive: Bool
+    var trailingInset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
     @State private var offset: CGFloat = 0
@@ -413,7 +526,7 @@ private struct MarqueeText: View {
     private static let fadeWidth: CGFloat = 16
 
     private var overflow: CGFloat {
-        max(textWidth - containerWidth, 0)
+        max(textWidth - containerWidth + (isActive ? trailingInset : 0), 0)
     }
 
     private var isScrolling: Bool {

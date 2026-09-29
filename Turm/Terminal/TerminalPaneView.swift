@@ -6,6 +6,7 @@ struct TerminalPaneView: View {
     let isFocused: Bool
     @State private var input = InputModel()
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(ProjectActionsPreference.key) private var showsProjectBar = true
 
     private static let horizontalInset: CGFloat = 16
 
@@ -45,8 +46,12 @@ struct TerminalPaneView: View {
                         SearchBar(search: session.search)
                     }
                 }
-                StatusBar()
+                if showsProjectBar, !session.project.isEmpty {
+                    StatusBar(session: session)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(.easeOut(duration: 0.18), value: session.project.isEmpty)
             .onChange(of: session.current?.output) { session.search.contentChanged() }
             .onChange(of: session.blocks.count) { session.search.contentChanged() }
             .onChange(of: session.current?.isRunning) { session.search.contentChanged() }

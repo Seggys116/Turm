@@ -16,6 +16,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var hasSubmittedCommand = false
     private(set) var directory = NSHomeDirectory()
     private(set) var git: GitStatus?
+    private(set) var project = ProjectSnapshot.empty
+    private(set) var variantChoices: [String: Int] = [:]
     private(set) var phase = Phase.starting
     private(set) var altScreen: AltScreenHost?
     private(set) var failure: String?
@@ -41,6 +43,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var startedAt: ContinuousClock.Instant?
     @ObservationIgnored private var renderPending = false
     @ObservationIgnored private var gitGeneration = 0
+    @ObservationIgnored private var projectGeneration = 0
     @ObservationIgnored private var isDark = true
     @ObservationIgnored private var reportsColorScheme = false
     @ObservationIgnored private var reportsFocus = false
@@ -70,6 +73,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         process = LocalProcess(delegate: self)
         startShell()
+        refreshProject(for: self.directory)
         let center = NotificationCenter.default
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             appObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -323,6 +327,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             directory = path
             phase = .ready
             refreshGit(for: path)
+            refreshProject(for: path)
         }
     }
 
@@ -436,6 +441,31 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         let failure = await GitInspector.switchBranch(to: name, in: path)
         refreshGit(for: path)
         return failure
+    }
+
+    private func refreshProject(for path: String) {
+        projectGeneration += 1
+        let generation = projectGeneration
+        Task {
+            let found = await ProjectDetection.detect(in: path)
+            guard generation == projectGeneration else { return }
+            if found != project {
+                project = found
+                variantChoices = VariantStore.load(roots: found.roots, variants: found.variants)
+            }
+        }
+    }
+
+    func run(_ action: ProjectAction) {
+        submit(project.commandLine(for: action, selection: variantChoices, from: directory))
+    }
+
+    func cycle(_ variant: ProjectVariant) {
+        guard variant.options.count > 1 else { return }
+        let current = variantChoices[variant.id].flatMap { variant.options.indices.contains($0) ? $0 : nil } ?? variant.defaultIndex
+        let next = (current + 1) % variant.options.count
+        variantChoices[variant.id] = next
+        VariantStore.save(index: next, variant: variant.id, roots: project.roots)
     }
 
     private func refreshGit(for path: String) {

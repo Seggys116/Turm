@@ -36,10 +36,6 @@ struct ContentView: View {
                             .zIndex(isActive ? 1 : 0)
                     }
                 }
-                if isSidebarVisible, placement == .right {
-                    ShellSidebar(workspace: workspace, placement: .right)
-                        .transition(.move(edge: .trailing))
-                }
             }
             .clipped()
         }
@@ -65,7 +61,6 @@ enum SidebarPreference {
 
 enum SidebarPlacement: String, CaseIterable, Identifiable {
     case left
-    case right
     case top
 
     static let key = "turm.sidebarPlacement"
@@ -75,7 +70,6 @@ enum SidebarPlacement: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .left: "Left"
-        case .right: "Right"
         case .top: "Top"
         }
     }
@@ -87,7 +81,6 @@ enum SidebarPlacement: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .left: "sidebar.left"
-        case .right: "sidebar.right"
         case .top: "rectangle.topthird.inset.filled"
         }
     }
