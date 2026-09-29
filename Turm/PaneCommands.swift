@@ -7,9 +7,16 @@ extension FocusedValues {
 
 struct PaneCommands: Commands {
     @FocusedValue(\.workspace) private var workspace
+    @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
 
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {}
+        CommandGroup(replacing: .sidebar) {
+            Button(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+                withAnimation(.easeInOut(duration: 0.18)) { isSidebarVisible.toggle() }
+            }
+            .keyboardShortcut("s", modifiers: [.command, .control])
+        }
         CommandGroup(after: .textEditing) {
             Menu("Find") {
                 Button("Find...") { workspace?.focusedSession?.search.present() }
@@ -24,6 +31,13 @@ struct PaneCommands: Commands {
             .disabled(workspace?.focusedSession == nil)
         }
         CommandMenu("Shell") {
+            Button("New Shell") { workspace?.newShell() }
+                .keyboardShortcut("t")
+            Button("Next Shell") { workspace?.selectNextTab() }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Shell") { workspace?.selectPreviousTab() }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Divider()
             Button("Split Right") { workspace?.split(.horizontal) }
                 .keyboardShortcut("d")
             Button("Split Down") { workspace?.split(.vertical) }

@@ -22,6 +22,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var progress: Terminal.ProgressReport?
     private(set) var programTitle: String?
     private(set) var runningOutputFrame: CGRect?
+    private(set) var userTitle: String?
     var isDropTargeted = false
 
     static let paneSpace = "turm.pane"
@@ -53,8 +54,12 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var appObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var submission = ShellIntegration.Submission.bracketedPaste
 
-    override init() {
+    init(directory: String = NSHomeDirectory()) {
         super.init()
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue {
+            self.directory = directory
+        }
         search.source = { [weak self] in
             guard let self else { return [] }
             return self.search.snapshot(self.blocks)
@@ -78,9 +83,15 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     var title: String {
+        if let userTitle { return userTitle }
         if let programTitle, !programTitle.isEmpty { return programTitle }
         if isRunning, let command = current?.command { return command }
         return Block.abbreviate(directory)
+    }
+
+    func rename(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        userTitle = trimmed.isEmpty ? nil : trimmed
     }
 
     var keyModes: KeyModes {
@@ -268,7 +279,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
                 args: launch.arguments,
                 environment: launch.environment,
                 execName: launch.execName,
-                currentDirectory: NSHomeDirectory()
+                currentDirectory: directory
             )
             SystemCompletionEnvironment.shared.setShellProcess(pid: process.shellPid)
         } catch {

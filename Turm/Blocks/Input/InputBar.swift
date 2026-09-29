@@ -55,13 +55,13 @@ struct InputBar: View {
         HStack(spacing: 6) {
             Chip(text: Block.abbreviate(session.directory), isActive: pathMenuOpen) { Image(systemName: "folder").chipIcon() }
                 .onTapGesture { toggle(path: true) }
-                .chipMenu(isOpen: $pathMenuOpen) {
+                .anchoredMenu(isOpen: $pathMenuOpen) {
                     PathMenu(path: session.directory) { pathMenuOpen = false }
                 }
             if let git = session.git {
                 Chip(text: git.branch, isActive: branchMenuOpen) { GitBranchIcon().frame(width: 12, height: 12) }
                     .onTapGesture { toggle(path: false) }
-                    .chipMenu(isOpen: $branchMenuOpen) {
+                    .anchoredMenu(isOpen: $branchMenuOpen) {
                         BranchMenu(session: session) { branchMenuOpen = false }
                     }
                 HStack(spacing: 4) {

@@ -3,18 +3,20 @@ import SwiftUI
 struct TilingView: View {
     let workspace: Workspace
     let node: PaneNode
+    let focusedPane: PaneID
+    let isActive: Bool
 
     var body: some View {
         switch node {
         case .leaf(let pane):
             if let session = workspace.session(for: pane) {
-                TerminalPaneView(session: session, isFocused: workspace.focusedPane == pane)
+                TerminalPaneView(session: session, isFocused: isActive && focusedPane == pane)
             }
         case .split(let id, let axis, let ratio, let first, let second):
             SplitContainer(axis: axis, ratio: ratio, onRatioChange: { workspace.resize(split: id, to: $0) }) {
-                TilingView(workspace: workspace, node: first)
+                TilingView(workspace: workspace, node: first, focusedPane: focusedPane, isActive: isActive)
             } second: {
-                TilingView(workspace: workspace, node: second)
+                TilingView(workspace: workspace, node: second, focusedPane: focusedPane, isActive: isActive)
             }
         }
     }

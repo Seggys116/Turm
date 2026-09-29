@@ -44,6 +44,7 @@ enum Theme {
     static let terminalBackground = ThemeColor(light: 0xFFFFFF, dark: 0x0B0B0C)
     static let inputBackground = ThemeColor(light: 0xF5F5F7, dark: 0x111113)
     static let topBar = ThemeColor(light: 0xE6E6EA, dark: 0x1B1B1F)
+    static let sidebar = ThemeColor(light: 0xF0F0F3, dark: 0x131316)
     static let statusBar = ThemeColor(light: 0xECECF0, dark: 0x151518)
     static let text = ThemeColor(light: 0x1F2328, dark: 0xDCDCDC)
     static let divider = ThemeColor(
