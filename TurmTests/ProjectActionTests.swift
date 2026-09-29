@@ -280,7 +280,7 @@ struct ProjectActionTests {
     @Test func projectOverridesWin() throws {
         let manifest = """
         {"bar": {"pinned": ["cargo.test", "cargo.build"], "icons": {"cargo.build": "star"}, "titles": "never",
-                 "subShell": false, "order": ["options", "actions"],
+                 "subShell": false,
                  "ecosystems": {"cargo": {"title": "Rust", "icon": "gear"}}}}
         """
         let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Turm.json": manifest]))
@@ -289,7 +289,6 @@ struct ProjectActionTests {
         let bar = resolved(found, preferences)
         #expect(bar.display(choice: nil).pinned.map(\.id) == ["cargo.test", "cargo.build"])
         #expect(!bar.subShell && bar.titles == .never)
-        #expect(bar.order == [.options, .actions])
         #expect(bar.groups.first?.title == "Rust" && bar.groups.first?.symbol == "gear")
         let action = try #require(found.actions.first { $0.id == "cargo.build" })
         #expect(bar.symbol(for: action) == "star")
@@ -298,14 +297,20 @@ struct ProjectActionTests {
     @Test func preferencesRoundTripAndTolerateJunk() {
         var preferences = StatusBarPreferences()
         #expect(preferences.runInSubShell)
-        preferences.order = [.options]
         preferences.setItems(["a"], for: "node")
         let decoded = StatusBarPreferences(rawValue: preferences.rawValue)
-        #expect(decoded?.order == [.options, .actions])
         #expect(decoded?.items(for: "node", defaults: []) == ["a"])
-        #expect(StatusBarPreferences(rawValue: "{\"order\": [\"ecosystems\", \"options\"]}")?.order == [.options, .actions])
+        #expect(StatusBarPreferences(rawValue: "{\"order\": [\"ecosystems\", \"options\"]}") != nil)
         #expect(StatusBarPreferences(rawValue: "{}")?.runInSubShell == true)
         #expect(StatusBarPreferences(rawValue: "not json") == nil)
+    }
+
+    @Test func actionsAndOptionsKeepTheirArrangedOrder() throws {
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": ""]))
+        var preferences = StatusBarPreferences()
+        preferences.setItems(["cargo.build", "cargo-profile", "cargo.run", "cargo.test"], for: "cargo")
+        let entries = resolved(found, preferences).display(choice: nil).entries
+        #expect(entries.map(\.id) == ["action.cargo.build", "variant.cargo-profile", "action.cargo.run", "action.cargo.test"])
     }
 
     @Test func catalogListsEveryDetector() {

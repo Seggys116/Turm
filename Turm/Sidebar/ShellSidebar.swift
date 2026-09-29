@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ShellSidebar: View {
     static let width: CGFloat = 240
@@ -14,12 +13,15 @@ struct ShellSidebar: View {
     private static let chipFont = NSFont.systemFont(ofSize: 12, weight: .medium)
     private static let countFont = NSFont.systemFont(ofSize: 10, weight: .medium)
     private static let stripSearchWidth: CGFloat = 150
+    private static let space = "shellTabs"
+    private static let slide = Animation.spring(duration: 0.24, bounce: 0.1)
 
     let workspace: Workspace
     let placement: SidebarPlacement
     @State private var query = ""
     @FocusState private var searchFocused: Bool
-    @State private var dropTargetID: UUID?
+    @State private var drag: TabDrag?
+    @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var stripPosition = ScrollPosition(edge: .leading)
     @State private var stripOffset: CGFloat = 0
     @State private var stripOverflow: CGFloat = 0
@@ -127,13 +129,8 @@ struct ShellSidebar: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: Self.gap) {
-                        ForEach(shells) { tab in
-                            row(for: tab)
-                                .id(tab.id)
-                        }
-                    }
-                    .padding(.horizontal, Self.gap)
+                    reorderable(shells)
+                        .padding(.horizontal, Self.gap)
                     .padding(.bottom, 8)
                 }
                 .onChange(of: workspace.activeTabID) { _, id in
@@ -153,13 +150,8 @@ struct ShellSidebar: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
-                    LazyHStack(spacing: Self.gap) {
-                        ForEach(shells) { tab in
-                            row(for: tab)
-                                .id(tab.id)
-                        }
-                    }
-                    .padding(.horizontal, 2)
+                    reorderable(shells)
+                        .padding(.horizontal, 2)
                     .padding(.vertical, 4)
                 }
                 .scrollIndicators(.never)
@@ -203,73 +195,132 @@ struct ShellSidebar: View {
     private func row(for tab: ShellTab) -> some View {
         let height = placement == .top ? Self.chipHeight : Self.rowHeight
         if tab.isSettings {
-            reorderable(
-                SettingsRow(
-                    height: height,
-                    isSelected: workspace.activeTabID == tab.id,
-                    isDropTarget: dropTargetID == tab.id,
-                    select: { workspace.selectTab(tab.id) },
-                    close: { workspace.closeTab(tab.id) }
-                )
-                .frame(width: chipWidth(for: "Settings")),
-                tab: tab,
-                title: "Settings"
+            SettingsRow(
+                height: height,
+                isSelected: workspace.activeTabID == tab.id,
+                select: { workspace.selectTab(tab.id) },
+                close: { workspace.closeTab(tab.id) }
             )
+            .frame(width: chipWidth(for: "Settings"))
         } else if let session = workspace.representative(of: tab) {
             let title = session.customTitle ?? Block.abbreviate(session.directory)
-            reorderable(
-                ShellRow(
-                    session: session,
-                    height: height,
-                    paneCount: tab.layout.leaves.count,
-                    isRunning: workspace.sessions(in: tab).contains(where: \.isRunning),
-                    isSelected: workspace.activeTabID == tab.id,
-                    isDropTarget: dropTargetID == tab.id,
-                    select: { workspace.selectTab(tab.id) },
-                    close: { workspace.closeTab(tab.id) }
-                )
-                .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count)),
-                tab: tab,
-                title: title
+            ShellRow(
+                session: session,
+                height: height,
+                paneCount: tab.layout.leaves.count,
+                isRunning: workspace.sessions(in: tab).contains(where: \.isRunning),
+                isSelected: workspace.activeTabID == tab.id,
+                select: { workspace.selectTab(tab.id) },
+                close: { workspace.closeTab(tab.id) }
             )
+            .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count))
         }
     }
 
-    private func reorderable(_ row: some View, tab: ShellTab, title: String) -> some View {
-        row
-            .draggable(DraggedShell(id: tab.id)) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-            }
-            .dropDestination(for: DraggedShell.self) { items, _ in
-                drop(items, onto: tab.id)
-            } isTargeted: { targeted in
-                if targeted {
-                    dropTargetID = tab.id
-                } else if dropTargetID == tab.id {
-                    dropTargetID = nil
-                }
-            }
+    private var isHorizontal: Bool { placement == .top }
+
+    private func mainAxis(_ point: CGPoint) -> CGFloat { isHorizontal ? point.x : point.y }
+    private func mainOrigin(_ frame: CGRect) -> CGFloat { isHorizontal ? frame.minX : frame.minY }
+    private func mainLength(_ frame: CGRect) -> CGFloat { isHorizontal ? frame.width : frame.height }
+
+    /// The shells as they would sit if the drag ended now, so the rest slide aside for the one being held.
+    private func arranged(_ shells: [ShellTab]) -> [ShellTab] {
+        guard let drag, let held = shells.first(where: { $0.id == drag.id }), let frame = rowFrames[drag.id] else { return shells }
+        var rest = shells.filter { $0.id != drag.id }
+        let center = drag.pointer - drag.grab + mainLength(frame) / 2
+        var index = 0
+        for tab in rest {
+            guard let other = rowFrames[tab.id], (isHorizontal ? other.midX : other.midY) < center else { break }
+            index += 1
+        }
+        rest.insert(held, at: index)
+        return rest
     }
 
-    private func drop(_ items: [DraggedShell], onto id: UUID) -> Bool {
-        dropTargetID = nil
-        guard let item = items.first,
-              item.id != id,
-              let index = workspace.tabs.firstIndex(where: { $0.id == id })
-        else { return false }
-        workspace.moveTab(item.id, to: index)
-        return true
+    private func reorderable(_ shells: [ShellTab]) -> some View {
+        let order = arranged(shells)
+        let layout = isHorizontal
+            ? AnyLayout(HStackLayout(spacing: Self.gap))
+            : AnyLayout(VStackLayout(spacing: Self.gap))
+        return layout {
+            ForEach(order) { tab in
+                row(for: tab)
+                    .geometryGroup()
+                    .opacity(drag?.id == tab.id ? 0 : 1)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: RowFrames.self, value: [tab.id: proxy.frame(in: .named(Self.space))])
+                    })
+                    .simultaneousGesture(dragGesture(for: tab))
+                    .id(tab.id)
+            }
+        }
+        .animation(Self.slide, value: order.map(\.id))
+        .overlay(alignment: .topLeading) {
+            floating(order).transaction { $0.animation = nil }
+        }
+        .coordinateSpace(name: Self.space)
+        .onPreferenceChange(RowFrames.self) { rowFrames = $0 }
+    }
+
+    @ViewBuilder
+    private func floating(_ order: [ShellTab]) -> some View {
+        if let drag, let tab = order.first(where: { $0.id == drag.id }), let frame = rowFrames[drag.id] {
+            let lower = rowFrames.values.map(mainOrigin).min() ?? 0
+            let upper = (rowFrames.values.map { mainOrigin($0) + mainLength($0) }.max() ?? 0) - mainLength(frame)
+            let position = min(max(drag.pointer - drag.grab, lower), max(upper, lower))
+            row(for: tab)
+                .geometryGroup()
+                .frame(width: frame.width, height: frame.height)
+                .background(Theme.sidebar.color, in: RoundedRectangle(cornerRadius: 6))
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                .offset(x: isHorizontal ? position : frame.minX, y: isHorizontal ? frame.minY : position)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func dragGesture(for tab: ShellTab) -> some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if drag == nil {
+                    guard let frame = rowFrames[tab.id] else { return }
+                    drag = TabDrag(id: tab.id, pointer: mainAxis(value.location), grab: mainAxis(value.startLocation) - mainOrigin(frame))
+                }
+                guard drag?.id == tab.id else { return }
+                drag?.pointer = mainAxis(value.location)
+            }
+            .onEnded { _ in finishDrag() }
+    }
+
+    private func finishDrag() {
+        guard let held = drag?.id else { return }
+        let order = arranged(workspace.shells(matching: query)).map(\.id)
+        let others = workspace.tabs.map(\.id).filter { $0 != held }
+        var target = others.count
+        if let position = order.firstIndex(of: held) {
+            if order.indices.contains(position + 1), let next = others.firstIndex(of: order[position + 1]) {
+                target = next
+            } else if position > 0, let previous = others.firstIndex(of: order[position - 1]) {
+                target = previous + 1
+            }
+        }
+        withAnimation(Self.slide) {
+            workspace.moveTab(held, to: target)
+            drag = nil
+        }
     }
 }
 
-private nonisolated struct DraggedShell: Codable, Transferable {
-    let id: UUID
+private struct TabDrag {
+    var id: UUID
+    var pointer: CGFloat
+    var grab: CGFloat
+}
 
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .json)
+private struct RowFrames: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 
@@ -279,7 +330,6 @@ private struct ShellRow: View {
     let paneCount: Int
     let isRunning: Bool
     let isSelected: Bool
-    let isDropTarget: Bool
     let select: () -> Void
     let close: () -> Void
     @State private var isHovered = false
@@ -325,11 +375,6 @@ private struct ShellRow: View {
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.accentColor, lineWidth: 2)
-                .opacity(isDropTarget ? 1 : 0)
         )
         .contentShape(Rectangle())
         .onOutsideFieldClick(isActive: isRenaming, perform: commitRename)
@@ -388,7 +433,6 @@ private struct ShellRow: View {
 private struct SettingsRow: View {
     let height: CGFloat
     let isSelected: Bool
-    let isDropTarget: Bool
     let select: () -> Void
     let close: () -> Void
     @State private var isHovered = false
@@ -411,11 +455,6 @@ private struct SettingsRow: View {
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.accentColor, lineWidth: 2)
-                .opacity(isDropTarget ? 1 : 0)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: select)

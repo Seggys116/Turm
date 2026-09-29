@@ -5,6 +5,7 @@ final class CompletionModel {
     private(set) var items: [CompletionItem] = []
     private(set) var engaged = false
     var selected = 0
+    var hinted = false
     @ObservationIgnored var onAccept: (Int) -> Void = { _ in }
     @ObservationIgnored var onPresentation: () -> Void = {}
 
@@ -15,6 +16,7 @@ final class CompletionModel {
         self.items = items
         self.engaged = engaged
         selected = 0
+        hinted = false
         onPresentation()
     }
 
@@ -23,6 +25,7 @@ final class CompletionModel {
         items = []
         selected = 0
         engaged = false
+        hinted = false
         onPresentation()
     }
 
@@ -30,7 +33,11 @@ final class CompletionModel {
         guard !items.isEmpty else { return }
         if !engaged {
             engaged = true
-            selected = step > 0 ? 0 : items.count - 1
+            if step > 0 {
+                selected = hinted && items.count > 1 ? 1 : 0
+            } else {
+                selected = items.count - 1
+            }
             return
         }
         selected = (selected + step + items.count) % items.count
@@ -60,27 +67,32 @@ struct CompletionPopup: View {
     static let rowHeight: CGFloat = 24
     static let maxRows = 9
     static let margin: CGFloat = 12
+    static let footerHeight: CGFloat = 22
 
     static func height(forRows rows: Int) -> CGFloat {
-        CGFloat(min(rows, maxRows)) * rowHeight + 8
+        CGFloat(min(rows, maxRows)) * rowHeight + 8 + footerHeight
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        CompletionRow(item: item, isSelected: model.engaged && index == model.selected)
-                            .id(index)
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.onAccept(index) }
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                            CompletionRow(item: item, highlight: highlight(index))
+                                .id(index)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.onAccept(index) }
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+                .onChange(of: model.selected) { _, value in
+                    proxy.scrollTo(value)
+                }
             }
-            .onChange(of: model.selected) { _, value in
-                proxy.scrollTo(value)
-            }
+            CompletionFooter(count: model.items.count, position: model.engaged ? model.selected + 1 : nil)
+                .frame(height: Self.footerHeight)
         }
         .frame(width: width, height: Self.height(forRows: model.items.count))
         .background(Theme.inputBackground.color, in: RoundedRectangle(cornerRadius: 8))
@@ -88,11 +100,49 @@ struct CompletionPopup: View {
         .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
         .padding(Self.margin)
     }
+
+    private func highlight(_ index: Int) -> Double {
+        if model.engaged { return index == model.selected ? 0.28 : 0 }
+        return model.hinted && index == 0 ? 0.12 : 0
+    }
+}
+
+private struct CompletionFooter: View {
+    let count: Int
+    let position: Int?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            hint("tab", "step")
+            hint("\u{2192}", "accept")
+            hint("\u{2191}\u{2193}", "browse")
+            hint("esc", "close")
+            Spacer(minLength: 4)
+            Text(position.map { "\($0) of \(count)" } ?? "\(count)")
+                .monospacedDigit()
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(Theme.secondaryText.color)
+        .padding(.horizontal, 10)
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.chipStroke.color).frame(height: 1)
+        }
+    }
+
+    private func hint(_ key: String, _ action: String) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.text.color)
+            Text(action)
+        }
+    }
 }
 
 private struct CompletionRow: View {
     let item: CompletionItem
-    let isSelected: Bool
+    let highlight: Double
 
     var body: some View {
         HStack(spacing: 8) {
@@ -120,6 +170,6 @@ private struct CompletionRow: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 24)
-        .background(isSelected ? Color.accentColor.opacity(0.28) : Color.clear)
+        .background(Color.accentColor.opacity(highlight))
     }
 }

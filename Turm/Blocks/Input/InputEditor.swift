@@ -102,6 +102,13 @@ struct InputEditor: NSViewRepresentable {
             case tab
             case refresh
             case auto
+            case cycle(Int)
+        }
+
+        private struct Candidates {
+            let text: String
+            let range: NSRange
+            let items: [CompletionItem]
         }
 
         var parent: InputEditor
@@ -111,6 +118,9 @@ struct InputEditor: NSViewRepresentable {
         private var stash = ""
         private var generation = 0
         private var completionRange = NSRange(location: 0, length: 0)
+        private var latest: Candidates?
+        private var pinned: String?
+        private var ghostItem: (item: CompletionItem, range: NSRange)?
         private var autoTask: Task<Void, Never>?
         private var suppressAuto = false
         private var popupHost: NSHostingView<CompletionPopup>?
@@ -142,6 +152,7 @@ struct InputEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let view = textView else { return }
             parent.text = view.string
+            historyIndex = nil
             afterEdit()
             scheduleCompletion(in: view)
         }
@@ -255,29 +266,28 @@ struct InputEditor: NSViewRepresentable {
             case #selector(NSResponder.moveUp(_:)):
                 if completion.isOpen {
                     completion.move(by: -1)
+                    updateGhost()
                     return true
                 }
                 guard onFirstLine(textView) else { return false }
-                recall(older: true)
+                if canCycle(textView) { cycle(-1) } else { recall(older: true) }
                 return true
             case #selector(NSResponder.moveDown(_:)):
                 if completion.isOpen {
                     completion.move(by: 1)
+                    updateGhost()
                     return true
                 }
                 guard onLastLine(textView) else { return false }
-                recall(older: false)
+                if canCycle(textView) { cycle(1) } else { recall(older: false) }
                 return true
             case #selector(NSResponder.insertTab(_:)):
-                if completion.isOpen {
-                    completion.move(by: 1)
-                } else {
-                    request(.tab)
-                }
+                tab()
                 return true
             case #selector(NSResponder.insertBacktab(_:)):
                 guard completion.isOpen else { return false }
                 completion.move(by: -1)
+                updateGhost()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 if completion.isOpen {
@@ -288,7 +298,7 @@ struct InputEditor: NSViewRepresentable {
                 }
                 return true
             case #selector(NSResponder.moveRight(_:)), #selector(NSResponder.moveForward(_:)):
-                if acceptGhost(wordOnly: false) { return true }
+                if acceptChosenItem() || acceptGhost(wordOnly: false) { return true }
                 completion.close()
                 return false
             case #selector(NSResponder.moveWordRight(_:)):
@@ -314,8 +324,78 @@ struct InputEditor: NSViewRepresentable {
             afterEdit()
         }
 
+        private func canCycle(_ view: NSTextView) -> Bool {
+            let text = view.string
+            let selection = view.selectedRange()
+            return parent.isEnabled && historyIndex == nil && !text.isEmpty && !view.hasMarkedText()
+                && selection.length == 0 && selection.location == (text as NSString).length
+        }
+
+        private func cycle(_ step: Int) {
+            guard let view = textView else { return }
+            let text = view.string
+            if let latest, latest.text == text,
+               latest.items.contains(where: { SuggestionList.ghost(for: $0, typed: typed(in: latest.range, of: text)) != nil }) {
+                present(latest, step: step)
+            } else {
+                request(.cycle(step))
+            }
+        }
+
+        private func present(_ candidates: Candidates, step: Int) {
+            completionRange = candidates.range
+            parent.completion.show(candidates.items, engaged: false)
+            updateGhost()
+            parent.completion.move(by: step)
+            updateGhost()
+        }
+
+        private func tab() {
+            guard let view = textView else { return }
+            let completion = parent.completion
+            if acceptChosenItem() { return }
+            if let chosen = ghostItem {
+                completionRange = chosen.range
+                accept(item: chosen.item)
+                return
+            }
+            guard !view.ghost.isEmpty else {
+                request(.tab)
+                return
+            }
+            let text = view.string
+            let step = GhostStep.next(text: text, ghost: view.ghost, directory: parent.directory, env: environment)
+            pinned = text + view.ghost
+            autoTask?.cancel()
+            completion.close()
+            suppressAuto = true
+            view.insertText(step, replacementRange: NSRange(location: (text as NSString).length, length: 0))
+            suppressAuto = false
+        }
+
+        private func acceptChosenItem() -> Bool {
+            let completion = parent.completion
+            guard completion.isOpen, completion.engaged, completion.items.indices.contains(completion.selected),
+                  completion.items[completion.selected].kind != .history,
+                  let view = textView, view.selectedRange().location == (view.string as NSString).length
+            else { return false }
+            accept(completion.selected)
+            return true
+        }
+
+        private func typed(in range: NSRange, of text: String) -> String {
+            let string = text as NSString
+            guard NSMaxRange(range) <= string.length else { return "" }
+            return string.substring(with: range)
+        }
+
         private func acceptGhost(wordOnly: Bool) -> Bool {
             guard let view = textView, !view.ghost.isEmpty else { return false }
+            if !wordOnly, let chosen = ghostItem {
+                completionRange = chosen.range
+                accept(item: chosen.item)
+                return true
+            }
             let ghost = wordOnly ? Self.firstWord(of: view.ghost) : view.ghost
             view.insertText(ghost, replacementRange: NSRange(location: (view.string as NSString).length, length: 0))
             return true
@@ -338,14 +418,35 @@ struct InputEditor: NSViewRepresentable {
         private func updateGhost() {
             guard let view = textView else { return }
             let text = view.string
+            let length = (text as NSString).length
             let selection = view.selectedRange()
+            let completion = parent.completion
+            if let line = pinned, text.isEmpty || line.count <= text.count || !line.hasPrefix(text) { pinned = nil }
             var ghost = ""
-            if !(parent.completion.isOpen && parent.completion.engaged), parent.isEnabled, selection.length == 0, !view.hasMarkedText(),
-               selection.location == (text as NSString).length,
-               let suggestion = CommandHistory.shared.suggestion(for: text) {
-                ghost = suggestion
+            ghostItem = nil
+            if parent.isEnabled, !text.isEmpty, selection.length == 0, !view.hasMarkedText(), selection.location == length {
+                if completion.isOpen, completion.engaged {
+                    if completion.items.indices.contains(completion.selected), NSMaxRange(completionRange) == length {
+                        let item = completion.items[completion.selected]
+                        ghost = SuggestionList.ghost(for: item, typed: typed(in: completionRange, of: text)) ?? ""
+                    }
+                } else if let line = pinned {
+                    ghost = String(line.dropFirst(text.count))
+                } else if let suggestion = CommandHistory.shared.suggestion(for: text) {
+                    ghost = suggestion
+                } else if let latest, latest.text == text, NSMaxRange(latest.range) == length,
+                          let item = SuggestionList.sole(latest.items),
+                          let suffix = SuggestionList.ghost(for: item, typed: typed(in: latest.range, of: text)) {
+                    ghost = suffix
+                    ghostItem = (item, latest.range)
+                }
             }
             view.ghost = ghost
+            var hinted = false
+            if completion.isOpen, !completion.engaged, !ghost.isEmpty, let first = completion.items.first {
+                hinted = SuggestionList.ghost(for: first, typed: typed(in: completionRange, of: text)) == ghost
+            }
+            if completion.hinted != hinted { completion.hinted = hinted }
         }
 
         private func restyle() {
@@ -387,13 +488,17 @@ struct InputEditor: NSViewRepresentable {
             let directory = parent.directory
             let history = CommandHistory.shared.entries
             let env = environment
+            let cycling: Bool
+            if case .cycle = mode { cycling = true } else { cycling = false }
             generation += 1
             let ticket = generation
             Task { [weak self] in
                 let result = await Task.detached(priority: .userInitiated) {
-                    CommandCompleter.complete(
+                    let found = CommandCompleter.complete(
                         line: text, cursor: cursor, directory: directory, history: history, environment: env
                     )
+                    guard cycling, !SuggestionList.extends(found, line: text) else { return found }
+                    return CommandCompleter.siblings(line: text, cursor: cursor, directory: directory, environment: env) ?? found
                 }.value
                 guard let self, ticket == self.generation else { return }
                 self.apply(result, mode: mode, text: text)
@@ -403,6 +508,23 @@ struct InputEditor: NSViewRepresentable {
         private func apply(_ result: CompletionResult?, mode: Mode, text: String) {
             guard let view = textView, view.string == text else { return }
             let completion = parent.completion
+            let merged = SuggestionList.merge(
+                text: text,
+                range: result.map { NSRange($0.range, in: text) },
+                items: result?.items ?? [],
+                history: CommandHistory.shared.entries
+            )
+            let candidates = Candidates(text: text, range: merged.range, items: merged.items)
+            latest = candidates
+            if case .cycle(let step) = mode {
+                if candidates.items.isEmpty {
+                    completion.close()
+                    recall(older: step < 0)
+                } else {
+                    present(candidates, step: step)
+                }
+                return
+            }
             guard let result, !result.items.isEmpty else {
                 completion.close()
                 updateGhost()
@@ -411,15 +533,17 @@ struct InputEditor: NSViewRepresentable {
             var range = NSRange(result.range, in: text)
             switch mode {
             case .refresh:
-                completionRange = range
-                completion.show(result.items, engaged: completion.engaged)
+                completionRange = candidates.range
+                completion.show(candidates.items, engaged: completion.engaged)
             case .auto:
                 if AutoTrigger.shouldShow(text: text, range: range, items: result.items) {
-                    completionRange = range
-                    completion.show(result.items, engaged: false)
+                    completionRange = candidates.range
+                    completion.show(candidates.items, engaged: false)
                 } else {
                     completion.close()
                 }
+            case .cycle:
+                break
             case .tab:
                 if result.items.count == 1 {
                     completionRange = range

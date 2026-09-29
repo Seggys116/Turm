@@ -32,20 +32,6 @@ nonisolated enum TitleMode: String, Codable, CaseIterable, Identifiable, Sendabl
     }
 }
 
-nonisolated enum BarSection: String, CaseIterable, Identifiable, Sendable {
-    case actions
-    case options
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .actions: "Pinned actions"
-        case .options: "Option toggles"
-        }
-    }
-}
-
 nonisolated struct EcosystemPreference: Codable, Equatable, Sendable {
     var enabled = true
     var items: [String]?
@@ -67,7 +53,6 @@ nonisolated struct StatusBarPreferences: Codable, Equatable, RawRepresentable, S
     var enabled = true
     var alignment = BarAlignment.leading
     var titles = TitleMode.auto
-    var order: [BarSection] = BarSection.allCases
     var runInSubShell = true
     var ecosystems: [String: EcosystemPreference] = [:]
 
@@ -78,7 +63,6 @@ nonisolated struct StatusBarPreferences: Codable, Equatable, RawRepresentable, S
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         alignment = try container.decodeIfPresent(BarAlignment.self, forKey: .alignment) ?? .leading
         titles = try container.decodeIfPresent(TitleMode.self, forKey: .titles) ?? .auto
-        order = Self.normalized((try container.decodeIfPresent([String].self, forKey: .order) ?? []).compactMap(BarSection.init(rawValue:)))
         runInSubShell = try container.decodeIfPresent(Bool.self, forKey: .runInSubShell) ?? true
         ecosystems = try container.decodeIfPresent([String: EcosystemPreference].self, forKey: .ecosystems) ?? [:]
     }
@@ -88,20 +72,12 @@ nonisolated struct StatusBarPreferences: Codable, Equatable, RawRepresentable, S
         try container.encode(enabled, forKey: .enabled)
         try container.encode(alignment, forKey: .alignment)
         try container.encode(titles, forKey: .titles)
-        try container.encode(order.map(\.rawValue), forKey: .order)
         try container.encode(runInSubShell, forKey: .runInSubShell)
         try container.encode(ecosystems, forKey: .ecosystems)
     }
 
     private enum Key: String, CodingKey {
-        case enabled, alignment, titles, order, runInSubShell, ecosystems
-    }
-
-    static func normalized(_ order: [BarSection]) -> [BarSection] {
-        var result: [BarSection] = []
-        for section in order where !result.contains(section) { result.append(section) }
-        for section in BarSection.allCases where !result.contains(section) { result.append(section) }
-        return result
+        case enabled, alignment, titles, runInSubShell, ecosystems
     }
 
     init?(rawValue: String) {
@@ -155,8 +131,19 @@ nonisolated struct BarOverrides: Equatable, Sendable {
     var ecosystems: [String: Ecosystem] = [:]
     var titles: TitleMode?
     var alignment: BarAlignment?
-    var order: [BarSection]?
     var subShell: Bool?
+}
+
+nonisolated enum BarEntry: Identifiable, Equatable, Sendable {
+    case action(ProjectAction)
+    case variant(ProjectVariant)
+
+    var id: String {
+        switch self {
+        case .action(let action): "action.\(action.id)"
+        case .variant(let variant): "variant.\(variant.id)"
+        }
+    }
 }
 
 nonisolated struct ResolvedBar: Equatable, Sendable {
@@ -166,39 +153,55 @@ nonisolated struct ResolvedBar: Equatable, Sendable {
         var symbol: String
         var actions: [ProjectAction]
         var variants: [ProjectVariant]
-        var pinned: [ProjectAction]
-        var shownVariants: [ProjectVariant]
+        /// What sits on the bar itself, in the order the user arranged it.
+        var entries: [BarEntry]
+
+        var pinned: [ProjectAction] {
+            entries.compactMap { if case .action(let action) = $0 { action } else { nil } }
+        }
+
+        var shownVariants: [ProjectVariant] {
+            entries.compactMap { if case .variant(let variant) = $0 { variant } else { nil } }
+        }
+    }
+
+    struct Display: Equatable, Sendable {
+        var selector: [Group] = []
+        var active: Group?
+        var entries: [BarEntry] = []
+
+        var pinned: [ProjectAction] {
+            entries.compactMap { if case .action(let action) = $0 { action } else { nil } }
+        }
+
+        var variants: [ProjectVariant] {
+            entries.compactMap { if case .variant(let variant) = $0 { variant } else { nil } }
+        }
     }
 
     var groups: [Group] = []
     var icons: [String: String] = [:]
     var titles = TitleMode.auto
     var alignment = BarAlignment.leading
-    var order = BarSection.allCases
     var subShell = true
     var usesManifest = false
     var manifestPinned: [ProjectAction]?
 
-    struct Display: Equatable, Sendable {
-        var selector: [Group] = []
-        var active: Group?
-        var pinned: [ProjectAction] = []
-        var variants: [ProjectVariant] = []
-    }
-
+    /// The selector appears only for several detected tools and never once a Turm.json is in charge.
     func display(choice: String?) -> Display {
         var display = Display()
         if !usesManifest, tools.count > 1 {
             display.selector = tools
             let active = activeTool(choice: choice)
             display.active = active
-            let shown = [projectGroup, active].compactMap { $0 }
-            display.pinned = shown.flatMap(\.pinned)
-            display.variants = shown.flatMap(\.shownVariants)
+            display.entries = [projectGroup, active].compactMap { $0 }.flatMap(\.entries)
             return display
         }
-        display.pinned = manifestPinned ?? groups.flatMap(\.pinned)
-        display.variants = groups.flatMap(\.shownVariants)
+        if let pinned = manifestPinned {
+            display.entries = pinned.map(BarEntry.action) + groups.flatMap(\.shownVariants).map(BarEntry.variant)
+        } else {
+            display.entries = groups.flatMap(\.entries)
+        }
         return display
     }
 
@@ -221,7 +224,6 @@ nonisolated struct ResolvedBar: Equatable, Sendable {
         bar.icons = overrides.icons
         bar.titles = overrides.titles ?? preferences.titles
         bar.alignment = overrides.alignment ?? preferences.alignment
-        bar.order = StatusBarPreferences.normalized(overrides.order ?? preferences.order)
         bar.subShell = overrides.subShell ?? preferences.runInSubShell
         bar.usesManifest = snapshot.manifestPath != nil
 
@@ -235,15 +237,18 @@ nonisolated struct ResolvedBar: Equatable, Sendable {
             let defaults = actions.filter(\.featured).map(\.id) + variants.map(\.id)
             let wanted = preference.items ?? defaults
 
-            var pinned = wanted.compactMap { id in actions.first { $0.id == id } }
-            if let ids = overrides.pinned {
-                pinned = ids.compactMap { id in actions.first { $0.id == id } }
+            var entries: [BarEntry] = wanted.compactMap { id in
+                if let action = actions.first(where: { $0.id == id }) { return .action(action) }
+                if let variant = variants.first(where: { $0.id == id }) { return .variant(variant) }
+                return nil
             }
-            let shown = wanted.compactMap { id in variants.first { $0.id == id } }
+            if let ids = overrides.pinned {
+                let pinned = ids.compactMap { id in actions.first { $0.id == id } }.map(BarEntry.action)
+                entries = pinned + entries.filter { if case .variant = $0 { true } else { false } }
+            }
             bar.groups.append(Group(
                 id: ecosystem.id, title: override?.title ?? ecosystem.title,
-                symbol: override?.symbol ?? ecosystem.symbol, actions: actions, variants: variants,
-                pinned: pinned, shownVariants: shown
+                symbol: override?.symbol ?? ecosystem.symbol, actions: actions, variants: variants, entries: entries
             ))
         }
         if let ids = overrides.pinned {

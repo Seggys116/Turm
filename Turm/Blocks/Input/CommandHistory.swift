@@ -21,12 +21,20 @@ final class CommandHistory {
     }
 
     nonisolated static func suggestion(for text: String, in entries: [String]) -> String? {
-        guard !text.isEmpty else { return nil }
+        suggestions(for: text, in: entries, limit: 1).first
+    }
+
+    nonisolated static func suggestions(for text: String, in entries: [String], limit: Int) -> [String] {
+        guard !text.isEmpty, limit > 0 else { return [] }
+        var results: [String] = []
+        var seen = Set<String>()
         for entry in entries.reversed() where entry.count > text.count && entry.hasPrefix(text) {
-            let rest = entry.dropFirst(text.count)
-            if !rest.contains("\n") { return String(rest) }
+            let rest = String(entry.dropFirst(text.count))
+            guard !rest.contains("\n"), seen.insert(rest).inserted else { continue }
+            results.append(rest)
+            if results.count == limit { break }
         }
-        return nil
+        return results
     }
 
     static func parseZsh(_ text: String) -> [String] {

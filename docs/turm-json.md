@@ -59,7 +59,6 @@ One custom action, everything detected is kept:
     },
     "titles": "auto",
     "alignment": "leading",
-    "order": ["actions", "options"],
     "subShell": true
   }
 }
@@ -89,7 +88,7 @@ Each entry in `actions`:
 | `icon` | string | no | An SF Symbol name such as `paperplane`. Defaults to the category's icon. |
 | `category` | string | no | One of `run`, `build`, `test`, `check`, `clean`, `deps`, `other` (case-insensitive). Anything else, or absent, is `other`. |
 | `featured` | boolean | no | Whether the action is on the bar by default. Defaults to `true` for a new action. |
-| `env` | object of strings | no | Environment variables for this command. |
+| `env` | object of strings | no | Environment variables for this command. Variables are set only for the first command of a compound line, and names must be valid identifiers (letters, digits and underscores, not starting with a digit); others are ignored. |
 
 Entries whose `title` or `command` is empty after trimming are skipped silently.
 
@@ -189,15 +188,14 @@ Values here override the app-wide Project Bar settings for this project. The bar
 
 | Field | Type | Meaning |
 |---|---|---|
-| `pinned` | array of action ids | Actions shown as buttons, in this order. Ids not present (or from an ecosystem that is hidden or disabled) are ignored. Replaces the per-ecosystem action lists; option toggles still follow the Settings for each ecosystem. Actions that do not fit collapse into the "..." menu. |
+| `pinned` | array of action ids | Actions shown as buttons, in this order. Ids not present (or from an ecosystem that is hidden or disabled) are ignored. Replaces the per-ecosystem action lists; the option dropdowns from each ecosystem's Settings follow the pinned actions. Actions that do not fit collapse into the "..." menu. |
 | `icons` | object, action id to SF Symbol name | Icon per action. Wins over the action's own `icon`. |
 | `ecosystems` | object, ecosystem id to settings | Per-ecosystem `title` (string), `icon` (SF Symbol name) and `hidden` (boolean). Use the ids from the [ecosystem table](project-actions.md#detected-ecosystems), or `project` for the custom group. |
 | `titles` | string | `auto`, `always` or `never`. |
 | `alignment` | string | `leading`, `center` or `trailing`. |
-| `order` | array of strings | Order of the bar's sections: `actions`, `options`. Repeats and unknown entries are dropped and a missing section is appended. |
 | `subShell` | boolean | Run actions in a hidden sub-shell. See [Running in a sub-shell](project-actions.md#running-in-a-sub-shell). |
 
-String values are matched case-insensitively. An unrecognised value for `titles` or `alignment` is ignored and the app-wide setting is used, and unrecognised entries in `order` are dropped.
+String values are matched case-insensitively. An unrecognised value for `titles` or `alignment` is ignored and the app-wide setting is used.
 
 ### Icons
 

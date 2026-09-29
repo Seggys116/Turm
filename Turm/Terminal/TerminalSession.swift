@@ -154,6 +154,14 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
     }
 
+    var isRunningAction: Bool {
+        isOpen && runner.isRunning
+    }
+
+    var needsCloseConfirmation: Bool {
+        isRunningAction || (hasSubmittedCommand && hasRunningJobs)
+    }
+
     func terminate() {
         runner.dismiss()
         guard !didExit else { return }

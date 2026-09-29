@@ -132,8 +132,9 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
             text = text.replacingOccurrences(of: "{\(variant.id)}", with: value)
         }
         text = Self.collapseSpaces(text)
-        if !action.environment.isEmpty {
-            let pairs = action.environment.sorted { $0.key < $1.key }
+        let environment = action.environment.filter { $0.key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil }
+        if !environment.isEmpty {
+            let pairs = environment.sorted { $0.key < $1.key }
                 .map { "\($0.key)=\(ShellQuoting.quote($0.value))" }
             text = "env \(pairs.joined(separator: " ")) \(text)"
         }

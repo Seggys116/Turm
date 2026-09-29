@@ -1,6 +1,7 @@
 import AppKit
 import SwiftTerm
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum BarMenu: Hashable {
     case tool
@@ -8,15 +9,15 @@ private enum BarMenu: Hashable {
     case all
 }
 
-private enum BarItem: Identifiable {
-    case action(ProjectAction)
-    case variant(ProjectVariant)
+private struct SettlingSchedule: TimelineSchedule {
+    let end: Date?
 
-    var id: String {
-        switch self {
-        case .action(let action): "action.\(action.id)"
-        case .variant(let variant): "variant.\(variant.id)"
-        }
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+        guard let end, end > start else { return AnySequence([end.map { max($0, start) } ?? start]) }
+        let step = 1.0 / 24
+        let count = Int(end.timeIntervalSince(start) / step)
+        let ticks = (0...count).lazy.map { start.addingTimeInterval(Double($0) * step) }
+        return AnySequence(Array(ticks) + [end])
     }
 }
 
@@ -90,15 +91,6 @@ struct StatusBar: View {
         }
     }
 
-    private var items: [BarItem] {
-        bar.order.flatMap { section -> [BarItem] in
-            switch section {
-            case .actions: display.pinned.map(BarItem.action)
-            case .options: display.variants.map(BarItem.variant)
-            }
-        }
-    }
-
     @ViewBuilder
     private var content: some View {
         switch bar.titles {
@@ -114,7 +106,7 @@ struct StatusBar: View {
 
     private func row(titles: Bool) -> some View {
         OverflowLayout {
-            ForEach(items) { item in
+            ForEach(display.entries) { item in
                 switch item {
                 case .action(let action):
                     BarButton(
@@ -208,11 +200,17 @@ struct StatusBar: View {
                 case .running:
                     if let report = runner.session?.progress { ReportedFill(report: report) }
                 case .succeeded:
-                    TimelineView(.animation(minimumInterval: 1.0 / 24)) { context in
-                        Theme.added.color.opacity(0.28 * progress.successOpacity(at: context.date))
+                    let end = progress.finishedAt?.addingTimeInterval(ActionProgress.successHold + ActionProgress.fade + 0.01)
+                    TimelineView(SettlingSchedule(end: end)) { context in
+                        if progress.isSettled(at: context.date) {
+                            SwiftUI.Color.clear
+                        } else {
+                            Theme.added.color.opacity(0.28 * progress.successOpacity(at: context.date))
+                        }
                     }
                 case .failed:
-                    TimelineView(.animation(minimumInterval: 1.0 / 24)) { context in
+                    let end = progress.finishedAt?.addingTimeInterval(ActionProgress.pulseDuration + 0.01)
+                    TimelineView(SettlingSchedule(end: end)) { context in
                         Theme.removed.color.opacity(0.08 + 0.3 * progress.pulse(at: context.date))
                     }
                 }
@@ -445,7 +443,7 @@ private struct AllActionsMenu: View {
     private var manifestRow: some View {
         if let path = session.project.manifestPath {
             MenuRow(title: "Edit Turm.json", symbol: "doc.badge.gearshape") {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                Self.openInTextEditor(URL(fileURLWithPath: path))
                 close()
             }
         } else {
@@ -456,13 +454,19 @@ private struct AllActionsMenu: View {
         }
     }
 
+    private static func openInTextEditor(_ url: URL) {
+        let workspace = NSWorkspace.shared
+        let editor = workspace.urlForApplication(toOpen: .plainText) ?? URL(fileURLWithPath: "/System/Applications/TextEdit.app")
+        workspace.open([url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
+    }
+
     private func createManifest() {
         let root = session.project.roots.first ?? session.directory
         let url = URL(fileURLWithPath: root).appendingPathComponent(ProjectManifest.fileName)
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             try ProjectManifest.template.write(to: url, atomically: true, encoding: .utf8)
-            NSWorkspace.shared.open(url)
+            Self.openInTextEditor(url)
         } catch {
             NSSound.beep()
         }

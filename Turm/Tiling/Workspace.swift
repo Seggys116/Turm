@@ -61,7 +61,7 @@ final class Workspace {
     }
 
     var shellsRequiringConfirmationCount: Int {
-        sessions.values.filter { $0.isOpen && $0.hasSubmittedCommand }.count
+        sessions.values.filter { $0.isOpen && ($0.hasSubmittedCommand || $0.isRunningAction) }.count
     }
 
     func shouldCloseWindow() -> Bool {
@@ -76,6 +76,7 @@ final class Workspace {
     }
 
     func split(_ axis: SplitAxis) {
+        guard !tabs[activeIndex].isSettings else { return }
         let newPane = PaneID()
         sessions[newPane] = makeSession(for: newPane)
         let index = activeIndex
@@ -125,22 +126,20 @@ final class Workspace {
     func closeTab(_ id: UUID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
         if tab.isSettings {
-            removeTab(at: tabs.firstIndex(where: { $0.id == id }) ?? 0)
+            let sessionPanes = tab.layout.leaves.filter { sessions[$0] != nil }
+            sessionPanes.compactMap { sessions.removeValue(forKey: $0) }.forEach { $0.terminate() }
+            if let index = tabs.firstIndex(where: { $0.id == id }) { removeTab(at: index) }
             return
         }
         let panes = tab.layout.leaves
-        let needsConfirmation = panes.contains { pane in
-            guard let session = sessions[pane] else { return false }
-            return session.hasSubmittedCommand && session.hasRunningJobs
-        }
+        let needsConfirmation = panes.contains { sessions[$0]?.needsCloseConfirmation ?? false }
         if needsConfirmation, !closeCoordinator.confirm(.shell) { return }
         panes.forEach(removePane)
     }
 
     func close(_ pane: PaneID) {
         guard let session = sessions[pane] else { return }
-        if session.hasSubmittedCommand, session.hasRunningJobs,
-           !closeCoordinator.confirm(.shell) { return }
+        if session.needsCloseConfirmation, !closeCoordinator.confirm(.shell) { return }
         removePane(pane)
     }
 
@@ -172,6 +171,10 @@ final class Workspace {
     }
 
     func closeFocused() {
+        if tabs[activeIndex].isSettings {
+            closeTab(activeTabID)
+            return
+        }
         close(focusedPane)
     }
 

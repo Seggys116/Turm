@@ -76,7 +76,7 @@ When an option's value is empty, the extra space is removed from the command. Yo
 The bar is always at the bottom of the pane. From left to right it holds:
 
 - **Tool selector:** a dropdown chip fixed to the left edge, for example "Cargo". It appears only when more than one tool is detected and the project has no `Turm.json`. Choosing a tool switches which tool's pinned actions and option toggles are shown. With a single detected tool, or with a `Turm.json`, there is no selector.
-- **Pinned actions and option toggles:** one-click action buttons, and small dropdown chips for option toggles (Release/Debug and so on). An option chip shows the current option; clicking it lists the options and choosing one selects it. Actions come first and option toggles second unless `bar.order` in `Turm.json` says otherwise (Settings has no control for this). Then `bar.alignment` or the Settings alignment places the items along the bar. Anything that does not fit on the bar collapses into the "..." menu.
+- **Pinned actions and option toggles:** one-click action buttons, and small dropdown chips for option toggles (Release/Debug and so on). An option chip shows the current option; clicking it lists the options and choosing one selects it. Actions and option dropdowns share one list, in exactly the order you arranged them in the Project Bar settings editor, so an option dropdown can sit between actions. `bar.alignment` or the Settings alignment places the items along the bar. Anything that does not fit on the bar collapses into the "..." menu.
 - **"..." menu:** opens a menu with everything the project offers: option toggles first (each row shows the current option, and clicking it switches to the next), then all actions grouped by category, or grouped by ecosystem (and by category within each) when there are several groups. Its last row is "Edit Turm.json" when the project has one, or "Create Turm.json", which writes a starter file next to the first detected project.
 - **Run state:** Stop, Watch and similar controls appear while an action runs (see [Running in a sub-shell](#running-in-a-sub-shell)).
 
@@ -86,7 +86,7 @@ What the bar shows depends on whether the project has a `Turm.json`:
 
 - **No `Turm.json`, several tools detected:** the selector and the chosen tool's items.
 - **No `Turm.json`, one tool:** that tool's items.
-- **With a `Turm.json`, no selector:** every enabled ecosystem's items, or exactly the actions in `bar.pinned`, in that order, when it is set. Option toggles still come from each ecosystem's items.
+- **With a `Turm.json`, no selector:** every enabled ecosystem's items, or, when `bar.pinned` is set, exactly those actions in that order, followed by the option dropdowns from each ecosystem's items.
 
 Each ecosystem's items are its featured actions plus all its option toggles, unless you changed them in Settings.
 
@@ -123,7 +123,7 @@ The editor's default content is the ecosystem's featured actions followed by its
 
 Items on the bar come from, in order of precedence:
 
-1. `bar.pinned` in the project's `Turm.json`: exactly those action ids, in that order, across all ecosystems. Option toggles are still taken from the ecosystem items below.
+1. `bar.pinned` in the project's `Turm.json`: exactly those action ids, in that order, across all ecosystems, followed by the option dropdowns taken from the ecosystem items below.
 2. Otherwise, each ecosystem's items: what you arranged in Settings, or the featured actions plus option toggles until you change it.
 
 ## Running in a sub-shell
@@ -148,7 +148,6 @@ App-wide settings apply to every project. `Turm.json` applies only to the projec
 | Bar shown | on | none | Off hides the bar in every project, regardless of `Turm.json`. |
 | Alignment | left | `bar.alignment` | `leading`, `center` or `trailing`. |
 | Titles | auto | `bar.titles` | `auto`, `always` or `never`. |
-| Layout order | actions, options (no Settings control) | `bar.order` | Entries are `actions` (pinned actions) and `options` (option toggles). Repeats and unknown entries are dropped and missing sections are added at the end. |
 | Items on the bar | per ecosystem | `bar.pinned` | The project list of action ids replaces the per-ecosystem action lists. |
 | Run in sub-shell | on | `bar.subShell` | |
 | Ecosystem on or off | on | `bar.ecosystems.<id>.hidden` | The ecosystem is hidden if either the app-wide setting or the project hides it. |

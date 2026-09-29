@@ -105,6 +105,27 @@ nonisolated enum CommandCompleter {
         return CompletionResult(range: range, items: Array(items.prefix(maxItems)))
     }
 
+    static func siblings(
+        line: String, cursor: String.Index, directory: String, environment env: CompletionEnvironment
+    ) -> CompletionResult? {
+        let prefix = String(line[..<cursor])
+        var tokens = ShellTokenizer.tokenize(prefix)
+        guard let word = tokens.last, word.kind == .word, word.range.upperBound == prefix.endIndex,
+              word.parts.allSatisfy({ $0.kind != .singleQuoted && $0.kind != .doubleQuoted }),
+              !word.value.isEmpty, !word.value.hasPrefix("-"),
+              env.fileExists(atPath: env.resolve(path: word.value, directory: directory))
+        else { return nil }
+        tokens.removeLast()
+        let command = currentSegment(tokens).first { $0.kind == .word }.map { ($0.value as NSString).lastPathComponent }
+        let folder = word.text.lastIndex(of: "/").map { String(word.text[...$0]) } ?? ""
+        let folderToken = folder.isEmpty ? nil : ShellTokenizer.tokenize(folder).last
+        let directoriesOnly = command.map { directoryCommands.contains(env.aliasTarget(of: $0) ?? $0) } ?? false
+        let items = pathItems(word: folderToken, directory: directory, env: env, directoriesOnly: directoriesOnly)
+        guard !items.isEmpty else { return nil }
+        let start = String.Index(utf16Offset: prefix.utf16.distance(from: prefix.startIndex, to: word.range.lowerBound), in: line)
+        return CompletionResult(range: start..<cursor, items: Array(items.prefix(maxItems)))
+    }
+
     static func isCompletable(_ word: ShellToken) -> Bool {
         let quoted = word.parts.contains { $0.kind == .singleQuoted || $0.kind == .doubleQuoted }
         if quoted { return quoteCharacter(word) != nil }

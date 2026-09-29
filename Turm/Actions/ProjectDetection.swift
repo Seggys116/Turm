@@ -3,6 +3,16 @@ import Foundation
 /// Turm.json: repository-level settings for the status bar.
 nonisolated struct ProjectManifest: Decodable {
     static let fileName = "Turm.json"
+    static let maxBytes = 262_144
+
+    static func resolvedFile(in directory: String) -> String? {
+        let path = (directory as NSString).appendingPathComponent(fileName)
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: resolved),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? Int, size <= maxBytes else { return nil }
+        return resolved
+    }
 
     static let template = """
         {
@@ -64,7 +74,6 @@ nonisolated struct ProjectManifest: Decodable {
         var ecosystems: [String: Ecosystem]?
         var titles: String?
         var alignment: String?
-        var order: [String]?
         var subShell: Bool?
 
         var overrides: BarOverrides {
@@ -76,7 +85,6 @@ nonisolated struct ProjectManifest: Decodable {
             }
             result.titles = titles.flatMap { TitleMode(rawValue: $0.lowercased()) }
             result.alignment = alignment.flatMap { BarAlignment(rawValue: $0.lowercased()) }
-            result.order = order?.compactMap { BarSection(rawValue: $0.lowercased()) }
             result.subShell = subShell
             return result
         }
@@ -157,14 +165,17 @@ nonisolated enum ProjectDetection {
         }
 
         var manifestRoot: String?
-        for place in places where FileManager.default.fileExists(atPath: (place as NSString).appendingPathComponent(ProjectManifest.fileName)) {
-            manifestRoot = place
-            break
+        var manifestFile: String?
+        for place in places {
+            if let file = ProjectManifest.resolvedFile(in: place) {
+                manifestRoot = place
+                manifestFile = file
+                break
+            }
         }
 
         var manifest: ProjectManifest?
-        if let manifestRoot {
-            let path = (manifestRoot as NSString).appendingPathComponent(ProjectManifest.fileName)
+        if let manifestRoot, let path = manifestFile {
             snapshot.manifestPath = path
             do {
                 guard let data = FileManager.default.contents(atPath: path) else { throw CocoaError(.fileReadNoPermission) }
