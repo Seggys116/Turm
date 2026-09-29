@@ -87,7 +87,7 @@ struct ImageStack {
 }
 
 enum OutputSegment {
-    case text(AttributedString)
+    case text(OutputText)
     case image(InlineImage)
     case stack(ImageStack)
 }
@@ -97,7 +97,7 @@ extension Array where Element == OutputSegment {
         var parts: [String] = []
         for segment in self {
             switch segment {
-            case .text(let text): parts.append(String(text.characters))
+            case .text(let text): parts.append(text.string)
             case .stack(let stack): parts.append(stack.lines.map { String($0.characters) }.joined(separator: "\n"))
             case .image: break
             }
@@ -107,7 +107,7 @@ extension Array where Element == OutputSegment {
 
     var isEmpty: Bool {
         allSatisfy { segment in
-            if case .text(let text) = segment { return text.characters.isEmpty }
+            if case .text(let text) = segment { return text.isEmpty }
             return false
         }
     }

@@ -18,8 +18,11 @@ nonisolated struct FakeEnvironment: CompletionEnvironment {
     var docker = DockerObjects()
     var listings: [CLIInvocation: [String]] = [:]
     var awsIndex: String?
+    var shortcutList: [Shortcut] = []
 
     func awsIndexPath() -> String? { awsIndex }
+
+    func shortcuts(in directory: String) -> [Shortcut] { shortcutList }
 
     func cliListing(_ invocation: CLIInvocation) -> [String] { listings[invocation] ?? [] }
 

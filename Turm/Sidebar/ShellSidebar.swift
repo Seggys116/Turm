@@ -203,7 +203,7 @@ struct ShellSidebar: View {
             )
             .frame(width: chipWidth(for: "Settings"))
         } else if let session = workspace.representative(of: tab) {
-            let title = session.customTitle ?? Block.abbreviate(session.directory)
+            let title = session.customTitle ?? ShortcutStore.shared.label(for: session.directory)
             ShellRow(
                 session: session,
                 height: height,
@@ -354,7 +354,7 @@ private struct ShellRow: View {
                     }
             } else {
                 MarqueeText(
-                    text: session.customTitle ?? Block.abbreviate(session.directory),
+                    text: session.customTitle ?? ShortcutStore.shared.label(for: session.directory),
                     isActive: isHovered,
                     trailingInset: HoverClose.coveredWidth
                 )

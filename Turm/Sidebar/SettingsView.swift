@@ -91,17 +91,17 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     }
 
     func apply() {
-        guard self != .automatic else {
+        DockTileIcon.removeBundleIcon()
+        if self == .automatic {
             NSApp.applicationIconImage = nil
-            return
+        } else {
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if let art = NSImage(named: assetName(isDark: isDark)) { NSApp.applicationIconImage = Self.dockIcon(from: art) }
         }
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        guard let art = NSImage(named: assetName(isDark: isDark)) else { return }
-        NSApp.applicationIconImage = Self.dockIcon(from: art)
+        DockTileIcon.publish(self) { Self.dockIcon(from: $0) }
     }
 
-    /// Exported renditions fill their canvas, so inset them to the 824pt macOS icon grid and add the system drop shadow.
-    private static func dockIcon(from art: NSImage) -> NSImage {
+    static func dockIcon(from art: NSImage) -> NSImage {
         let side = 1024
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
@@ -123,9 +123,53 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     }
 }
 
+enum DockTileIcon {
+    static let changed = Notification.Name("com.zak-noble-clarke.Turm.dockTileChanged")
+    private static let publishedKey = "turm.appIcon.dockTile"
+
+    static var directory: URL {
+        URL.applicationSupportDirectory.appendingPathComponent("Turm", isDirectory: true)
+    }
+
+    static func file(dark: Bool) -> URL {
+        directory.appendingPathComponent(dark ? "DockTile-dark.png" : "DockTile-light.png")
+    }
+
+    static func publish(_ preference: AppIconPreference, render: (NSImage) -> NSImage) {
+        let defaults = UserDefaults.standard
+        let files = [file(dark: false), file(dark: true)]
+        let current = files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }
+        if preference == .automatic {
+            guard defaults.string(forKey: publishedKey) != nil || files.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) else { return }
+            files.forEach { try? FileManager.default.removeItem(at: $0) }
+            defaults.removeObject(forKey: publishedKey)
+        } else {
+            guard defaults.string(forKey: publishedKey) != preference.rawValue || !current else { return }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for dark in [false, true] {
+                guard let art = NSImage(named: preference.assetName(isDark: dark)),
+                      let tiff = render(art).tiffRepresentation,
+                      let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+                else { return }
+                try? png.write(to: file(dark: dark), options: .atomic)
+            }
+            defaults.set(preference.rawValue, forKey: publishedKey)
+        }
+        DistributedNotificationCenter.default().postNotificationName(changed, object: nil, userInfo: nil, deliverImmediately: true)
+    }
+
+    static func removeBundleIcon() {
+        let path = Bundle.main.bundlePath
+        guard FileManager.default.fileExists(atPath: path + "/Icon\r") else { return }
+        NSWorkspace.shared.setIcon(nil, forFile: path)
+        NSWorkspace.shared.noteFileSystemChanged(path)
+    }
+}
+
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case statusBar = "Project Bar"
+    case shortcuts = "Shortcuts"
     case about = "About"
 
     var id: Self { self }
@@ -162,6 +206,7 @@ struct SettingsView: View {
                     switch tab {
                     case .appearance: appearanceTab
                     case .statusBar: StatusBarSettings()
+                    case .shortcuts: ShortcutSettings()
                     case .about: aboutTab
                     }
                 }

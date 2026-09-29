@@ -37,6 +37,7 @@ enum ShellIntegration {
         let arguments: [String]
         let environment: [String]
         let submission: Submission
+        let kind: Kind
     }
 
     static var forcedShell: String?
@@ -134,7 +135,7 @@ enum ShellIntegration {
                 environment.append("TURM_USER_ZDOTDIR=\(original)")
             }
             environment.append("ZDOTDIR=\(directory.path)")
-            return Launch(executable: shell, execName: "-" + name, arguments: [], environment: environment, submission: .bracketedPaste)
+            return Launch(executable: shell, execName: "-" + name, arguments: [], environment: environment, submission: .bracketedPaste, kind: .zsh)
         case .bash:
             let directory = try install(kind: .bash, files: [("rc.bash", ShellScripts.bash)])
             let commandFile = FileManager.default.temporaryDirectory.appendingPathComponent("turm-\(UUID().uuidString).cmd")
@@ -147,7 +148,8 @@ enum ShellIntegration {
                 execName: name,
                 arguments: ["--rcfile", directory.appendingPathComponent("rc.bash").path, "-i"],
                 environment: environment,
-                submission: .sourceFile(commandFile)
+                submission: .sourceFile(commandFile),
+                kind: .bash
             )
         case .fish:
             let directory = try install(kind: .fish, files: [("integration.fish", ShellScripts.fish)])
@@ -157,13 +159,22 @@ enum ShellIntegration {
                 execName: "-" + name,
                 arguments: ["--init-command", "source \(fishQuoted(script))"],
                 environment: environment,
-                submission: .bracketedPaste
+                submission: .bracketedPaste,
+                kind: .fish
             )
         }
     }
 
     static func quoted(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static var userKind: Kind {
+        Kind(path: userShell()) ?? .zsh
+    }
+
+    static func quoted(_ text: String, for kind: Kind) -> String {
+        kind == .fish ? fishQuoted(text) : quoted(text)
     }
 
     private static func fishQuoted(_ path: String) -> String {

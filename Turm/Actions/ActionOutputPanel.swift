@@ -13,7 +13,11 @@ struct ActionOutputPanel: View {
         .background(Theme.terminalBackground.color)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.chipStroke.color, lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+        .background {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.terminalBackground.color)
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+        }
     }
 
     private var header: some View {

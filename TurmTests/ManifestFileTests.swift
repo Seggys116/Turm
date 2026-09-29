@@ -16,6 +16,22 @@ struct ManifestFileTests {
         #expect(ProjectManifest.resolvedFile(in: dir) != nil)
     }
 
+    @Test(arguments: ["turm.json", "TURM.json", "Turm.JSON", "tUrM.JsOn"])
+    func fileNameIgnoresCase(name: String) throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try "{}".write(toFile: dir + "/" + name, atomically: true, encoding: .utf8)
+        let resolved = try #require(ProjectManifest.resolvedFile(in: dir))
+        #expect((resolved as NSString).lastPathComponent == name)
+    }
+
+    @Test func otherJSONIsIgnored() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try "{}".write(toFile: dir + "/turm.jsonc", atomically: true, encoding: .utf8)
+        #expect(ProjectManifest.resolvedFile(in: dir) == nil)
+    }
+
     @Test func symlinkToPlainFileResolves() throws {
         let dir = try scratch()
         defer { try? FileManager.default.removeItem(atPath: dir) }

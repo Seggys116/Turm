@@ -19,6 +19,39 @@ final class BlockEmulator: TerminalDelegate {
     var replyFilter = KittyReplyFilter()
     private var held: [UInt8] = []
     private var sgrRewriter = SGRRewriter()
+    private var lineCache: [RenderedLine?] = []
+    private var cacheBase = 0
+    private var cacheSettled = 0
+    private var cachedBuffer: ObjectIdentifier?
+    private var chunkCache: [Int: CachedChunk] = [:]
+    private var renderSerial = 0
+    private var styles: [Attribute: AttributeContainer] = [:]
+    private var carried: [ObjectIdentifier: RenderedLine] = [:]
+
+    static let chunkRows = 128
+
+    private final class RenderedLine {
+        let row: Int
+        let line: BufferLine?
+        let text: AttributedString
+        let wrapped: Bool
+        let extent: Int
+        let serial: Int
+
+        init(row: Int, line: BufferLine?, text: AttributedString, wrapped: Bool, extent: Int, serial: Int) {
+            self.row = row
+            self.line = line
+            self.text = text
+            self.wrapped = wrapped
+            self.extent = extent
+            self.serial = serial
+        }
+    }
+
+    private struct CachedChunk {
+        let serials: [Int]
+        let chunk: TextChunk
+    }
 
     var store: KittyStore {
         storeOverride ?? (terminal.isCurrentBufferAlternate ? altStore : normalStore)
@@ -75,11 +108,11 @@ final class BlockEmulator: TerminalDelegate {
     var onProgress: (Terminal.ProgressReport?) -> Void = { _ in }
     var onTitle: (String) -> Void = { _ in }
 
-    init(cols: Int, rows: Int) {
+    init(cols: Int, rows: Int, scrollback: Int = BlockEmulator.scrollback) {
         var options = TerminalOptions.default
         options.cols = max(cols, 2)
         options.rows = max(rows, 2)
-        options.scrollback = Self.scrollback
+        options.scrollback = scrollback
         options.termName = "xterm-256color"
         terminal = Terminal(delegate: self, options: options)
     }
@@ -127,7 +160,46 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     func resize(cols: Int, rows: Int) {
-        terminal.resize(cols: max(cols, 2), rows: max(rows, 2))
+        let newCols = max(cols, 2)
+        let reflows = newCols != terminal.cols
+        let settled = terminal.buffer.totalLinesTrimmed + terminal.buffer.yDisp
+        if reflows { carryUnwrappedLines(fitting: min(newCols, terminal.cols)) }
+        terminal.resize(cols: newCols, rows: max(rows, 2))
+        // growing rows pulls history back onto the screen, where it can be rewritten
+        guard reflows else {
+            if terminal.buffer.totalLinesTrimmed + terminal.buffer.yDisp < settled { forgetRenders() }
+            return
+        }
+        forgetRenders()
+        // consumed before more output can recycle a carried line object
+        if !carried.isEmpty { _ = collectLines() }
+    }
+
+    // reflow keeps the line objects of rows it does not split or join, so their renders stay valid
+    private func carryUnwrappedLines(fitting columns: Int) {
+        carried = [:]
+        let trimmed = terminal.buffer.totalLinesTrimmed
+        for (slot, cached) in lineCache.enumerated() {
+            guard let cached, let line = cached.line, !cached.wrapped, cached.extent <= columns,
+                  cached.row >= trimmed, cached.row < cacheSettled,
+                  terminal.getScrollInvariantLine(row: cached.row) === line
+            else { continue }
+            let next = slot + 1 < lineCache.count ? lineCache[slot + 1]?.wrapped : nil
+            guard !(next ?? terminal.getScrollInvariantLine(row: cached.row + 1)?.isWrapped ?? false) else { continue }
+            carried[ObjectIdentifier(line)] = cached
+        }
+    }
+
+    func releaseRenderCache() {
+        forgetRenders()
+        chunkCache = [:]
+        cachedBuffer = nil
+    }
+
+    // chunks stay cached: they are keyed by render serials, which never repeat for different text
+    private func forgetRenders() {
+        lineCache = []
+        cacheSettled = 0
     }
 
     func render() -> AttributedString {
@@ -140,7 +212,7 @@ final class BlockEmulator: TerminalDelegate {
         }
         for segment in renderSegments() {
             switch segment {
-            case .text(let text): append(text)
+            case .text(let text): append(text.attributed)
             case .stack(let stack): stack.lines.forEach(append)
             case .image: break
             }
@@ -167,22 +239,39 @@ final class BlockEmulator: TerminalDelegate {
         let tileRows = Set(holders.tiles.map(\.anchor))
         let bands = Self.bands(of: placements)
         let legacy = normalStore.images.filter { !($0.fromKitty && $0.rowSpan > 0) }
-        var byRow: [Int: (text: AttributedString, wrapped: Bool)] = [:]
-        for line in lines {
-            byRow[line.row] = (tileRows.contains(line.row) ? line.text.maskingPlaceholders() : line.text, line.wrapped)
-        }
         let lastRow = max(lines.last?.row ?? trimmed - 1, (bands.last?.range.upperBound ?? 0) - 1)
+        var byRow = [RenderedLine?](repeating: nil, count: max(lastRow - trimmed + 1, 0))
+        for line in lines where line.row >= trimmed && line.row <= lastRow {
+            guard tileRows.contains(line.row) else {
+                byRow[line.row - trimmed] = line
+                continue
+            }
+            renderSerial += 1
+            byRow[line.row - trimmed] = RenderedLine(
+                row: line.row, line: nil, text: line.text.maskingPlaceholders(), wrapped: line.wrapped, extent: line.extent, serial: renderSerial
+            )
+        }
+        func rendered(_ row: Int) -> RenderedLine? {
+            row >= trimmed && row <= lastRow ? byRow[row - trimmed] : nil
+        }
 
         var segments: [OutputSegment] = []
-        var text = AttributedString()
-        var hasText = false
+        var chunks: [TextChunk] = []
+        var pending: [RenderedLine] = []
+        var pendingStart = 0
+        var keptChunks: [Int: CachedChunk] = [:]
         var nextLegacy = 0
 
+        func closeChunk(hangs: Bool) {
+            guard !pending.isEmpty else { return }
+            chunks.append(chunk(pending, start: pendingStart, hangs: hangs, keeping: &keptChunks))
+            pending = []
+        }
         func flushText() {
-            if hasText {
-                segments.append(.text(text))
-                text = AttributedString()
-                hasText = false
+            closeChunk(hangs: false)
+            if !chunks.isEmpty {
+                segments.append(.text(OutputText(chunks)))
+                chunks = []
             }
         }
         func placeLegacy(upTo row: Int?) {
@@ -198,7 +287,7 @@ final class BlockEmulator: TerminalDelegate {
             placeLegacy(upTo: row)
             if let band = bands.first(where: { $0.range.contains(row) }) {
                 flushText()
-                let contents = band.range.map { byRow[$0]?.text ?? AttributedString() }
+                let contents = band.range.map { rendered($0)?.text ?? AttributedString() }
                 let ordered = band.images.enumerated().sorted {
                     ($0.element.zIndex, $0.element.kittyID ?? 0, $0.offset) < ($1.element.zIndex, $1.element.kittyID ?? 0, $1.offset)
                 }.map(\.element)
@@ -213,17 +302,35 @@ final class BlockEmulator: TerminalDelegate {
                 row = band.range.upperBound
                 continue
             }
-            let line = byRow[row]
-            if hasText, !(line?.wrapped ?? false) {
-                text.append(AttributedString("\n"))
+            let line = rendered(row) ?? RenderedLine(row: row, line: nil, text: AttributedString(), wrapped: false, extent: 0, serial: 0)
+            if !pending.isEmpty, !line.wrapped, row / Self.chunkRows != pendingStart / Self.chunkRows {
+                closeChunk(hangs: true)
             }
-            text.append(line?.text ?? AttributedString())
-            hasText = true
+            if pending.isEmpty { pendingStart = row }
+            pending.append(line)
             row += 1
         }
         placeLegacy(upTo: nil)
         flushText()
+        chunkCache = keptChunks
         return segments
+    }
+
+    private func chunk(_ rows: [RenderedLine], start: Int, hangs: Bool, keeping kept: inout [Int: CachedChunk]) -> TextChunk {
+        let serials = rows.map(\.serial) + [hangs ? 1 : 0]
+        if let cached = chunkCache[start], cached.serials == serials {
+            kept[start] = cached
+            return cached.chunk
+        }
+        var text = AttributedString()
+        for (index, line) in rows.enumerated() {
+            if index > 0, !line.wrapped { text.append(AttributedString("\n")) }
+            text.append(line.text)
+        }
+        if hangs { text.append(AttributedString("\n")) }
+        let built = TextChunk(text, id: start, hangs: hangs)
+        kept[start] = CachedChunk(serials: serials, chunk: built)
+        return built
     }
 
     private static func bands(of placements: [InlineImage]) -> [(range: Range<Int>, images: [InlineImage])] {
@@ -239,15 +346,53 @@ final class BlockEmulator: TerminalDelegate {
         return bands
     }
 
-    private func collectLines() -> [(row: Int, text: AttributedString, wrapped: Bool)] {
-        let trimmed = terminal.buffer.totalLinesTrimmed
-        let lineCount = terminal.buffer.yDisp + terminal.rows
-        var lines: [(row: Int, text: AttributedString, wrapped: Bool)] = []
+    // history rows only change through a resize, a buffer switch, a reset or a cleared scrollback; the last three replace every history line
+    private func collectLines() -> [RenderedLine] {
+        let buffer = terminal.buffer
+        let trimmed = buffer.totalLinesTrimmed
+        let settled = trimmed + buffer.yDisp
+        let identity = ObjectIdentifier(buffer)
+        if cachedBuffer != identity || trimmed < cacheBase || settled < cacheSettled || !sentinelsHold(trimmed: trimmed) {
+            cachedBuffer = identity
+            forgetRenders()
+        }
+        if lineCache.isEmpty {
+            cacheBase = trimmed
+            cacheSettled = trimmed
+        } else if trimmed > cacheBase {
+            lineCache.removeFirst(min(trimmed - cacheBase, lineCache.count))
+            cacheBase = trimmed
+        }
+        let trusted = max(cacheSettled, trimmed)
+        let lineCount = buffer.yDisp + terminal.rows
+        var lines: [RenderedLine] = []
         lines.reserveCapacity(lineCount)
         for index in 0..<lineCount {
-            guard let line = terminal.getScrollInvariantLine(row: index + trimmed) else { continue }
-            lines.append((index + trimmed, renderLine(line), line.isWrapped))
+            let row = index + trimmed
+            let slot = row - cacheBase
+            if row < trusted, slot < lineCache.count, let cached = lineCache[slot] {
+                lines.append(cached)
+                continue
+            }
+            guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
+            let fresh: RenderedLine
+            if row < settled, !line.isWrapped, let carry = carried[ObjectIdentifier(line)], carry.line === line {
+                fresh = RenderedLine(row: row, line: line, text: carry.text, wrapped: false, extent: carry.extent, serial: carry.serial)
+            } else {
+                renderSerial += 1
+                let (text, extent) = render(line)
+                fresh = RenderedLine(row: row, line: line, text: text, wrapped: line.isWrapped, extent: extent, serial: renderSerial)
+            }
+            if row < settled {
+                if slot >= lineCache.count { lineCache.append(contentsOf: repeatElement(nil, count: slot - lineCache.count + 1)) }
+                lineCache[slot] = fresh
+            } else if slot < lineCache.count {
+                lineCache[slot] = nil
+            }
+            lines.append(fresh)
         }
+        cacheSettled = settled
+        carried = [:]
         while let last = lines.last, last.text.characters.isEmpty, !last.wrapped {
             lines.removeLast()
         }
@@ -255,42 +400,71 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     private func renderLine(_ line: BufferLine) -> AttributedString {
-        var cells: [(Character, Attribute, URL?)] = []
-        cells.reserveCapacity(line.count)
-        for column in 0..<line.count {
-            let cell = line[column]
-            if cell.width == 0 { continue }
-            let character = terminal.getCharacter(for: cell)
-            cells.append((character == "\u{0}" ? " " : character, cell.attribute, Self.link(of: cell)))
+        render(line).text
+    }
+
+    private func sentinelsHold(trimmed: Int) -> Bool {
+        for row in [max(trimmed, cacheBase), cacheSettled - 1] {
+            let slot = row - cacheBase
+            guard slot >= 0, slot < lineCache.count, let cached = lineCache[slot] else { continue }
+            guard cached.line === terminal.getScrollInvariantLine(row: row) else { return false }
         }
-        while let last = cells.last, last.0 == " ", last.1.bg == .defaultInvertedColor || last.1.bg == .defaultColor {
-            cells.removeLast()
+        return true
+    }
+
+    private func render(_ line: BufferLine) -> (text: AttributedString, extent: Int) {
+        var end = line.count
+        while end > 0 {
+            let cell = line[end - 1]
+            if cell.width != 0 {
+                let character = terminal.getCharacter(for: cell)
+                let background = cell.attribute.bg
+                guard character == " " || character == "\u{0}",
+                      background == .defaultInvertedColor || background == .defaultColor
+                else { break }
+            }
+            end -= 1
         }
 
         var result = AttributedString()
         var run = ""
-        var runAttribute: Attribute?
-        var runLink: URL?
+        var runAttribute = Attribute.empty
+        var runPayload: String?
+        var started = false
         func flush() {
-            guard let attribute = runAttribute, !run.isEmpty else { return }
-            result.append(AttributedString(run, attributes: TerminalPalette.attributes(attribute, link: runLink)))
+            guard started, !run.isEmpty else { return }
+            result.append(AttributedString(run, attributes: container(runAttribute, link: runPayload.flatMap(Self.link))))
             run = ""
         }
-        for (character, attribute, link) in cells {
-            if attribute != runAttribute || link != runLink {
+        for column in 0..<end {
+            let cell = line[column]
+            if cell.width == 0 { continue }
+            let attribute = cell.attribute
+            let payload = cell.hasPayload ? cell.getPayload() as? String : nil
+            if !started || attribute != runAttribute || payload != runPayload {
                 flush()
                 runAttribute = attribute
-                runLink = link
+                runPayload = payload
+                started = true
             }
-            run.append(character)
+            let character = terminal.getCharacter(for: cell)
+            run.append(character == "\u{0}" ? " " : character)
         }
         flush()
-        return result
+        return (result, end)
     }
 
-    private static func link(of cell: CharData) -> URL? {
-        guard let payload = cell.getPayload() as? String,
-              let separator = payload.firstIndex(of: ";")
+    private func container(_ attribute: Attribute, link: URL?) -> AttributeContainer {
+        if let link { return TerminalPalette.attributes(attribute, link: link) }
+        if let cached = styles[attribute] { return cached }
+        if styles.count > 4096 { styles.removeAll() }
+        let built = TerminalPalette.attributes(attribute)
+        styles[attribute] = built
+        return built
+    }
+
+    private static func link(_ payload: String) -> URL? {
+        guard let separator = payload.firstIndex(of: ";")
         else { return nil }
         let target = payload[payload.index(after: separator)...]
         guard let url = URL(string: String(target)),

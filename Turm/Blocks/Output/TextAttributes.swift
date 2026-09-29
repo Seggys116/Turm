@@ -64,10 +64,13 @@ extension NSAttributedString {
             return NSAttributedString(string: String(text.characters))
         }
         let result = NSMutableAttributedString(attributedString: converted)
-        result.enumerateAttribute(.fontStyle, in: NSRange(location: 0, length: result.length)) { value, range, _ in
+        let whole = NSRange(location: 0, length: result.length)
+        result.beginEditing()
+        result.enumerateAttribute(.fontStyle, in: whole) { value, range, _ in
             result.addAttribute(.font, value: TerminalFonts.font(for: (value as? NSNumber)?.intValue ?? 0), range: range)
-            result.removeAttribute(.fontStyle, range: range)
         }
+        result.removeAttribute(.fontStyle, range: whole)
+        result.endEditing()
         return result
     }
 }

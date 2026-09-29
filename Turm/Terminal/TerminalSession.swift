@@ -60,6 +60,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var lastReportedFocus = false
     @ObservationIgnored private var appObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var submission = ShellIntegration.Submission.bracketedPaste
+    @ObservationIgnored private var shellKind = ShellIntegration.Kind.zsh
+    @ObservationIgnored private var pendingCommand: String?
 
     init(directory: String = NSHomeDirectory(), auxiliary: Bool = false) {
         self.isAuxiliary = auxiliary
@@ -95,7 +97,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         if let userTitle { return userTitle }
         if let programTitle, !programTitle.isEmpty { return programTitle }
         if isRunning, let command = current?.command { return command }
-        return Block.abbreviate(directory)
+        return ShortcutStore.shared.label(for: directory)
     }
 
     func rename(_ text: String) {
@@ -173,12 +175,30 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         onFocus()
     }
 
+    var shortcuts: [Shortcut] {
+        Shortcuts.merged(ShortcutStore.shared.items, project: project.shortcuts)
+    }
+
+    func quoted(_ text: String) -> String {
+        ShellIntegration.quoted(text, for: shellKind)
+    }
+
+    func submitWhenReady(_ text: String) {
+        if phase == .ready {
+            submit(text)
+        } else {
+            pendingCommand = text
+        }
+    }
+
     func submit(_ text: String) {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .ready, !command.isEmpty else { return }
-        guard let payload = try? submission.payload(for: command) else { return }
+        let kind = shellKind
+        let expanded = Shortcuts.expand(command, in: shortcuts) { ShellIntegration.quoted($0, for: kind) } ?? command
+        guard let payload = try? submission.payload(for: expanded) else { return }
         let emulator = makeEmulator()
-        let block = Block(command: command, directory: directory, git: git, emulator: emulator)
+        let block = Block(command: expanded, directory: directory, git: git, emulator: emulator)
         blocks.append(block)
         hasSubmittedCommand = true
         phase = .submitted
@@ -292,6 +312,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         do {
             let launch = try ShellIntegration.launch()
             submission = launch.submission
+            shellKind = launch.kind
             process.startProcess(
                 executable: launch.executable,
                 args: launch.arguments,
@@ -342,6 +363,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             phase = .ready
             refreshGit(for: path)
             if !isAuxiliary { refreshProject(for: path) }
+            if let pending = pendingCommand {
+                pendingCommand = nil
+                submit(pending)
+            }
         }
     }
 
@@ -463,6 +488,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         Task {
             let found = await ProjectDetection.detect(in: path)
             guard generation == projectGeneration else { return }
+            ProjectShortcutIndex.shared.set(found.shortcuts, for: path)
             if found != project {
                 project = found
                 variantChoices = VariantStore.load(roots: found.roots, variants: found.variants)

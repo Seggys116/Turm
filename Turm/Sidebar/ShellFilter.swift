@@ -12,7 +12,7 @@ nonisolated enum ShellFilter {
 
 extension TerminalSession {
     var searchFields: [String] {
-        var fields = [title, directory, Block.abbreviate(directory)]
+        var fields = [title, directory, Block.abbreviate(directory), ShortcutStore.shared.label(for: directory)]
         if let git { fields.append(git.branch) }
         fields.append(contentsOf: blocks.map(\.command))
         return fields

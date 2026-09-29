@@ -4,9 +4,21 @@ import SwiftUI
 struct PathMenu: View {
     let path: String
     let close: () -> Void
+    let editShortcut: () -> Void
+    var store = ShortcutStore.shared
 
     var body: some View {
         MenuSurface(width: 220) {
+            if let shortcut = store.directory(at: path) {
+                MenuRow(title: "Edit Shortcut", symbol: "at", detail: shortcut.token, action: editShortcut)
+                MenuRow(title: "Remove Shortcut", symbol: "trash", isDestructive: true) {
+                    store.remove(shortcut.id)
+                    close()
+                }
+            } else {
+                MenuRow(title: "Add Shortcut...", symbol: "at", action: editShortcut)
+            }
+            MenuDivider()
             MenuRow(title: "Open in Finder", symbol: "folder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 close()

@@ -94,6 +94,7 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
     var variants: [ProjectVariant] = []
     var notice: String?
     var manifestPath: String?
+    var shortcuts: [Shortcut] = []
 
     static let empty = ProjectSnapshot()
 

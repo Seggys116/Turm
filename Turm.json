@@ -1,0 +1,45 @@
+{
+  "actions": [
+    {
+      "id": "run",
+      "title": "Run",
+      "command": "xcodebuild -project Turm.xcodeproj -scheme Turm -configuration {xcode-configuration} -destination 'platform=macOS' -derivedDataPath DerivedData build && open DerivedData/Build/Products/{xcode-configuration}/Turm.app",
+      "icon": "play.fill",
+      "category": "run"
+    },
+    {
+      "id": "xcode.test",
+      "title": "Unit tests",
+      "command": "xcodebuild test -project Turm.xcodeproj -scheme Turm -configuration {xcode-configuration} -destination 'platform=macOS' -derivedDataPath DerivedData -only-testing:TurmTests"
+    },
+    {
+      "id": "ui-tests",
+      "title": "UI tests",
+      "command": "xcodebuild test -project Turm.xcodeproj -scheme Turm -configuration {xcode-configuration} -destination 'platform=macOS' -derivedDataPath DerivedData -only-testing:TurmUITests",
+      "icon": "macwindow",
+      "category": "test",
+      "featured": false
+    },
+    {
+      "id": "build-for-testing",
+      "title": "Build for testing",
+      "command": "xcodebuild build-for-testing -project Turm.xcodeproj -scheme Turm -configuration {xcode-configuration} -destination 'platform=macOS' -derivedDataPath DerivedData",
+      "icon": "checklist",
+      "category": "check",
+      "featured": false
+    },
+    {
+      "id": "resolve",
+      "title": "Resolve packages",
+      "command": "xcodebuild -resolvePackageDependencies -project Turm.xcodeproj -scheme Turm -derivedDataPath DerivedData",
+      "category": "deps",
+      "featured": false
+    }
+  ],
+  "bar": {
+    "pinned": ["run", "xcode.build", "xcode.test", "xcode.clean", "xcode.open"],
+    "ecosystems": {
+      "project": { "title": "Turm", "icon": "terminal" }
+    }
+  }
+}

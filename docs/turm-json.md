@@ -6,6 +6,8 @@
 
 Turm checks the shell's current directory, then its parents (at most 10 folders, never your home folder or `/`; if the shell is in one of those, only that folder is checked). The first `Turm.json` found is the only one used. Files are not merged.
 
+The name is matched without regard to case, so `turm.json` and `TURM.json` work too. If a folder on a case-sensitive volume holds several spellings, `Turm.json` wins, otherwise the first in sorted order.
+
 This search is separate from project detection, so `Turm.json` can sit in a parent folder above the project. Actions defined in `Turm.json` run from the folder that holds the file (Turm adds `cd` when the shell is somewhere else). See [Monorepo](#monorepo).
 
 ## Minimal Turm.json
@@ -73,6 +75,7 @@ One custom action, everything detected is kept:
 | `variants` | array | Option toggles, see [Variants](#variants). |
 | `actions` | array | Custom or overriding actions, see [Actions](#actions). |
 | `bar` | object | Layout and pinning for this project, see [The bar block](#the-bar-block). |
+| `shortcuts` | object of strings | Shortcuts that only apply inside this project, see [Shortcuts](#shortcuts). |
 
 Unknown fields are ignored.
 
@@ -222,6 +225,26 @@ Icons are SF Symbol names, the same names shown in Apple's SF Symbols app.
 
 Default icons per category: run `play.fill`, build `hammer.fill`, test `checkmark.seal.fill`, check `checklist`, clean `trash`, deps `shippingbox`, other `terminal`. Detected actions may carry their own icon.
 
+## Shortcuts
+
+`shortcuts` maps a shortcut token to its value. The first character of the token sets the kind, as described in [Shortcuts](shortcuts.md):
+
+```json
+{
+  "shortcuts": {
+    "@web": "apps/web",
+    "#env": ".env",
+    "!dev": "pnpm dev",
+    "!mig": "pnpm prisma migrate dev --name {1}"
+  }
+}
+```
+
+- Directory (`@`) and file (`#`) values are relative to the folder holding `Turm.json`. Values starting with `/` or `~` are used as they are.
+- Command (`!`) values are used as written, including `{1}`, `{2}` and `{@}` argument placeholders.
+- These shortcuts apply to shells anywhere inside the project and override a global shortcut with the same kind and key.
+- An entry with no valid kind or key, or an empty value, is skipped and reported as `Turm.json: invalid shortcut <token>`.
+
 ## Monorepo
 
 Put one `Turm.json` at the repository root. Open a shell in any package below it and Turm finds the file by walking up, while detection runs against the package itself.
@@ -277,5 +300,6 @@ The reason text is one of:
 | `Turm.json: missing "<field>"` | A required field is absent (`title` or `command` in an action, `id` or `options` in a variant, `label` in an option object). |
 | `Turm.json: invalid value at <path>` | A field has the wrong type, for example `"subShell": "yes"` or `"actions": {}`. |
 | `Turm.json: could not be read` | The file exists but Turm could not open or read it. |
+| `Turm.json: invalid shortcut <tokens>` | A `shortcuts` entry has no `@`, `#` or `!` in front, a key with characters other than letters, digits, `-`, `_` and `.`, or an empty value. |
 
 Fields that decode but hold unusable values (an empty title, an unknown `alignment`) are skipped without a warning.

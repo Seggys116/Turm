@@ -1,17 +1,23 @@
 import Foundation
 
-/// Turm.json: repository-level settings for the status bar.
 nonisolated struct ProjectManifest: Decodable {
     static let fileName = "Turm.json"
     static let maxBytes = 262_144
 
     static func resolvedFile(in directory: String) -> String? {
-        let path = (directory as NSString).appendingPathComponent(fileName)
+        guard let name = entryName(in: directory) else { return nil }
+        let path = (directory as NSString).appendingPathComponent(name)
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: resolved),
               attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? Int, size <= maxBytes else { return nil }
         return resolved
+    }
+
+    static func entryName(in directory: String) -> String? {
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return nil }
+        let matches = entries.filter { $0.caseInsensitiveCompare(fileName) == .orderedSame }
+        return matches.contains(fileName) ? fileName : matches.sorted().first
     }
 
     static let template = """
@@ -95,6 +101,7 @@ nonisolated struct ProjectManifest: Decodable {
     var variants: [Variant]?
     var actions: [Action]?
     var bar: Bar?
+    var shortcuts: [String: String]?
 
     static func decode(_ data: Data) throws -> ProjectManifest {
         try JSONDecoder().decode(ProjectManifest.self, from: data)
@@ -131,7 +138,6 @@ nonisolated enum ProjectDetection {
 
     private static let maxDepth = 10
 
-    /// The directory itself, then its ancestors, never reaching the home folder or the filesystem root unless the shell is already there.
     static func candidates(from directory: String, home: String) -> [String] {
         let start = URL(fileURLWithPath: directory).standardizedFileURL.path
         let home = URL(fileURLWithPath: home).standardizedFileURL.path
@@ -240,6 +246,11 @@ nonisolated enum ProjectDetection {
             ), at: 0)
         }
         snapshot.bar = manifest.bar?.overrides ?? BarOverrides()
+        let shortcuts = Shortcuts.project(manifest.shortcuts ?? [:], root: root)
+        snapshot.shortcuts = shortcuts.shortcuts
+        if !shortcuts.invalid.isEmpty {
+            snapshot.notice = "Turm.json: invalid shortcut \(shortcuts.invalid.joined(separator: ", "))"
+        }
     }
 
     private static func describe(_ error: Error) -> String {

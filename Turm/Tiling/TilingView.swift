@@ -7,93 +7,55 @@ struct TilingView: View {
     let isActive: Bool
 
     var body: some View {
-        switch node {
-        case .leaf(let pane):
-            if let session = workspace.session(for: pane) {
-                TerminalPaneView(session: session, isFocused: isActive && focusedPane == pane)
+        GeometryReader { geometry in
+            let layout = PaneLayout(node: node, size: geometry.size)
+            ZStack(alignment: .topLeading) {
+                ForEach(layout.panes, id: \.id) { pane in
+                    if let session = workspace.session(for: pane.id) {
+                        TerminalPaneView(session: session, isFocused: isActive && focusedPane == pane.id)
+                            .frame(width: pane.frame.width, height: pane.frame.height)
+                            .position(x: pane.frame.midX, y: pane.frame.midY)
+                    }
+                }
+                ForEach(layout.dividers, id: \.split) { divider in
+                    SplitDivider(divider: divider) { workspace.resize(split: divider.split, to: $0) }
+                }
             }
-        case .split(let id, let axis, let ratio, let first, let second):
-            SplitContainer(axis: axis, ratio: ratio, onRatioChange: { workspace.resize(split: id, to: $0) }) {
-                TilingView(workspace: workspace, node: first, focusedPane: focusedPane, isActive: isActive)
-            } second: {
-                TilingView(workspace: workspace, node: second, focusedPane: focusedPane, isActive: isActive)
-            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .coordinateSpace(name: SplitSpace.name)
         }
     }
 }
 
-private struct SplitContainer<First: View, Second: View>: View {
-    let axis: SplitAxis
-    let ratio: Double
+private struct SplitDivider: View {
+    let divider: PaneLayout.Divider
     let onRatioChange: (Double) -> Void
-    @ViewBuilder let first: First
-    @ViewBuilder let second: Second
 
-    private let dividerThickness: CGFloat = 1
-    private let dividerHitArea: CGFloat = 9
+    private let hitArea: CGFloat = 9
 
     var body: some View {
-        GeometryReader { geometry in
-            let length = axis == .horizontal ? geometry.size.width : geometry.size.height
-            let available = max(length - dividerThickness, 1)
-            let firstLength = available * ratio
-
-            Group {
-                if axis == .horizontal {
-                    HStack(spacing: 0) {
-                        first.frame(width: firstLength)
-                        divider
-                        second.frame(maxWidth: .infinity)
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        first.frame(height: firstLength)
-                        divider
-                        second.frame(maxHeight: .infinity)
-                    }
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                dragHandle(available: available, firstLength: firstLength)
-            }
-            .coordinateSpace(name: SplitSpace.name)
-        }
-    }
-
-    private var divider: some View {
+        let frame = divider.frame
+        let horizontal = divider.axis == .horizontal
         Rectangle()
             .fill(Theme.divider.color)
-            .frame(
-                width: axis == .horizontal ? dividerThickness : nil,
-                height: axis == .vertical ? dividerThickness : nil
-            )
-    }
-
-    private func dragHandle(available: CGFloat, firstLength: CGFloat) -> some View {
+            .frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
+            .allowsHitTesting(false)
         Color.clear
-            .frame(
-                width: axis == .horizontal ? dividerHitArea : nil,
-                height: axis == .vertical ? dividerHitArea : nil
-            )
+            .frame(width: horizontal ? hitArea : frame.width, height: horizontal ? frame.height : hitArea)
             .contentShape(Rectangle())
-            .offset(
-                x: axis == .horizontal ? firstLength - (dividerHitArea - dividerThickness) / 2 : 0,
-                y: axis == .vertical ? firstLength - (dividerHitArea - dividerThickness) / 2 : 0
-            )
             .onHover { inside in
                 if inside {
-                    (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+                    (horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
                 } else {
                     NSCursor.pop()
                 }
             }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .named(SplitSpace.name))
-                    .onChanged { drag in
-                        let position = axis == .horizontal ? drag.location.x : drag.location.y
-                        onRatioChange(Double(position / available))
-                    }
+                    .onChanged { drag in onRatioChange(divider.ratio(at: drag.location)) }
             )
+            .position(x: frame.midX, y: frame.midY)
     }
 }
 

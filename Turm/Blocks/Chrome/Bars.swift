@@ -7,6 +7,9 @@ struct TopBar: View {
     @Binding var isSidebarVisible: Bool
     let placement: SidebarPlacement
     let onOpenSettings: () -> Void
+    let spotlight: SpotlightPresenter
+    let isSpotlightOpen: Bool
+    let onSpotlight: () -> Void
     @State private var height = TopBar.defaultHeight
 
     var body: some View {
@@ -14,7 +17,10 @@ struct TopBar: View {
             .frame(height: height)
             .frame(maxWidth: .infinity)
             .background(Theme.topBar.color)
-            .background(TitlebarChrome(height: $height, isSidebarVisible: $isSidebarVisible, placement: placement, onOpenSettings: onOpenSettings))
+            .background(TitlebarChrome(
+                height: $height, isSidebarVisible: $isSidebarVisible, placement: placement, onOpenSettings: onOpenSettings,
+                spotlight: spotlight, isSpotlightOpen: isSpotlightOpen, onSpotlight: onSpotlight
+            ))
             .overlay(alignment: .bottom) {
                 Rectangle().fill(Theme.divider.color).frame(height: 1)
             }
@@ -27,6 +33,9 @@ private struct TitlebarChrome: NSViewRepresentable {
     @Binding var isSidebarVisible: Bool
     let placement: SidebarPlacement
     let onOpenSettings: () -> Void
+    let spotlight: SpotlightPresenter
+    let isSpotlightOpen: Bool
+    let onSpotlight: () -> Void
 
     func makeNSView(context: Context) -> ChromeView {
         let view = ChromeView()
@@ -43,6 +52,10 @@ private struct TitlebarChrome: NSViewRepresentable {
         view.onToggle = { withAnimation(.easeInOut(duration: 0.18)) { isSidebarVisible.toggle() } }
         view.onSettings = onOpenSettings
         view.setSidebar(visible: isSidebarVisible, placement: placement)
+        view.search.onClick = onSpotlight
+        view.spotlightOpen = isSpotlightOpen
+        view.search.isHidden = isSpotlightOpen || view.search.frame.width == 0
+        spotlight.anchor = view.search
     }
 
     final class ChromeView: NSView {
@@ -53,9 +66,13 @@ private struct TitlebarChrome: NSViewRepresentable {
         private static let buttonSize = NSSize(width: 30, height: 24)
         private static let trafficLightGap: CGFloat = 12
         private static let buttonGap: CGFloat = 2
+        private static let searchHeight: CGFloat = 22
+        private static let searchWidth: ClosedRange<CGFloat> = 180...380
 
         private let toggle = NSButton()
         private let settings = NSButton()
+        let search = SpotlightBarField()
+        var spotlightOpen = false
         private var observers: [NSObjectProtocol] = []
 
         override init(frame: NSRect) {
@@ -109,6 +126,7 @@ private struct TitlebarChrome: NSViewRepresentable {
             observers = []
             toggle.removeFromSuperview()
             settings.removeFromSuperview()
+            search.removeFromSuperview()
             guard let window else { return }
             let names: [Notification.Name] = [
                 NSWindow.didResizeNotification,
@@ -143,6 +161,19 @@ private struct TitlebarChrome: NSViewRepresentable {
                 height: Self.buttonSize.height
             )
             settings.frame = toggle.frame.offsetBy(dx: Self.buttonSize.width + Self.buttonGap, dy: 0)
+
+            if search.superview !== container { container.addSubview(search) }
+            let leftEdge = settings.frame.maxX + 16
+            let width = min(Self.searchWidth.upperBound, max(Self.searchWidth.lowerBound, container.bounds.width * 0.36))
+            var x = ((container.bounds.width - width) / 2).rounded()
+            x = max(x, leftEdge)
+            let fitted = min(width, container.bounds.width - x - 12)
+            let fits = fitted >= Self.searchWidth.lowerBound * 0.75
+            search.frame = fits
+                ? NSRect(x: x, y: (close.frame.midY - Self.searchHeight / 2).rounded(), width: fitted, height: Self.searchHeight)
+                : .zero
+            search.isHidden = !fits || spotlightOpen
+            search.needsDisplay = true
         }
     }
 }

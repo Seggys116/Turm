@@ -254,6 +254,10 @@ nonisolated final class SystemCompletionEnvironment: CompletionEnvironment, @unc
         commandSpec(forCommand: command).flags
     }
 
+    func shortcuts(in directory: String) -> [Shortcut] {
+        Shortcuts.merged(Shortcuts.load(), project: ProjectShortcutIndex.shared.shortcuts(for: directory))
+    }
+
     func commandSpec(forCommand command: String) -> CommandSpec {
         lock.lock()
         if let cached = specCache[command] {

@@ -29,6 +29,19 @@ nonisolated enum SyntaxHighlighter {
 
     static func spans(for line: String, directory: String, environment env: CompletionEnvironment) -> [HighlightSpan] {
         guard !line.isEmpty, line.utf16.count <= maxLength else { return [] }
+        let matches = Shortcuts.scan(line, in: env.shortcuts(in: directory))
+        guard !matches.isEmpty else { return shellSpans(for: line, directory: directory, environment: env) }
+        let directory = matches.first(where: \.changesDirectory)?.target ?? directory
+        let marked = matches.map { NSRange($0.range, in: line) }
+        let masked = Shortcuts.masked(line, matches: matches)
+        return shellSpans(for: masked, directory: directory, environment: env)
+            .filter { span in !marked.contains { NSIntersectionRange($0, span.range).length > 0 } }
+            + zip(matches, marked).map { match, range in
+                HighlightSpan(range: range, kind: match.shortcut.isMissing(env.fileExists) ? .error : .alias)
+            }
+    }
+
+    private static func shellSpans(for line: String, directory: String, environment env: CompletionEnvironment) -> [HighlightSpan] {
         let tokens = ShellTokenizer.tokenize(line)
         var spans: [HighlightSpan] = []
         var expectCommand = true

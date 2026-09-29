@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct BlockTextView: NSViewRepresentable {
-    let text: AttributedString
+    let chunk: TextChunk
     var highlights = SegmentHighlights(ranges: [], active: nil)
     var piece: PieceRef?
     var selection: NSRange?
@@ -12,7 +12,7 @@ struct BlockTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: BlockTextNSView, context: Context) {
-        view.setText(text)
+        view.setChunk(chunk)
         view.setHighlights(highlights)
         view.setSelection(selection)
         view.bind(piece)
@@ -29,7 +29,8 @@ struct BlockTextView: NSViewRepresentable {
 
 final class BlockTextNSView: NSTextView {
     private let layout: UnderlineLayoutManager
-    private var source: AttributedString?
+    private var chunk: TextChunk?
+    private var isMaterialized = false
     private var blinkTimer: Timer?
     private var blinkStart = Date()
     private var cachedFit: (width: CGFloat, size: CGSize)?
@@ -41,6 +42,7 @@ final class BlockTextNSView: NSTextView {
         container.lineFragmentPadding = 0
         container.widthTracksTextView = true
         let manager = UnderlineLayoutManager()
+        manager.allowsNonContiguousLayout = true
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
         layout = manager
@@ -61,11 +63,26 @@ final class BlockTextNSView: NSTextView {
         fatalError("init(coder:) is not supported")
     }
 
-    func setText(_ text: AttributedString) {
-        guard source != text, let storage = textStorage else { return }
-        source = text
+    var textLength: Int {
+        chunk?.length ?? 0
+    }
+
+    func setChunk(_ next: TextChunk) {
+        if let chunk, chunk.matches(next) {
+            self.chunk = next
+            return
+        }
+        chunk = next
         cachedFit = nil
-        storage.setAttributedString(NSAttributedString.terminalText(text))
+        isMaterialized = false
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    private func materialize() {
+        guard !isMaterialized, let storage = textStorage else { return }
+        isMaterialized = true
+        storage.setAttributedString(chunk.map { Self.display($0.text) } ?? NSAttributedString())
         var blinks = false
         storage.enumerateAttribute(.blink, in: NSRange(location: 0, length: storage.length)) { value, _, stop in
             if (value as? NSNumber)?.boolValue == true {
@@ -76,8 +93,34 @@ final class BlockTextNSView: NSTextView {
         layout.hasBlink = blinks
         layout.blinkAlpha = 1
         updateBlinkTimer()
-        invalidateIntrinsicContentSize()
         needsDisplay = true
+    }
+
+    private static let wrapping: NSParagraphStyle = {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byCharWrapping
+        return style
+    }()
+
+    // wraps at the cell like a terminal; spaces become no-break spaces so they cannot hang past the edge
+    static func display(_ text: AttributedString) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: NSAttributedString.terminalText(text))
+        let whole = NSRange(location: 0, length: result.length)
+        result.beginEditing()
+        result.mutableString.replaceOccurrences(of: " ", with: "\u{00A0}", options: .literal, range: whole)
+        result.addAttribute(.paragraphStyle, value: wrapping, range: whole)
+        result.endEditing()
+        return result
+    }
+
+    override func viewWillDraw() {
+        materialize()
+        super.viewWillDraw()
+    }
+
+    override func accessibilityValue() -> String? {
+        materialize()
+        return super.accessibilityValue()
     }
 
     func setHighlights(_ highlights: SegmentHighlights) {
@@ -88,7 +131,7 @@ final class BlockTextNSView: NSTextView {
     }
 
     func setSelection(_ range: NSRange?) {
-        let clamped = range.map { NSIntersectionRange($0, NSRange(location: 0, length: textStorage?.length ?? 0)) }
+        let clamped = range.map { NSIntersectionRange($0, NSRange(location: 0, length: textLength)) }
         let value = clamped?.length == 0 ? nil : clamped
         guard layout.selection != value else { return }
         layout.selection = value
@@ -96,24 +139,27 @@ final class BlockTextNSView: NSTextView {
     }
 
     func bind(_ piece: PieceRef?) {
-        if let boundPiece, boundPiece.id != piece?.id {
-            boundPiece.host.unregister(boundPiece.id, view: self)
+        if let boundPiece, boundPiece.id != piece?.id || boundPiece.slot != piece?.slot {
+            boundPiece.host.unregister(boundPiece, view: self)
         }
         boundPiece = piece
-        if let piece { piece.host.register(piece.id, view: self) }
+        if let piece { piece.host.register(piece, view: self) }
     }
 
     func insertionOffset(at point: NSPoint) -> Int {
-        characterIndexForInsertion(at: point)
+        materialize()
+        return characterIndexForInsertion(at: point)
     }
 
     func characterOffset(at point: NSPoint) -> Int {
+        materialize()
         guard let container = textContainer, layout.numberOfGlyphs > 0 else { return 0 }
         let glyph = layout.glyphIndex(for: point, in: container)
         return layout.characterIndexForGlyph(at: glyph)
     }
 
     func link(at point: NSPoint) -> URL? {
+        materialize()
         guard let container = textContainer, let storage = textStorage, layout.numberOfGlyphs > 0 else { return nil }
         let glyph = layout.glyphIndex(for: point, in: container)
         guard layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point) else { return nil }
@@ -132,13 +178,25 @@ final class BlockTextNSView: NSTextView {
     func fittingSize(width: CGFloat?) -> CGSize {
         let proposed = width.map { max($0, 1) } ?? 100_000
         if let cachedFit, cachedFit.width == proposed { return cachedFit.size }
+        if width != nil, let height = chunk?.fixedHeight(width: proposed) {
+            let size = CGSize(width: proposed, height: height)
+            cachedFit = (proposed, size)
+            return size
+        }
+        let size = measuredSize(width: width)
+        cachedFit = (proposed, size)
+        return size
+    }
+
+    func measuredSize(width: CGFloat?) -> CGSize {
+        let proposed = width.map { max($0, 1) } ?? 100_000
+        materialize()
         guard let container = textContainer else { return .zero }
         container.containerSize = NSSize(width: proposed, height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
-        let size = CGSize(width: width == nil ? ceil(used.width) : proposed, height: ceil(used.height))
-        cachedFit = (proposed, size)
-        return size
+        let height = used.height - (chunk?.hangs == true ? layout.extraLineFragmentRect.height : 0)
+        return CGSize(width: width == nil ? ceil(used.width) : proposed, height: ceil(height))
     }
 
     override func scrollWheel(with event: NSEvent) {

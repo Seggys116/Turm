@@ -7,6 +7,7 @@ extension FocusedValues {
 
 struct PaneCommands: Commands {
     @FocusedValue(\.workspace) private var workspace
+    @FocusedValue(\.spotlightPresented) private var spotlight
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
     @AppStorage(SidebarPlacement.key) private var placement = SidebarPlacement.left
 
@@ -35,8 +36,10 @@ struct PaneCommands: Commands {
             .disabled(workspace?.focusedSession == nil)
         }
         CommandMenu("Shell") {
-            Button("New Shell") { workspace?.newShell() }
+            Button("Spotlight") { spotlight?.wrappedValue = true }
                 .keyboardShortcut("t")
+            Button("New Shell") { workspace?.newShell() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
             Button("Next Shell") { workspace?.selectNextTab() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Shell") { workspace?.selectPreviousTab() }

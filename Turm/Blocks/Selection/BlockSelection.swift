@@ -5,6 +5,19 @@ import Observation
 struct PieceRef {
     let id: PieceID
     let host: BlockSelection
+    var slot = 0
+    var offset = 0
+
+    func slice(slot: Int, offset: Int) -> PieceRef {
+        PieceRef(id: id, host: host, slot: slot, offset: offset)
+    }
+
+    func local(_ range: NSRange?, length: Int) -> NSRange? {
+        guard let range else { return nil }
+        let clipped = NSIntersectionRange(range, NSRange(location: offset, length: length))
+        guard clipped.length > 0 else { return nil }
+        return NSRange(location: clipped.location - offset, length: clipped.length)
+    }
 }
 
 @Observable
@@ -18,13 +31,20 @@ final class BlockSelection {
     @ObservationIgnored weak var responder: SelectionResponderView?
     @ObservationIgnored var source: () -> [SearchDocument] = { [] }
     @ObservationIgnored private(set) var layout = SelectionLayout(pieces: [])
-    @ObservationIgnored private var frames: [PieceID: CGRect] = [:]
-    @ObservationIgnored private var views: [PieceID: WeakText] = [:]
+    @ObservationIgnored private var frames: [PieceID: [Int: CGRect]] = [:]
+    @ObservationIgnored private var views: [PieceID: [Int: WeakText]] = [:]
     @ObservationIgnored private var unit: SelectionUnit?
     @ObservationIgnored private var granularity = SelectionGranularity.character
 
     private struct WeakText {
         weak var view: BlockTextNSView?
+        let offset: Int
+    }
+
+    private struct Target {
+        let piece: SelectionLayout.Piece
+        let frame: CGRect
+        let text: WeakText?
     }
 
     var hasSelection: Bool {
@@ -37,19 +57,20 @@ final class BlockSelection {
         return layout.range(of: id, anchor: anchor, focus: focus)
     }
 
-    func register(_ id: PieceID, view: BlockTextNSView) {
-        views[id] = WeakText(view: view)
+    func register(_ piece: PieceRef, view: BlockTextNSView) {
+        views[piece.id, default: [:]][piece.slot] = WeakText(view: view, offset: piece.offset)
     }
 
-    func unregister(_ id: PieceID, view: BlockTextNSView) {
-        if views[id]?.view === view {
-            views[id] = nil
-            frames[id] = nil
-        }
+    func unregister(_ piece: PieceRef, view: BlockTextNSView) {
+        guard views[piece.id]?[piece.slot]?.view === view else { return }
+        views[piece.id]?[piece.slot] = nil
+        frames[piece.id]?[piece.slot] = nil
+        if views[piece.id]?.isEmpty == true { views[piece.id] = nil }
+        if frames[piece.id]?.isEmpty == true { frames[piece.id] = nil }
     }
 
-    func setFrame(_ frame: CGRect, for id: PieceID) {
-        frames[id] = frame
+    func setFrame(_ frame: CGRect, for piece: PieceRef) {
+        frames[piece.id, default: [:]][piece.slot] = frame
     }
 
     func clear() {
@@ -124,29 +145,37 @@ final class BlockSelection {
     }
 
     private func pieceView(at point: CGPoint) -> (view: BlockTextNSView, local: NSPoint)? {
-        for (id, frame) in frames where frame.contains(point) {
-            if let view = views[id]?.view {
-                return (view, NSPoint(x: point.x - frame.minX, y: point.y - frame.minY))
+        for (id, slots) in frames {
+            for (slot, frame) in slots where frame.contains(point) {
+                if let view = views[id]?[slot]?.view {
+                    return (view, NSPoint(x: point.x - frame.minX, y: point.y - frame.minY))
+                }
             }
         }
         return nil
     }
 
     private func hit(_ point: CGPoint, insertion: Bool) -> SelectionPoint? {
-        var best: (piece: SelectionLayout.Piece, frame: CGRect, distance: CGFloat)?
-        for piece in layout.pieces {
-            guard let frame = frames[piece.id] else { continue }
-            let distance = point.y < frame.minY ? frame.minY - point.y : (point.y > frame.maxY ? point.y - frame.maxY : 0)
-            if best == nil || distance < best!.distance { best = (piece, frame, distance) }
-            if distance == 0 { break }
+        var best: (target: Target, distance: CGFloat)?
+        search: for piece in layout.pieces {
+            guard let slots = frames[piece.id] else { continue }
+            for (slot, frame) in slots {
+                let distance = point.y < frame.minY ? frame.minY - point.y : (point.y > frame.maxY ? point.y - frame.maxY : 0)
+                if best == nil || distance < best!.distance {
+                    best = (Target(piece: piece, frame: frame, text: views[piece.id]?[slot]), distance)
+                }
+                if distance == 0 { break search }
+            }
         }
-        guard let best else { return nil }
-        let piece = best.piece
-        if point.y < best.frame.minY { return SelectionPoint(piece: piece.id, offset: 0) }
-        if point.y > best.frame.maxY { return SelectionPoint(piece: piece.id, offset: piece.length) }
-        guard let view = views[piece.id]?.view else { return SelectionPoint(piece: piece.id, offset: 0) }
-        let local = NSPoint(x: point.x - best.frame.minX, y: point.y - best.frame.minY)
-        let offset = insertion ? view.insertionOffset(at: local) : view.characterOffset(at: local)
+        guard let target = best?.target else { return nil }
+        let piece = target.piece
+        let start = target.text?.offset ?? 0
+        let end = target.text?.view.map { start + $0.textLength } ?? piece.length
+        if point.y < target.frame.minY { return SelectionPoint(piece: piece.id, offset: min(start, piece.length)) }
+        if point.y > target.frame.maxY { return SelectionPoint(piece: piece.id, offset: min(end, piece.length)) }
+        guard let view = target.text?.view else { return SelectionPoint(piece: piece.id, offset: 0) }
+        let local = NSPoint(x: point.x - target.frame.minX, y: point.y - target.frame.minY)
+        let offset = start + (insertion ? view.insertionOffset(at: local) : view.characterOffset(at: local))
         return SelectionPoint(piece: piece.id, offset: min(max(offset, 0), piece.length))
     }
 }

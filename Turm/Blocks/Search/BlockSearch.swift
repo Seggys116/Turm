@@ -8,6 +8,28 @@ struct SegmentHighlights: Equatable {
     var active: NSRange?
 
     static let none = SegmentHighlights(ranges: [], active: nil)
+
+    func local(offset: Int, length: Int) -> SegmentHighlights {
+        guard !ranges.isEmpty || active != nil else { return self }
+        let window = NSRange(location: offset, length: length)
+        func shift(_ range: NSRange) -> NSRange? {
+            let clipped = NSIntersectionRange(range, window)
+            return clipped.length > 0 ? NSRange(location: clipped.location - offset, length: clipped.length) : nil
+        }
+        var low = 0
+        var high = ranges.count
+        while low < high {
+            let middle = (low + high) / 2
+            if NSMaxRange(ranges[middle]) <= offset { low = middle + 1 } else { high = middle }
+        }
+        var local: [NSRange] = []
+        var index = low
+        while index < ranges.count, ranges[index].location < offset + length {
+            if let shifted = shift(ranges[index]) { local.append(shifted) }
+            index += 1
+        }
+        return SegmentHighlights(ranges: local, active: active.flatMap(shift))
+    }
 }
 
 nonisolated struct SearchOptions: Equatable, Sendable {
@@ -130,7 +152,7 @@ extension SearchDocument {
         for (index, segment) in block.segments.enumerated() {
             switch segment {
             case .text(let text):
-                parts.append(Part(index: index, text: String(text.characters)))
+                parts.append(Part(index: index, text: text.string))
             case .stack(let stack):
                 if !stack.lines.isEmpty {
                     parts.append(Part(index: index, text: String(stack.text.characters)))

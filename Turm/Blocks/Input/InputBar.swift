@@ -7,12 +7,26 @@ struct InputBar: View {
     @State private var completion = CompletionModel()
     @State private var pathMenuOpen = false
     @State private var branchMenuOpen = false
+    @State private var shortcutEditorOpen = false
+    private let tracker = ShortcutSuggestionTracker.shared
+
+    private var suggestion: ShortcutSuggestion? {
+        guard !session.isRunning, !session.isAuxiliary else { return nil }
+        return tracker.suggestion(
+            currentDirectory: session.directory,
+            lastCommand: session.blocks.last?.command,
+            shortcuts: ShortcutStore.shared.items
+        )
+    }
 
     var body: some View {
         let _ = input.draft
         VStack(alignment: .leading, spacing: 8) {
             if !input.attachments.isEmpty {
                 AttachmentStrip(input: input)
+            }
+            if let suggestion {
+                SuggestionRow(suggestion: suggestion) { tracker.dismiss(suggestion) }
             }
             chips
             if session.isRunning {
@@ -45,18 +59,35 @@ struct InputBar: View {
         }
         .task { SystemCompletionEnvironment.shared.warmUp(shell: ShellIntegration.forcedShell) }
         .onDisappear { completion.close() }
+        .onAppear { recordVisit() }
+        .onChange(of: session.directory) { recordVisit() }
         .onChange(of: session.isRunning) { wasRunning, isRunning in
             guard wasRunning, !isRunning, let command = session.blocks.last?.command else { return }
             SystemCompletionEnvironment.shared.commandFinished(command, directory: session.directory)
+            if !session.isAuxiliary { tracker.recordCommand(command) }
         }
+    }
+
+    private func recordVisit() {
+        guard !session.isAuxiliary else { return }
+        tracker.recordVisit(session.directory)
     }
 
     private var chips: some View {
         HStack(spacing: 6) {
-            Chip(text: Block.abbreviate(session.directory), isActive: pathMenuOpen) { Image(systemName: "folder").chipIcon() }
+            Chip(text: ShortcutStore.shared.label(for: session.directory), isActive: pathMenuOpen || shortcutEditorOpen) {
+                Image(systemName: "folder").chipIcon()
+            }
+                .help(Block.abbreviate(session.directory))
                 .onTapGesture { toggle(path: true) }
                 .anchoredMenu(isOpen: $pathMenuOpen) {
-                    PathMenu(path: session.directory) { pathMenuOpen = false }
+                    PathMenu(path: session.directory, close: { pathMenuOpen = false }) {
+                        pathMenuOpen = false
+                        shortcutEditorOpen = true
+                    }
+                }
+                .popover(isPresented: $shortcutEditorOpen, arrowEdge: .top) {
+                    ShortcutEditor.directory(at: session.directory) { shortcutEditorOpen = false }
                 }
             if let git = session.git {
                 Chip(text: git.branch, isActive: branchMenuOpen) { GitBranchIcon().frame(width: 12, height: 12) }
@@ -90,6 +121,40 @@ struct InputBar: View {
     private func submit() {
         session.submit(input.draft)
         input.reset()
+    }
+}
+
+private struct SuggestionRow: View {
+    let suggestion: ShortcutSuggestion
+    let onDismiss: () -> Void
+    @State private var editorOpen = false
+
+    private var message: String {
+        suggestion.kind == .directory ? "You often open \(Block.abbreviate(suggestion.value))" : "You run this often"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: suggestion.kind.symbol).chipIcon()
+                Text(message).lineLimit(1).truncationMode(.middle)
+            }
+            .chipStyle()
+            Button("Save as \(suggestion.draft.token)") { editorOpen = true }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.accentColor)
+                .popover(isPresented: $editorOpen, arrowEdge: .top) {
+                    ShortcutEditor(suggestion.draft) { editorOpen = false }
+                }
+            Spacer(minLength: 0)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark").imageScale(.small)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.secondaryText.color)
+            .help("Dismiss suggestion")
+        }
     }
 }
 

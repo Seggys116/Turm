@@ -56,6 +56,8 @@ struct InputEditor: NSViewRepresentable {
         view.onDragTarget = { context.coordinator.parent.onDragTarget($0) }
         view.onClick = { context.coordinator.parent.completion.close() }
         view.onSelectAllBlocks = { context.coordinator.parent.onSelectAllBlocks() }
+        view.extraMenuItems = { context.coordinator.shortcutMenuItems(at: $0) }
+        context.coordinator.observeLayout(of: scroll)
         return scroll
     }
 
@@ -76,11 +78,13 @@ struct InputEditor: NSViewRepresentable {
         if isFocused, !wasFocused || !coordinator.didFocus {
             coordinator.attached()
         }
+        coordinator.refreshTags()
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.parent.completion.close()
         coordinator.removePopup()
+        coordinator.removeTags()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
@@ -124,6 +128,10 @@ struct InputEditor: NSViewRepresentable {
         private var autoTask: Task<Void, Never>?
         private var suppressAuto = false
         private var popupHost: NSHostingView<CompletionPopup>?
+        private let tags = ShortcutTagLayer()
+        private let shellKind = ShellIntegration.userKind
+        private var shortcutPopover: NSPopover?
+        private weak var observedWindow: NSWindow?
         private let environment = SystemCompletionEnvironment.shared
 
         init(_ parent: InputEditor) {
@@ -138,6 +146,129 @@ struct InputEditor: NSViewRepresentable {
 
         @objc private func environmentChanged() {
             restyle()
+            refreshTags()
+        }
+
+        func observeLayout(of scroll: NSScrollView) {
+            let center = NotificationCenter.default
+            scroll.postsFrameChangedNotifications = true
+            scroll.contentView.postsBoundsChangedNotifications = true
+            textView?.postsFrameChangedNotifications = true
+            center.addObserver(self, selector: #selector(layoutChanged), name: NSView.frameDidChangeNotification, object: scroll)
+            center.addObserver(self, selector: #selector(layoutChanged), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+            center.addObserver(self, selector: #selector(layoutChanged), name: NSView.frameDidChangeNotification, object: textView)
+        }
+
+        @objc private func layoutChanged() {
+            refreshTags()
+        }
+
+        func refreshTags() {
+            guard let view = textView else { return }
+            if let window = view.window, window !== observedWindow {
+                let center = NotificationCenter.default
+                if let old = observedWindow { center.removeObserver(self, name: NSWindow.didResizeNotification, object: old) }
+                center.addObserver(self, selector: #selector(layoutChanged), name: NSWindow.didResizeNotification, object: window)
+                observedWindow = window
+            }
+            let kind = shellKind
+            tags.update(
+                in: view,
+                shortcuts: ShortcutStore.shared.effective(in: parent.directory),
+                quote: { ShellIntegration.quoted($0, for: kind) },
+                visible: parent.isEnabled && !parent.completion.isOpen,
+                select: { [weak self] in self?.selectShortcut($0) },
+                expand: { [weak self] in self?.expandShortcut($0, with: $1) }
+            )
+        }
+
+        private func expandShortcut(_ range: NSRange, with text: String) {
+            guard let view = textView, NSMaxRange(range) <= (view.string as NSString).length else { return }
+            autoTask?.cancel()
+            parent.completion.close()
+            view.window?.makeFirstResponder(view)
+            suppressAuto = true
+            view.insertText(text, replacementRange: range)
+            suppressAuto = false
+        }
+
+        func shortcutMenuItems(at point: NSPoint) -> [NSMenuItem] {
+            guard let view = textView, !view.string.isEmpty else { return [] }
+            let text = view.string
+            let index = view.characterIndexForInsertion(at: point)
+            let store = ShortcutStore.shared
+            for match in Shortcuts.scan(text, in: store.items) {
+                let range = NSRange(match.range, in: text)
+                guard index >= range.location, index <= NSMaxRange(range) else { continue }
+                return [ActionMenuItem(title: "Edit \(match.shortcut.token) Shortcut...") { [weak self] in
+                    self?.presentShortcutEditor(match.shortcut, near: range)
+                }]
+            }
+            let masked = Shortcuts.masked(text, matches: Shortcuts.scan(text, in: store.effective(in: parent.directory)))
+            for token in ShellTokenizer.tokenize(masked) where token.kind == .word {
+                let range = NSRange(token.range, in: masked)
+                guard index >= range.location, index <= NSMaxRange(range) else { continue }
+                let path = resolvedPath(token.value)
+                var isDirectory: ObjCBool = false
+                guard !token.value.isEmpty, !token.value.hasPrefix("-"),
+                      FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                else { return [] }
+                let kind: ShortcutKind = isDirectory.boolValue ? .directory : .file
+                if let existing = store.items.first(where: { $0.kind == kind && $0.value == path }) {
+                    return [ActionMenuItem(title: "Edit \(existing.token) Shortcut...") { [weak self] in
+                        self?.presentShortcutEditor(existing, near: range)
+                    }]
+                }
+                let name = (path as NSString).lastPathComponent
+                let draft = kind == .directory
+                    ? Shortcut(kind: .directory, key: Shortcuts.sanitize(name).lowercased(), name: name, value: path)
+                    : Shortcut(kind: .file, key: Shortcuts.sanitize((name as NSString).deletingPathExtension).lowercased(), name: "", value: path)
+                return [ActionMenuItem(title: "Save as \(kind.title) Shortcut...") { [weak self] in
+                    self?.presentShortcutEditor(draft, near: range)
+                }]
+            }
+            return []
+        }
+
+        private func resolvedPath(_ value: String) -> String {
+            let home = NSHomeDirectory()
+            let absolute: String
+            if value == "~" {
+                absolute = home
+            } else if value.hasPrefix("~/") {
+                absolute = home + value.dropFirst()
+            } else if value.hasPrefix("/") {
+                absolute = value
+            } else {
+                absolute = (parent.directory as NSString).appendingPathComponent(value)
+            }
+            return URL(fileURLWithPath: absolute).standardizedFileURL.path
+        }
+
+        private func presentShortcutEditor(_ shortcut: Shortcut, near range: NSRange) {
+            guard let view = textView, let layout = view.layoutManager, let container = view.textContainer else { return }
+            let popover = NSPopover()
+            popover.behavior = .transient
+            let content = ShortcutEditor(shortcut) { [weak popover] in popover?.performClose(nil) }
+            popover.contentViewController = NSHostingController(rootView: content)
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+            rect.origin.x += view.textContainerOrigin.x
+            rect.origin.y += view.textContainerOrigin.y
+            shortcutPopover = popover
+            popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+        }
+
+        func removeTags() {
+            tags.clear()
+        }
+
+        private func selectShortcut(_ range: NSRange) {
+            guard let view = textView, NSMaxRange(range) <= (view.string as NSString).length else { return }
+            parent.completion.close()
+            view.window?.makeFirstResponder(view)
+            view.setSelectedRange(range)
+            view.scrollRangeToVisible(range)
         }
 
         func attached() {
@@ -187,6 +318,7 @@ struct InputEditor: NSViewRepresentable {
                   let scroll = view.enclosingScrollView
             else {
                 removePopup()
+                refreshTags()
                 return
             }
             let host: NSHostingView<CompletionPopup>
@@ -213,6 +345,7 @@ struct InputEditor: NSViewRepresentable {
             }
             host.frame = NSRect(x: x, y: y, width: width + margin * 2, height: height + margin * 2)
             if host.superview !== content { content.addSubview(host, positioned: .above, relativeTo: nil) }
+            refreshTags()
         }
 
         func removePopup() {
@@ -227,6 +360,7 @@ struct InputEditor: NSViewRepresentable {
         func afterEdit() {
             restyle()
             updateGhost()
+            refreshTags()
         }
 
         func control(_ key: Character) {
@@ -451,29 +585,8 @@ struct InputEditor: NSViewRepresentable {
 
         private func restyle() {
             guard let view = textView, !view.hasMarkedText(), let storage = view.textStorage else { return }
-            let full = NSRange(location: 0, length: storage.length)
-            let base: [NSAttributedString.Key: Any] = [.font: TerminalMetrics.font, .foregroundColor: Theme.text.dynamicNS]
             let spans = SyntaxHighlighter.spans(for: view.string, directory: parent.directory, environment: environment)
-            storage.beginEditing()
-            storage.setAttributes(base, range: full)
-            for span in spans where NSMaxRange(span.range) <= storage.length {
-                switch span.kind {
-                case .existingPath:
-                    storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: span.range)
-                case .error:
-                    let color = Theme.syntaxError.dynamicNS
-                    storage.addAttributes(
-                        [.foregroundColor: color, .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: color],
-                        range: span.range
-                    )
-                default:
-                    if let color = span.kind.themeColor {
-                        storage.addAttribute(.foregroundColor, value: color.dynamicNS, range: span.range)
-                    }
-                }
-            }
-            storage.endEditing()
-            view.typingAttributes = base
+            view.typingAttributes = HighlightStyle.apply(spans, to: storage)
         }
 
         private func request(_ mode: Mode) {
@@ -618,6 +731,37 @@ struct InputEditor: NSViewRepresentable {
     }
 }
 
+enum HighlightStyle {
+    static var base: [NSAttributedString.Key: Any] {
+        [.font: TerminalMetrics.font, .foregroundColor: Theme.text.dynamicNS]
+    }
+
+    @discardableResult
+    static func apply(_ spans: [HighlightSpan], to storage: NSTextStorage) -> [NSAttributedString.Key: Any] {
+        let base = base
+        storage.beginEditing()
+        storage.setAttributes(base, range: NSRange(location: 0, length: storage.length))
+        for span in spans where NSMaxRange(span.range) <= storage.length {
+            switch span.kind {
+            case .existingPath:
+                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: span.range)
+            case .error:
+                let color = Theme.syntaxError.dynamicNS
+                storage.addAttributes(
+                    [.foregroundColor: color, .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: color],
+                    range: span.range
+                )
+            default:
+                if let color = span.kind.themeColor {
+                    storage.addAttribute(.foregroundColor, value: color.dynamicNS, range: span.range)
+                }
+            }
+        }
+        storage.endEditing()
+        return base
+    }
+}
+
 private extension HighlightKind {
     var themeColor: ThemeColor? {
         switch self {
@@ -645,6 +789,7 @@ final class EditorTextView: NSTextView {
     var onDragTarget: (Bool) -> Void = { _ in }
     var onClick: () -> Void = {}
     var onSelectAllBlocks: () -> Void = {}
+    var extraMenuItems: (NSPoint) -> [NSMenuItem] = { _ in [] }
     var ghost = "" {
         didSet { if ghost != oldValue { needsDisplay = true } }
     }
@@ -657,6 +802,15 @@ final class EditorTextView: NSTextView {
             .foregroundColor: Theme.inputGhost.dynamicNS,
         ]
         (ghost as NSString).draw(at: caretOrigin(layout, container), withAttributes: attributes)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let items = extraMenuItems(convert(event.locationInWindow, from: nil))
+        guard !items.isEmpty else { return menu }
+        menu.insertItem(.separator(), at: 0)
+        for item in items.reversed() { menu.insertItem(item, at: 0) }
+        return menu
     }
 
     override func selectAll(_ sender: Any?) {
@@ -739,5 +893,23 @@ final class EditorTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+}
+
+final class ActionMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    @objc private func run() {
+        handler()
     }
 }

@@ -9,11 +9,22 @@ nonisolated enum CommandCompleter {
     static func complete(
         line: String,
         cursor: String.Index,
-        directory: String,
+        directory baseDirectory: String,
         history: [String],
         environment env: CompletionEnvironment
     ) -> CompletionResult? {
-        let prefix = String(line[..<cursor])
+        let typedPrefix = String(line[..<cursor])
+        let shortcuts = env.shortcuts(in: baseDirectory)
+        if let partial = Shortcuts.partial(atEndOf: typedPrefix) {
+            let items = shortcutItems(partial, shortcuts: shortcuts, env: env)
+            if !items.isEmpty {
+                let start = String.Index(utf16Offset: typedPrefix.utf16.distance(from: typedPrefix.startIndex, to: partial.range.lowerBound), in: line)
+                return CompletionResult(range: start..<cursor, items: Array(items.prefix(maxItems)))
+            }
+        }
+        let matches = Shortcuts.scan(typedPrefix, in: shortcuts)
+        let directory = matches.first(where: \.changesDirectory)?.target ?? baseDirectory
+        let prefix = Shortcuts.masked(typedPrefix, matches: matches)
         var tokens = ShellTokenizer.tokenize(prefix)
         if tokens.contains(where: { $0.kind == .comment }) { return nil }
 
@@ -473,6 +484,35 @@ nonisolated enum CommandCompleter {
         }
         items += fromHistory
         return items
+    }
+
+    static func shortcutItems(_ partial: ShortcutPartial, shortcuts: [Shortcut], env: CompletionEnvironment) -> [CompletionItem] {
+        if let subpath = partial.subpath {
+            guard let shortcut = Shortcuts.find(partial.key, kind: partial.kind, in: shortcuts) else { return [] }
+            let token = subpath.isEmpty ? nil : ShellTokenizer.tokenize(subpath).last
+            return pathItems(word: token, directory: shortcut.value, env: env, directoriesOnly: true).map {
+                CompletionItem(insert: shortcut.token + "/" + $0.insert, display: $0.display, kind: $0.kind, detail: $0.detail, terminator: $0.terminator)
+            }
+        }
+        let typed = partial.key.lowercased()
+        let home = env.homeDirectory
+        return shortcuts
+            .filter { $0.kind == partial.kind && $0.key.lowercased().hasPrefix(typed) }
+            .sorted { $0.key.lowercased() < $1.key.lowercased() }
+            .map { shortcut in
+                let value: String
+                if shortcut.kind == .command {
+                    value = shortValue(shortcut.value) ?? ""
+                } else if shortcut.value == home {
+                    value = "~"
+                } else if shortcut.value.hasPrefix(home + "/") {
+                    value = "~" + shortcut.value.dropFirst(home.count)
+                } else {
+                    value = shortcut.value
+                }
+                let detail = shortcut.name.isEmpty ? value : shortcut.name + "  " + value
+                return CompletionItem(insert: shortcut.token, kind: .shortcut, detail: detail)
+            }
     }
 
     static func pathItems(word: ShellToken?, directory: String, env: CompletionEnvironment, directoriesOnly: Bool) -> [CompletionItem] {

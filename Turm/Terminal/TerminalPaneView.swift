@@ -74,7 +74,7 @@ struct TerminalPaneView: View {
             }
             .animation(.easeOut(duration: 0.18), value: showsBar)
             .animation(.easeOut(duration: 0.2), value: isWatchingAction)
-            .onChange(of: session.current?.output) { session.search.contentChanged() }
+            .onChange(of: session.current?.revision) { session.search.contentChanged() }
             .onChange(of: session.blocks.count) { session.search.contentChanged() }
             .onChange(of: session.current?.isRunning) { session.search.contentChanged() }
             .onChange(of: proxy.size, initial: true) { _, size in

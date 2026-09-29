@@ -463,7 +463,7 @@ private struct AllActionsMenu: View {
     private func createManifest() {
         let root = session.project.roots.first ?? session.directory
         let url = URL(fileURLWithPath: root).appendingPathComponent(ProjectManifest.fileName)
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        guard ProjectManifest.entryName(in: root) == nil else { return }
         do {
             try ProjectManifest.template.write(to: url, atomically: true, encoding: .utf8)
             Self.openInTextEditor(url)

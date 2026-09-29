@@ -40,6 +40,7 @@ nonisolated struct CompletionItem: Equatable, Identifiable, Sendable {
         case release
         case chart
         case repo
+        case shortcut
 
         var label: String {
             switch self {
@@ -81,6 +82,7 @@ nonisolated struct CompletionItem: Equatable, Identifiable, Sendable {
             case .release: return "release"
             case .chart: return "chart"
             case .repo: return "repository"
+            case .shortcut: return "shortcut"
             }
         }
 
@@ -117,6 +119,7 @@ nonisolated struct CompletionItem: Equatable, Identifiable, Sendable {
             case .release: return "shippingbox.fill"
             case .chart: return "shippingbox"
             case .repo: return "books.vertical"
+            case .shortcut: return "at"
             }
         }
     }
@@ -286,6 +289,7 @@ nonisolated protocol CompletionEnvironment: Sendable {
     func cliListing(_ invocation: CLIInvocation) -> [String]
     func awsIndexPath() -> String?
     func commandSpec(forCommand command: String) -> CommandSpec
+    func shortcuts(in directory: String) -> [Shortcut]
 }
 
 nonisolated extension CompletionEnvironment {
@@ -298,6 +302,8 @@ nonisolated extension CompletionEnvironment {
     func cliListing(_ invocation: CLIInvocation) -> [String] { [] }
 
     func awsIndexPath() -> String? { AWSCompletionIndex.locate(self) }
+
+    func shortcuts(in directory: String) -> [Shortcut] { [] }
 
     func commandSpec(forCommand command: String) -> CommandSpec {
         CommandSpec(subcommands: [], flags: flags(forCommand: command))

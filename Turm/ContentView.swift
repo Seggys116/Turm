@@ -3,22 +3,27 @@ import SwiftUI
 struct ContentView: View {
     let updater: Updater
     @State private var workspace = Workspace()
+    @State private var isSpotlightOpen = false
+    @State private var spotlight = SpotlightPresenter()
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
     @AppStorage(SidebarPlacement.key) private var placement = SidebarPlacement.left
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(isSidebarVisible: $isSidebarVisible, placement: placement, onOpenSettings: { workspace.openSettings() })
+            TopBar(
+                isSidebarVisible: $isSidebarVisible, placement: placement, onOpenSettings: { workspace.openSettings() },
+                spotlight: spotlight, isSpotlightOpen: isSpotlightOpen, onSpotlight: { isSpotlightOpen = true }
+            )
                 .zIndex(1)
             if isSidebarVisible, placement == .top {
                 ShellSidebar(workspace: workspace, placement: .top)
-                    .transition(.move(edge: .top))
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
             HStack(spacing: 0) {
                 if isSidebarVisible, placement == .left {
                     ShellSidebar(workspace: workspace, placement: .left)
-                        .transition(.move(edge: .leading))
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
                 ZStack {
                     ForEach(workspace.tabs) { tab in
@@ -39,12 +44,36 @@ struct ContentView: View {
             }
             .clipped()
         }
+        .animation(.easeInOut(duration: 0.18), value: placement)
+        .animation(.easeInOut(duration: 0.18), value: isSidebarVisible)
         .ignoresSafeArea(.container, edges: .top)
         .background(Theme.terminalBackground.color)
         .background(WindowCloseGuard(workspace: workspace))
+        .overlay {
+            if isSpotlightOpen {
+                Color.black.opacity(0.15)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isSpotlightOpen)
+        .onChange(of: isSpotlightOpen) { _, open in
+            if open {
+                let view = SpotlightView(workspace: workspace) { launched in
+                    spotlight.restoresFocus = !launched
+                    isSpotlightOpen = false
+                }
+                spotlight.present(view) { isSpotlightOpen = false }
+                if !spotlight.isPresented { isSpotlightOpen = false }
+            } else {
+                spotlight.dismiss()
+            }
+        }
             .navigationTitle(workspace.focusedTitle)
             .frame(minWidth: 320, minHeight: 200)
             .focusedSceneValue(\.workspace, workspace)
+            .focusedSceneValue(\.spotlightPresented, $isSpotlightOpen)
             .onAppear {
                 workspace.onEmpty = { dismiss() }
             }

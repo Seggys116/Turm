@@ -236,7 +236,7 @@ struct KittyLayoutTests {
             Issue.record("expected text after the image")
             return
         }
-        #expect(String(tail.characters).contains("z"))
+        #expect(tail.string.contains("z"))
     }
 
     @Test func overlappingImagesShareOneStackOrderedByZ() {

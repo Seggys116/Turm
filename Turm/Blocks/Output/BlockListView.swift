@@ -55,7 +55,7 @@ struct BlockListView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: session.blocks.count) { scrollToBottom(reader) }
-            .onChange(of: session.current?.output) { scrollToBottom(reader) }
+            .onChange(of: session.current?.revision) { scrollToBottom(reader) }
             .onChange(of: session.current?.segments.count) { scrollToBottom(reader) }
             .onChange(of: session.search.scrollRequest) { _, request in
                 guard let request else { return }
@@ -139,12 +139,16 @@ struct BlockListView: View {
 struct BlockView: View {
     let block: Block
     let session: TerminalSession
+    @State private var shortcutEditorOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
+                .popover(isPresented: $shortcutEditorOpen, arrowEdge: .bottom) {
+                    ShortcutEditor(commandShortcut) { shortcutEditorOpen = false }
+                }
             PieceText(
-                text: commandText,
+                chunk: TextChunk(commandText),
                 highlights: session.search.commandHighlights(for: block),
                 piece: PieceRef(id: PieceID(blockID: block.id, target: .command), host: session.selection)
             )
@@ -154,7 +158,7 @@ struct BlockView: View {
                     ForEach(Array(block.segments.enumerated()), id: \.offset) { index, segment in
                         switch segment {
                         case .text(let text):
-                            PieceText(
+                            OutputTextView(
                                 text: text,
                                 highlights: session.search.highlights(for: block, segment: index),
                                 piece: pieceRef(index)
@@ -189,7 +193,27 @@ struct BlockView: View {
                 .disabled(block.output.isEmpty)
             Button("Run Again") { session.submit(block.command) }
                 .disabled(session.phase != .ready)
+            Divider()
+            Button(existingShortcut == nil ? "Save as Command Shortcut..." : "Edit Command Shortcut...") {
+                shortcutEditorOpen = true
+            }
+            .disabled(trimmedCommand.isEmpty)
         }
+    }
+
+    private var trimmedCommand: String { block.command.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var existingShortcut: Shortcut? {
+        ShortcutStore.shared.items.first { $0.kind == .command && $0.value.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedCommand }
+    }
+
+    private var commandShortcut: Shortcut {
+        existingShortcut ?? Shortcut(
+            kind: .command,
+            key: ShortcutSuggestions.commandKey(for: trimmedCommand, in: ShortcutStore.shared.items),
+            name: "",
+            value: block.command
+        )
     }
 
     private var commandText: AttributedString {
@@ -205,7 +229,7 @@ struct BlockView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(Block.abbreviate(block.directory))
+            Text(ShortcutStore.shared.label(for: block.directory))
             if let git = block.git {
                 Text("git:(\(git.branch))")
                 Text("\(git.files) \u{2022} +\(git.added) -\(git.removed)")
@@ -281,9 +305,9 @@ struct KittyImageBand: View {
             if let text {
                 Group {
                     if let piece {
-                        PieceText(text: text, highlights: highlights, piece: piece)
+                        PieceText(chunk: TextChunk(text), highlights: highlights, piece: piece)
                     } else {
-                        BlockTextView(text: text, highlights: highlights)
+                        BlockTextView(chunk: TextChunk(text), highlights: highlights)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)

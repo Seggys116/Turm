@@ -14,6 +14,7 @@ final class Block: Identifiable {
     private(set) var exitCode: Int32?
     private(set) var duration: Duration?
     private(set) var isRunning = true
+    private(set) var revision = 0
     private var rawLog: [UInt8] = []
     private static let rawLogLimit = 2_000_000
 
@@ -47,6 +48,7 @@ final class Block: Identifiable {
     func refreshOutput() {
         segments = emulator.renderSegments()
         output = segments.plainText
+        revision += 1
     }
 
     func finish(exitCode: Int32?, duration: Duration?) {
@@ -54,6 +56,7 @@ final class Block: Identifiable {
         self.duration = duration
         isRunning = false
         refreshOutput()
+        emulator.releaseRenderCache()
         rawLog = []
     }
 
