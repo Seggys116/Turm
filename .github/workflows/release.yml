@@ -155,6 +155,22 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$PLIST")" = "https://seggys116.github.io/Turm/appcast.xml"
           test -n "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST")"
 
+      - name: Sign the Sparkle helpers
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+        run: |
+          APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
+          FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+          sign() { codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$@"; }
+          for xpc in "$FRAMEWORK"/Versions/B/XPCServices/*.xpc; do
+            [ -e "$xpc" ] && sign "$xpc"
+          done
+          sign "$FRAMEWORK/Versions/B/Autoupdate"
+          sign "$FRAMEWORK/Versions/B/Updater.app"
+          sign "$FRAMEWORK"
+          sign --preserve-metadata=entitlements "$APP"
+
       - name: Verify the signature
         run: |
           APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
