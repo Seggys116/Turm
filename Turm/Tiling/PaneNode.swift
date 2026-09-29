@@ -1,6 +1,6 @@
 import Foundation
 
-struct PaneID: Hashable, Sendable {
+nonisolated struct PaneID: Hashable, Sendable {
     let raw = UUID()
 }
 

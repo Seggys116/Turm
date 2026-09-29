@@ -1,20 +1,26 @@
 {
   "fill" : {
-    "automatic-gradient" : "srgb:0.18115,0.55242,1.00000,1.00000"
+    "automatic-gradient" : "srgb:1.00000,1.00000,1.00000,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "Image.png",
-          "name" : "Image",
-          "position" : {
-            "scale" : 0.8,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "normal"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : false,
+          "image-name" : "Image 2.png",
+          "name" : "light"
         }
       ],
       "shadow" : {

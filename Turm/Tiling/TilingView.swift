@@ -60,7 +60,7 @@ private struct SplitContainer<First: View, Second: View>: View {
 
     private var divider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.14))
+            .fill(Theme.divider.color)
             .frame(
                 width: axis == .horizontal ? dividerThickness : nil,
                 height: axis == .vertical ? dividerThickness : nil

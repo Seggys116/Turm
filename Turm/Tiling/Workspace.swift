@@ -6,14 +6,17 @@ final class Workspace {
     private(set) var layout: PaneNode
     private(set) var focusedPane: PaneID
     private var sessions: [PaneID: TerminalSession] = [:]
+    private let closeCoordinator: CloseCoordinator
 
     var onEmpty: () -> Void = {}
 
-    init() {
+    init(closeCoordinator: CloseCoordinator = .shared) {
+        self.closeCoordinator = closeCoordinator
         let first = PaneID()
         layout = .leaf(first)
         focusedPane = first
         sessions[first] = makeSession(for: first)
+        closeCoordinator.register(self)
     }
 
     deinit {
@@ -24,6 +27,33 @@ final class Workspace {
         sessions[pane]
     }
 
+    var focusedTitle: String {
+        sessions[focusedPane]?.title ?? "Turm"
+    }
+
+    var focusedSession: TerminalSession? {
+        sessions[focusedPane]
+    }
+
+    var openShellCount: Int {
+        sessions.values.filter(\.isOpen).count
+    }
+
+    var shellsRequiringConfirmationCount: Int {
+        sessions.values.filter { $0.isOpen && $0.hasSubmittedCommand }.count
+    }
+
+    func shouldCloseWindow() -> Bool {
+        let count = shellsRequiringConfirmationCount
+        return count == 0 || closeCoordinator.confirm(.window(shellCount: count))
+    }
+
+    func terminateAll() {
+        let closing = Array(sessions.values)
+        sessions.removeAll()
+        closing.forEach { $0.terminate() }
+    }
+
     func split(_ axis: SplitAxis) {
         let newPane = PaneID()
         sessions[newPane] = makeSession(for: newPane)
@@ -32,7 +62,14 @@ final class Workspace {
     }
 
     func close(_ pane: PaneID) {
-        guard layout.contains(pane) else { return }
+        guard let session = sessions[pane] else { return }
+        if session.hasSubmittedCommand, session.hasRunningJobs,
+           !closeCoordinator.confirm(.shell) { return }
+        removePane(pane)
+    }
+
+    private func removePane(_ pane: PaneID) {
+        guard sessions[pane] != nil else { return }
         let order = layout.leaves
         sessions.removeValue(forKey: pane)?.terminate()
 
@@ -76,7 +113,7 @@ final class Workspace {
     private func makeSession(for pane: PaneID) -> TerminalSession {
         let session = TerminalSession()
         session.onFocus = { [weak self] in self?.focus(pane) }
-        session.onExit = { [weak self] in self?.close(pane) }
+        session.onExit = { [weak self] in self?.removePane(pane) }
         return session
     }
 }
