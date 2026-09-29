@@ -274,22 +274,22 @@ struct TerminalSessionTests {
     }
 
     @Test func versionQueryIsAnsweredWithTheIdentity() async throws {
-        let text = try await output(of: #"printf '\e[>0q'; read -rs -t 3 -d '\\' reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[>0q'; read -rs -t 3 -d '\\' reply; printf '%s\n' "${reply//$'\e'/ESC}""#)
         #expect(text.contains("ESCP>|\(TerminalIdentity.xtVersion)ESC"))
     }
 
     @Test func colorSchemeQueryIsAnswered() async throws {
-        let text = try await output(of: #"printf '\e[?996n'; read -rs -t 3 -d n reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[?996n'; read -rs -t 3 -d n reply; printf '%s\n' "${reply//$'\e'/ESC}""#)
         #expect(text.contains("ESC[?997;1"))
     }
 
     @Test func capabilityQueryIsAnswered() async throws {
-        let text = try await output(of: #"printf '\eP+q436F\e\\'; read -rs -t 3 -d '\\' reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\eP+q436F\e\\'; read -rs -t 3 -d '\\' reply; printf '%s\n' "${reply//$'\e'/ESC}""#)
         #expect(text.contains("ESCP1+r436F=323536"))
     }
 
     @Test func colorSchemeModeReportsAreRewritten() async throws {
-        let text = try await output(of: #"printf '\e[?2031$p'; read -rs -t 3 -d y reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[?2031$p'; read -rs -t 3 -d y reply; printf '%s\n' "${reply//$'\e'/ESC}""#)
         #expect(text.contains("ESC[?2031;2$"))
     }
 

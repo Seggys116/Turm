@@ -44,7 +44,7 @@ nonisolated enum ProcessRunner {
         let buffer = OutputBuffer()
         let finished = DispatchSemaphore(value: 0)
         let reader = pipe.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async {
+        Thread.detachNewThread {
             buffer.set(reader.readDataToEndOfFile())
             finished.signal()
         }

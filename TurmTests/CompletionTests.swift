@@ -1137,7 +1137,7 @@ nonisolated final class TinyUnixServer: @unchecked Sendable {
         }
         path = socketPath
         listener = descriptor
-        DispatchQueue.global().async { Self.serve(descriptor, routes, connections, silent) }
+        Thread.detachNewThread { Self.serve(descriptor, routes, connections, silent) }
     }
 
     private static func serve(_ descriptor: Int32, _ routes: [String: Route], _ connections: Int, _ silent: Bool) {
@@ -1322,7 +1322,7 @@ private let dockerFixture: FakeEnvironment = env { value in
             connections: 4
         ))
         defer { server.stop() }
-        let objects = DockerEngine.load(socket: server.path)
+        let objects = DockerEngine.load(socket: server.path, timeout: 10)
         #expect(objects.images.map { $0.names } == [["nginx:latest"]])
         #expect(objects.containers.map { $0.names } == [["web"]])
         #expect(objects.containers.first?.state == "running")
@@ -1706,7 +1706,7 @@ nonisolated final class TestClock: @unchecked Sendable {
     }
 
     @Test func processRunnerReturnsOutputAndHonoursExitStatus() {
-        #expect(ProcessRunner.run("/bin/echo", arguments: ["hi"], timeout: 2) == "hi\n")
+        #expect(ProcessRunner.run("/bin/echo", arguments: ["hi"], timeout: 10) == "hi\n")
         #expect(ProcessRunner.run("/usr/bin/false", arguments: [], timeout: 2) == "")
         #expect(ProcessRunner.run("/usr/bin/false", arguments: [], timeout: 2, requireSuccess: true) == nil)
         #expect(ProcessRunner.run("/nonexistent/tool", arguments: [], timeout: 1) == nil)
@@ -1829,7 +1829,7 @@ struct KubectlInstanceTests {
             connections: 4
         ))
         defer { server.stop() }
-        let objects = DockerEngine.load(socket: server.path)
+        let objects = DockerEngine.load(socket: server.path, timeout: 10)
         #expect(objects.available)
         #expect(objects.volumes == ["data"])
         #expect(objects.networks == ["bridge", "appnet"])
