@@ -198,6 +198,7 @@ struct BlockEmulatorTests {
 }
 
 @MainActor
+@Suite(.serialized)
 struct TerminalSessionTests {
     private func wait(timeout: Duration = .seconds(20), until condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
@@ -268,27 +269,27 @@ struct TerminalSessionTests {
     }
 
     @Test func programsSeeTheGhosttyIdentity() async throws {
-        let text = try await output(of: #"print -r -- "$TERM_PROGRAM $TERM_PROGRAM_VERSION $COLORTERM $TERM""#)
+        let text = try await output(of: #"printf '%s\n' "$TERM_PROGRAM $TERM_PROGRAM_VERSION $COLORTERM $TERM""#)
         #expect(text == "ghostty \(TerminalIdentity.version) truecolor xterm-256color")
     }
 
     @Test func versionQueryIsAnsweredWithTheIdentity() async throws {
-        let text = try await output(of: #"printf '\e[>0q'; read -rs -t 3 -d '\\' reply; print -r -- ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[>0q'; read -rs -t 3 -d '\\' reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
         #expect(text.contains("ESCP>|\(TerminalIdentity.xtVersion)ESC"))
     }
 
     @Test func colorSchemeQueryIsAnswered() async throws {
-        let text = try await output(of: #"printf '\e[?996n'; read -rs -t 3 -d n reply; print -r -- ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[?996n'; read -rs -t 3 -d n reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
         #expect(text.contains("ESC[?997;1"))
     }
 
     @Test func capabilityQueryIsAnswered() async throws {
-        let text = try await output(of: #"printf '\eP+q436F\e\\'; read -rs -t 3 -d '\\' reply; print -r -- ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\eP+q436F\e\\'; read -rs -t 3 -d '\\' reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
         #expect(text.contains("ESCP1+r436F=323536"))
     }
 
     @Test func colorSchemeModeReportsAreRewritten() async throws {
-        let text = try await output(of: #"printf '\e[?2031$p'; read -rs -t 3 -d y reply; print -r -- ${reply//$'\e'/ESC}"#)
+        let text = try await output(of: #"printf '\e[?2031$p'; read -rs -t 3 -d y reply; printf '%s\n' ${reply//$'\e'/ESC}"#)
         #expect(text.contains("ESC[?2031;2$"))
     }
 
@@ -296,7 +297,7 @@ struct TerminalSessionTests {
         let session = TerminalSession()
         defer { session.terminate() }
         #expect(await wait { session.phase == .ready })
-        session.submit("printf '\\033[?1049hinside'; sleep 1; printf '\\033[?1049l'; echo after")
+        session.submit("printf '\\033[?1049hinside'; sleep 2; printf '\\033[?1049l'; echo after")
         #expect(await wait { session.altScreen != nil })
         #expect(await wait { session.altScreen == nil && session.blocks.first?.isRunning == false })
         #expect(session.blocks.first?.plainOutput.contains("after") == true)

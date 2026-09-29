@@ -1212,7 +1212,7 @@ private let dockerFixture: FakeEnvironment = env { value in
     value.texts["/work/other.yml"] = "services:\n  svc:\n    image: a\n"
 }
 
-struct DockerSourceTests {
+@Suite(.serialized) struct DockerSourceTests {
     @Test func imagesForRunCreatePullRmi() throws {
         let run = try #require(complete("docker run ng", env: dockerFixture))
         #expect(inserts(run) == ["nginx:1.25", "nginx:latest"])
@@ -1585,7 +1585,7 @@ nonisolated final class TestClock: @unchecked Sendable {
     }
 }
 
-struct CLIListingTests {
+@Suite(.serialized) struct CLIListingTests {
     @Test func kubectlArgumentVector() {
         let full = CLIListing.kubectl(kind: "pods", context: "prod", namespace: "payments", kubeconfig: "/k/config")
         #expect(full.tool == "kubectl")
@@ -1790,7 +1790,7 @@ struct KubectlInstanceTests {
     }
 }
 
-struct DockerVolumeNetworkTests {
+@Suite(.serialized) struct DockerVolumeNetworkTests {
     @Test func volumeAndNetworkSubcommands() {
         #expect(inserts(complete("docker volume rm da", env: dockerFixture)) == ["data"])
         #expect(inserts(complete("docker volume inspect ", env: dockerFixture)) == ["data", "cache-vol"])
