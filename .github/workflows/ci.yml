@@ -39,12 +39,17 @@ jobs:
             -scheme Turm \
             -destination 'platform=macOS' \
             -derivedDataPath DerivedData \
+            -resultBundlePath "$RUNNER_TEMP/test.xcresult" \
             -only-testing:TurmTests \
             -skipPackagePluginValidation \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Show test failures
+        if: failure()
+        run: xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/test.xcresult" | python3 -c 'import json,sys; [print(f["testName"], "|", f["failureText"]) for f in json.load(sys.stdin).get("testFailures", [])]'
 
       - name: Save the Swift package checkouts
         if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
