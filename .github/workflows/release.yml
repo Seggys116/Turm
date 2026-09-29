@@ -66,7 +66,11 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath DerivedData \
             -only-testing:TurmTests \
-            -skipPackagePluginValidation
+            -skipPackagePluginValidation \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
 
       - name: Import the signing certificate
         id: keychain
