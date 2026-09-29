@@ -23,6 +23,10 @@ open Turm.xcodeproj
 
 Then press Build. Xcode will ask you to trust the SwiftTerm package plugin.
 
+## Documentation
+
+Project actions and the `Turm.json` project file are documented in [docs](docs/README.md).
+
 ## License
 
 Turm is released under the [MIT License](LICENSE).
