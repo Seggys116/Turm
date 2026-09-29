@@ -168,11 +168,7 @@ jobs:
         run: |
           APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
           ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Turm.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/Turm.zip" \
-            --key "$RUNNER_TEMP/notary.p8" \
-            --key-id "$KEY_ID" \
-            --issuer "$ISSUER_ID" \
-            --wait
+          Scripts/notarize.sh "$RUNNER_TEMP/Turm.zip"
           xcrun stapler staple "$APP"
           xcrun stapler validate "$APP"
 
@@ -196,11 +192,7 @@ jobs:
           ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           DMG: ${{ steps.version.outputs.dmg }}
         run: |
-          xcrun notarytool submit "$RUNNER_TEMP/$DMG" \
-            --key "$RUNNER_TEMP/notary.p8" \
-            --key-id "$KEY_ID" \
-            --issuer "$ISSUER_ID" \
-            --wait
+          Scripts/notarize.sh "$RUNNER_TEMP/$DMG"
           xcrun stapler staple "$RUNNER_TEMP/$DMG"
           xcrun stapler validate "$RUNNER_TEMP/$DMG"
 
