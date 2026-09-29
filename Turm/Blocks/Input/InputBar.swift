@@ -19,6 +19,12 @@ struct InputBar: View {
         )
     }
 
+    private var hasTags: Bool {
+        guard session.phase == .ready, !completion.isOpen else { return false }
+        let shortcuts = ShortcutStore.shared.effective(in: session.directory)
+        return !Shortcuts.scan(input.draft, in: shortcuts).isEmpty || !Shortcuts.unknown(input.draft, in: shortcuts).isEmpty
+    }
+
     var body: some View {
         let _ = input.draft
         VStack(alignment: .leading, spacing: 8) {
@@ -27,6 +33,12 @@ struct InputBar: View {
             }
             if let suggestion {
                 SuggestionRow(suggestion: suggestion) { tracker.dismiss(suggestion) }
+            }
+            if completion.isOpen, !session.isRunning {
+                CompletionList(model: completion)
+                    .padding(.horizontal, -16)
+                    .padding(.top, -2)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             chips
             if session.isRunning {
@@ -48,8 +60,11 @@ struct InputBar: View {
                         session.selection.claimFocus()
                     }
                 )
+                .padding(.top, hasTags ? 18 : 0)
             }
         }
+        .animation(.easeOut(duration: 0.14), value: completion.isOpen)
+        .animation(.easeOut(duration: 0.2), value: hasTags)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)

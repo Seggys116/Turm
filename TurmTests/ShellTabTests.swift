@@ -192,6 +192,55 @@ struct ShellTabTests {
         #expect(workspace.focusedSession?.directory == "/usr")
     }
 
+    @Test func openingAFolderReusesAnUntouchedShell() {
+        let workspace = makeWorkspace()
+        defer { workspace.terminateAll() }
+        let original = workspace.focusedSession
+
+        workspace.open(directory: "/usr")
+
+        #expect(workspace.tabs.count == 1)
+        #expect(workspace.focusedSession !== original)
+        #expect(original?.isOpen == false)
+        #expect(workspace.focusedSession?.directory == "/usr")
+    }
+
+    @Test func openingAFolderAddsATabBesideOtherShells() {
+        let workspace = makeWorkspace()
+        defer { workspace.terminateAll() }
+        workspace.newShell()
+
+        workspace.open(directory: "/usr")
+
+        #expect(workspace.tabs.count == 3)
+        #expect(workspace.activeTabID == workspace.tabs[2].id)
+        #expect(workspace.focusedSession?.directory == "/usr")
+    }
+
+    @Test func openingAFolderKeepsASplitShell() {
+        let workspace = makeWorkspace()
+        defer { workspace.terminateAll() }
+        workspace.split(.horizontal)
+
+        workspace.open(directory: "/usr")
+
+        #expect(workspace.tabs.count == 2)
+        #expect(workspace.tabs[0].layout.leaves.count == 2)
+    }
+
+    @Test func contextMenuOpensFilesInTheirFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("notes.txt")
+        try Data().write(to: file)
+        let path = folder.standardizedFileURL.path
+
+        #expect(ContextMenuService.directories(for: [URL(fileURLWithPath: folder.path)]) == [path])
+        #expect(ContextMenuService.directories(for: [file]) == [path])
+        #expect(ContextMenuService.directories(for: [folder, file]) == [path])
+    }
+
     @Test func missingDirectoryFallsBackToHome() {
         let session = TerminalSession(directory: "/definitely/not/a/directory")
         defer { session.terminate() }

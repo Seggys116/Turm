@@ -170,6 +170,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case statusBar = "Project Bar"
     case shortcuts = "Shortcuts"
+    case accessibility = "Accessibility"
     case about = "About"
 
     var id: Self { self }
@@ -182,6 +183,7 @@ struct SettingsView: View {
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
     @AppStorage(SidebarPlacement.key) private var sidebarPlacement = SidebarPlacement.left
     @State private var tab = SettingsTab.appearance
+    @State private var isContextMenuEnabled = ContextMenuService.isEnabled
     @Environment(\.openURL) private var openURL
 
     private static let repositoryURL = URL(string: "https://github.com/Seggys116/Turm")!
@@ -207,6 +209,7 @@ struct SettingsView: View {
                     case .appearance: appearanceTab
                     case .statusBar: StatusBarSettings()
                     case .shortcuts: ShortcutSettings()
+                    case .accessibility: accessibilityTab
                     case .about: aboutTab
                     }
                 }
@@ -219,6 +222,10 @@ struct SettingsView: View {
         .background(Theme.terminalBackground.color)
         .onChange(of: appearance) { _, new in new.apply(animated: true) }
         .onChange(of: appIcon) { _, new in new.apply() }
+        .onChange(of: isContextMenuEnabled) { _, new in ContextMenuService.isEnabled = new }
+        .onChange(of: tab) { _, new in
+            if new == .accessibility { isContextMenuEnabled = ContextMenuService.isEnabled }
+        }
     }
 
     @ViewBuilder
@@ -241,6 +248,17 @@ struct SettingsView: View {
             row("Sidebar position", detail: "Keep shells on the left, or as a tab bar under the title bar.") {
                 SlidingPicker(selection: $sidebarPlacement, options: SidebarPlacement.allCases, title: \.title)
                     .frame(width: 240)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var accessibilityTab: some View {
+        section("Context menu") {
+            row(ContextMenuService.title, detail: "Right-click a file or folder in Finder to open a shell there.") {
+                Toggle(ContextMenuService.title, isOn: $isContextMenuEnabled)
+                    .labelsHidden()
+                    .toggleStyle(SquareToggleStyle())
             }
         }
     }

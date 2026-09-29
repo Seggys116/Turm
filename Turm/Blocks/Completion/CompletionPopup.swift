@@ -60,83 +60,39 @@ nonisolated enum AutoTrigger {
     }
 }
 
-struct CompletionPopup: View {
+struct CompletionList: View {
     let model: CompletionModel
-    let width: CGFloat
 
     static let rowHeight: CGFloat = 24
     static let maxRows = 9
-    static let margin: CGFloat = 12
-    static let footerHeight: CGFloat = 22
-
-    static func height(forRows rows: Int) -> CGFloat {
-        CGFloat(min(rows, maxRows)) * rowHeight + 8 + footerHeight
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                            CompletionRow(item: item, highlight: highlight(index))
-                                .id(index)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.onAccept(index) }
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        CompletionRow(item: item, highlight: highlight(index))
+                            .id(index)
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.onAccept(index) }
                     }
-                    .padding(.vertical, 4)
                 }
-                .onChange(of: model.selected) { _, value in
-                    proxy.scrollTo(value)
-                }
+                .padding(.vertical, 4)
             }
-            CompletionFooter(count: model.items.count, position: model.engaged ? model.selected + 1 : nil)
-                .frame(height: Self.footerHeight)
+            .scrollIndicators(model.items.count > Self.maxRows ? .automatic : .never)
+            .onChange(of: model.selected) { _, value in
+                proxy.scrollTo(value)
+            }
         }
-        .frame(width: width, height: Self.height(forRows: model.items.count))
-        .background(Theme.inputBackground.color, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.chipStroke.color, lineWidth: 1))
-        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
-        .padding(Self.margin)
+        .frame(height: CGFloat(min(model.items.count, Self.maxRows)) * Self.rowHeight + 8)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.divider.color).frame(height: 1)
+        }
     }
 
     private func highlight(_ index: Int) -> Double {
         if model.engaged { return index == model.selected ? 0.28 : 0 }
         return model.hinted && index == 0 ? 0.12 : 0
-    }
-}
-
-private struct CompletionFooter: View {
-    let count: Int
-    let position: Int?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            hint("tab", "step")
-            hint("\u{2192}", "accept")
-            hint("\u{2191}\u{2193}", "browse")
-            hint("esc", "close")
-            Spacer(minLength: 4)
-            Text(position.map { "\($0) of \(count)" } ?? "\(count)")
-                .monospacedDigit()
-        }
-        .font(.system(size: 10))
-        .foregroundStyle(Theme.secondaryText.color)
-        .padding(.horizontal, 10)
-        .frame(maxHeight: .infinity)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Theme.chipStroke.color).frame(height: 1)
-        }
-    }
-
-    private func hint(_ key: String, _ action: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(Theme.text.color)
-            Text(action)
-        }
     }
 }
 
@@ -168,8 +124,10 @@ private struct CompletionRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.secondaryText.color)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .frame(height: 24)
-        .background(Color.accentColor.opacity(highlight))
+        .background(Color.accentColor.opacity(highlight), in: RoundedRectangle(cornerRadius: 5))
+        .animation(.easeOut(duration: 0.1), value: highlight)
+        .padding(.horizontal, 8)
     }
 }

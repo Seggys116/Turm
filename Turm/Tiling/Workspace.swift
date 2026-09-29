@@ -94,6 +94,22 @@ final class Workspace {
         activeTabID = tab.id
     }
 
+    func open(directory: String) {
+        let index = activeIndex
+        guard tabs.count == 1, !tabs[index].isSettings, case .leaf(let pane) = tabs[index].layout,
+              let current = sessions[pane], !current.hasSubmittedCommand, !current.isRunningAction
+        else {
+            newShell(directory: directory)
+            return
+        }
+        let replacement = PaneID()
+        sessions[replacement] = makeSession(for: replacement, directory: directory)
+        tabs[index].layout = .leaf(replacement)
+        tabs[index].focusedPane = replacement
+        sessions.removeValue(forKey: pane)
+        current.terminate()
+    }
+
     func openSettings() {
         if let existing = tabs.first(where: \.isSettings) {
             activeTabID = existing.id

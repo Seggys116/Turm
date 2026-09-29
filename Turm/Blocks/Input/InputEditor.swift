@@ -74,7 +74,6 @@ struct InputEditor: NSViewRepresentable {
         }
         view.isEditable = isEnabled
         if !isEnabled { completion.close() }
-        if completion.isOpen { coordinator.syncPopup() }
         if isFocused, !wasFocused || !coordinator.didFocus {
             coordinator.attached()
         }
@@ -83,7 +82,6 @@ struct InputEditor: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.parent.completion.close()
-        coordinator.removePopup()
         coordinator.removeTags()
     }
 
@@ -127,7 +125,6 @@ struct InputEditor: NSViewRepresentable {
         private var ghostItem: (item: CompletionItem, range: NSRange)?
         private var autoTask: Task<Void, Never>?
         private var suppressAuto = false
-        private var popupHost: NSHostingView<CompletionPopup>?
         private let tags = ShortcutTagLayer()
         private let shellKind = ShellIntegration.userKind
         private var shortcutPopover: NSPopover?
@@ -138,7 +135,7 @@ struct InputEditor: NSViewRepresentable {
             self.parent = parent
             super.init()
             parent.completion.onAccept = { [weak self] in self?.accept($0) }
-            parent.completion.onPresentation = { [weak self] in self?.syncPopup() }
+            parent.completion.onPresentation = { [weak self] in self?.refreshTags() }
             NotificationCenter.default.addObserver(
                 self, selector: #selector(environmentChanged), name: .completionEnvironmentChanged, object: nil
             )
@@ -178,8 +175,21 @@ struct InputEditor: NSViewRepresentable {
                 quote: { ShellIntegration.quoted($0, for: kind) },
                 visible: parent.isEnabled && !parent.completion.isOpen,
                 select: { [weak self] in self?.selectShortcut($0) },
-                expand: { [weak self] in self?.expandShortcut($0, with: $1) }
+                expand: { [weak self] in self?.expandShortcut($0, with: $1) },
+                save: { [weak self] in self?.offerShortcut($0, near: $1) }
             )
+        }
+
+        private func offerShortcut(_ key: String, near range: NSRange) {
+            let directory = parent.directory
+            let match = (try? FileManager.default.contentsOfDirectory(atPath: directory))?.first { name in
+                var isDirectory: ObjCBool = false
+                let path = (directory as NSString).appendingPathComponent(name)
+                return name.caseInsensitiveCompare(key) == .orderedSame
+                    && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            }
+            let value = match.map { (directory as NSString).appendingPathComponent($0) } ?? directory
+            presentShortcutEditor(Shortcut(kind: .directory, key: key, name: "", value: value), near: range)
         }
 
         private func expandShortcut(_ range: NSRange, with text: String) {
@@ -310,47 +320,6 @@ struct InputEditor: NSViewRepresentable {
                 guard !Task.isCancelled else { return }
                 self?.request(.auto)
             }
-        }
-
-        func syncPopup() {
-            let model = parent.completion
-            guard model.isOpen, let view = textView, let window = view.window, let content = window.contentView,
-                  let scroll = view.enclosingScrollView
-            else {
-                removePopup()
-                refreshTags()
-                return
-            }
-            let host: NSHostingView<CompletionPopup>
-            if let existing = popupHost {
-                host = existing
-            } else {
-                host = NSHostingView(rootView: CompletionPopup(model: model, width: 460))
-                popupHost = host
-            }
-            let margin = CompletionPopup.margin
-            let width = min(460, max(240, content.bounds.width - 16 - margin * 2))
-            host.rootView = CompletionPopup(model: model, width: width)
-            let height = CompletionPopup.height(forRows: model.items.count)
-            let anchor = content.convert(scroll.bounds, from: scroll)
-            var x = anchor.minX - margin
-            x = max(4, min(x, content.bounds.width - width - margin * 2 - 4))
-            var y: CGFloat
-            if content.isFlipped {
-                y = anchor.minY - height - margin * 2 - 4
-                if y < 0 { y = anchor.maxY + 4 }
-            } else {
-                y = anchor.maxY + 4
-                if y + height + margin * 2 > content.bounds.height { y = anchor.minY - height - margin * 2 - 4 }
-            }
-            host.frame = NSRect(x: x, y: y, width: width + margin * 2, height: height + margin * 2)
-            if host.superview !== content { content.addSubview(host, positioned: .above, relativeTo: nil) }
-            refreshTags()
-        }
-
-        func removePopup() {
-            popupHost?.removeFromSuperview()
-            popupHost = nil
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {

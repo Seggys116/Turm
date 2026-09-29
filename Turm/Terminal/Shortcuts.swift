@@ -170,6 +170,29 @@ nonisolated enum Shortcuts {
     static func scan(_ line: String, in shortcuts: [Shortcut]) -> [ShortcutMatch] {
         guard !shortcuts.isEmpty else { return [] }
         var matches: [ShortcutMatch] = []
+        walkTokens(line) { range in
+            guard let found = resolve(line[range], in: shortcuts) else { return false }
+            let isLead = line[..<range.lowerBound].allSatisfy(\.isWhitespace)
+            matches.append(ShortcutMatch(shortcut: found.shortcut, subpath: found.subpath, range: range, isLead: isLead))
+            return true
+        }
+        return matches
+    }
+
+    static func unknown(_ line: String, in shortcuts: [Shortcut]) -> [(key: String, range: Range<String.Index>)] {
+        var unknown: [(key: String, range: Range<String.Index>)] = []
+        walkTokens(line) { range in
+            let token = line[range]
+            if resolve(token, in: shortcuts) != nil { return true }
+            let key = token.dropFirst()
+            guard token.first == ShortcutKind.directory.sigil, !key.isEmpty, key.allSatisfy(isKeyCharacter) else { return false }
+            unknown.append((String(key), range))
+            return true
+        }
+        return unknown
+    }
+
+    private static func walkTokens(_ line: String, _ visit: (Range<String.Index>) -> Bool) {
         var quote: Character?
         var escaped = false
         var index = line.startIndex
@@ -185,16 +208,13 @@ nonisolated enum Shortcuts {
                 quote = character
             } else if ShortcutKind(sigil: character) != nil, startsWord(line, at: index) {
                 let end = tokenEnd(line, from: index)
-                if let found = resolve(line[index..<end], in: shortcuts) {
-                    let isLead = line[..<index].allSatisfy(\.isWhitespace)
-                    matches.append(ShortcutMatch(shortcut: found.shortcut, subpath: found.subpath, range: index..<end, isLead: isLead))
+                if visit(index..<end) {
                     index = end
                     continue
                 }
             }
             index = line.index(after: index)
         }
-        return matches
     }
 
     static func partial(atEndOf prefix: String) -> ShortcutPartial? {

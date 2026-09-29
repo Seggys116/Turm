@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppearancePreference.stored.apply()
         AppIconPreference.stored.apply()
+        ContextMenuService.shared.install()
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
             MainActor.assumeIsolated { AppIconPreference.stored.apply() }
         }

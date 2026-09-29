@@ -358,3 +358,33 @@ struct ProjectShortcutTests {
         #expect(found.contains { $0.range == NSRange(location: 4, length: 4) && $0.kind == .alias })
     }
 }
+
+struct UnknownShortcutTests {
+    private func unknown(_ line: String, _ shortcuts: [Shortcut] = all) -> [String] {
+        Shortcuts.unknown(line, in: shortcuts).map { String(line[$0.range]) }
+    }
+
+    @Test func flagsBareDirectoryTokensWithNoShortcut() {
+        #expect(unknown("ls @turm") == ["@turm"])
+        #expect(Shortcuts.unknown("ls @turm", in: []).map(\.key) == ["turm"])
+        #expect(unknown("@a && cd @b") == ["@a", "@b"])
+    }
+
+    @Test func skipsKnownShortcutsAndOtherSigils() {
+        #expect(unknown("cd @api && @API/src") == [])
+        #expect(unknown("!nope #nope") == [])
+    }
+
+    @Test func ignoresNonShortcutUses() {
+        #expect(unknown("npm i @types/node") == [])
+        #expect(unknown("git log @{u}") == [])
+        #expect(unknown("ssh me@host") == [])
+        #expect(unknown("echo '@quoted' \"@too\"") == [])
+        #expect(unknown("ls @") == [])
+    }
+
+    @Test func scanStillFindsShortcutsAfterUnmatchedTokens() {
+        #expect(scanned("@x=@api") == ["@api"])
+        #expect(scanned("ls @nope @api") == ["@api"])
+    }
+}

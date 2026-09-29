@@ -37,11 +37,13 @@ final class WindowCloseView: NSView, NSWindowDelegate {
         observedWindow = window
         originalDelegate = window.delegate
         window.delegate = self
+        ContextMenuService.shared.register(workspace, in: window)
     }
 
     func detach() {
-        if let observedWindow, observedWindow.delegate === self {
-            observedWindow.delegate = originalDelegate
+        if let observedWindow {
+            ContextMenuService.shared.unregister(observedWindow)
+            if observedWindow.delegate === self { observedWindow.delegate = originalDelegate }
         }
         observedWindow = nil
         originalDelegate = nil
@@ -52,7 +54,13 @@ final class WindowCloseView: NSView, NSWindowDelegate {
         return workspace.shouldCloseWindow()
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        if let window = notification.object as? NSWindow { ContextMenuService.shared.windowBecameKey(window) }
+        originalDelegate?.windowDidBecomeKey?(notification)
+    }
+
     func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow { ContextMenuService.shared.unregister(window) }
         workspace.terminateAll()
         originalDelegate?.windowWillClose?(notification)
     }
