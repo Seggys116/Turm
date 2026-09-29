@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the Swift package checkouts
+        id: swiftpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Turm.xcodeproj \
+            -scheme Turm \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -only-testing:TurmTests \
+            -skipPackagePluginValidation
+
+      - name: Save the Swift package checkouts
+        if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+  release-build:
+    name: Release build
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the Swift package checkouts
+        id: swiftpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Turm.xcodeproj \
+            -scheme Turm \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/Turm.xcarchive" \
+            -derivedDataPath DerivedData \
+            -skipPackagePluginValidation \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Save the Swift package checkouts
+        if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+      - name: Verify the archived bundle is signed
+        run: codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"

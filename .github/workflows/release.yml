@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, notarise and publish
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: release
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag to be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main."
+            exit 1
+          fi
+
+      - name: Resolve the version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::$GITHUB_REF_NAME is not a version tag such as v1.2.3 or v1.2.3-beta.1."
+            exit 1
+          fi
+          {
+            echo "version=$VERSION"
+            echo "dmg=Turm-$VERSION-arm64.dmg"
+            case "$VERSION" in
+              *-*) echo "prerelease=true" ;;
+              *)   echo "prerelease=false" ;;
+            esac
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Swift package checkouts
+        id: swiftpm
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Turm.xcodeproj \
+            -scheme Turm \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -only-testing:TurmTests \
+            -skipPackagePluginValidation
+
+      - name: Import the signing certificate
+        id: keychain
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/turm-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          echo "ORIGINAL_KEYCHAINS=$(security list-keychains -d user | tr -d '" ' | tr '\n' ' ')" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" \
+            -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          /bin/rm -f "$CERT_PATH"
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" |
+            awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity in the imported certificate."
+            security find-identity -v -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
+          echo "Signing as $IDENTITY"
+
+          {
+            echo "keychain=$KEYCHAIN"
+            echo "identity=$IDENTITY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install the notary key
+        env:
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+        run: printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+
+      - name: Archive
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Turm.xcodeproj \
+            -scheme Turm \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/Turm.xcarchive" \
+            -derivedDataPath DerivedData \
+            -skipPackagePluginValidation \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --keychain $KEYCHAIN"
+
+      - name: Save the Swift package checkouts
+        if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+      - name: Verify the signature
+        run: |
+          APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dvv "$APP" 2>&1 | grep -q 'flags=.*runtime'
+
+      - name: Notarise and staple the app
+        env:
+          KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Turm.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/Turm.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+      - name: Build and sign the disk image
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
+          IDENTITY: ${{ steps.keychain.outputs.identity }}
+          DMG: ${{ steps.version.outputs.dmg }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          ditto "$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app" "$STAGE/Turm.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Turm $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$RUNNER_TEMP/$DMG"
+          codesign --force --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$RUNNER_TEMP/$DMG"
+
+      - name: Notarise and staple the disk image
+        env:
+          KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          xcrun notarytool submit "$RUNNER_TEMP/$DMG" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$RUNNER_TEMP/$DMG"
+          xcrun stapler validate "$RUNNER_TEMP/$DMG"
+
+      - name: Verify Gatekeeper acceptance
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$RUNNER_TEMP/$DMG"
+          spctl --assess --type exec --verbose=2 "$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
+
+      - name: Collect the release assets
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          mkdir -p artifacts
+          mv "$RUNNER_TEMP/$DMG" "artifacts/$DMG"
+          (cd artifacts && shasum -a 256 "$DMG" > "$DMG.sha256")
+          cat "artifacts/$DMG.sha256"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "Turm $VERSION" \
+            --generate-notes \
+            --verify-tag \
+            --prerelease="$PRERELEASE"
+
+      - name: Remove the signing material
+        if: always()
+        run: |
+          if [ -n "${ORIGINAL_KEYCHAINS:-}" ]; then
+            # shellcheck disable=SC2086
+            security list-keychains -d user -s $ORIGINAL_KEYCHAINS
+          fi
+          security delete-keychain "$RUNNER_TEMP/turm-signing.keychain-db" 2>/dev/null || true
+          /bin/rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary.p8"
