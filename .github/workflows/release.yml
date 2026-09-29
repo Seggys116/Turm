@@ -145,6 +145,12 @@ jobs:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
+      - name: The archive carries the update feed and key
+        run: |
+          PLIST="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$PLIST")" = "https://seggys116.github.io/Turm/appcast.xml"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST")"
+
       - name: Verify the signature
         run: |
           APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
@@ -210,6 +216,144 @@ jobs:
           (cd artifacts && shasum -a 256 "$DMG" > "$DMG.sha256")
           cat "artifacts/$DMG.sha256"
 
+      - name: Download Sparkle tools
+        env:
+          SPARKLE_VERSION: 2.9.5
+          SPARKLE_CHECKSUM: 015336b601493e05c237964954bff6191370003d94edefe663724c88840d73cc
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sL -o "sparkle-${SPARKLE_VERSION}.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+
+          DOWNLOADED_CHECKSUM=$(shasum -a 256 "sparkle-${SPARKLE_VERSION}.tar.xz" | awk '{print $1}')
+          if [ "$DOWNLOADED_CHECKSUM" != "$SPARKLE_CHECKSUM" ]; then
+            echo "::error::Sparkle checksum mismatch. Expected: $SPARKLE_CHECKSUM, got: $DOWNLOADED_CHECKSUM"
+            exit 1
+          fi
+
+          tar -xf "sparkle-${SPARKLE_VERSION}.tar.xz"
+
+      # The clone is an `if` condition so a missing gh-pages does not abort the step under bash -e.
+      - name: Fetch existing appcast from gh-pages
+        id: appcast
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/appcast-work"
+          cd "$RUNNER_TEMP/appcast-work"
+
+          if git clone \
+            --quiet \
+            --single-branch \
+            --branch gh-pages \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          then
+            echo "cloned=true" >> "$GITHUB_OUTPUT"
+            if [ -f gh-pages/appcast.xml ]; then
+              cp gh-pages/appcast.xml existing-appcast.xml
+            else
+              : > existing-appcast.xml
+            fi
+          else
+            echo "cloned=false" >> "$GITHUB_OUTPUT"
+            echo "gh-pages does not exist yet; it will be created on push"
+            : > existing-appcast.xml
+          fi
+
+      - name: Generate appcast for new release
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -o pipefail
+
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY secret is empty. Sparkle cannot sign this update, and an unsigned one will not install."
+            exit 1
+          fi
+
+          APPCAST_GEN_DIR="$RUNNER_TEMP/appcast-new"
+          mkdir -p "$APPCAST_GEN_DIR"
+          cp "artifacts/$DMG" "$APPCAST_GEN_DIR/"
+          cd "$APPCAST_GEN_DIR"
+
+          FLAGS=()
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--channel beta)
+          fi
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/bin/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" \
+            "${FLAGS[@]}" \
+            .
+
+          if [ ! -f appcast.xml ]; then
+            echo "::error::generate_appcast wrote no appcast.xml; it names the feed after the basename of SUFeedURL. It produced: $(ls ./*.xml 2>/dev/null || echo 'nothing')."
+            exit 1
+          fi
+
+      - name: Every enclosure is signed
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          python3 Scripts/add-enclosure-signatures.py \
+            "$RUNNER_TEMP/bin" \
+            "$RUNNER_TEMP/appcast-new/appcast.xml" \
+            "$RUNNER_TEMP/appcast-new"
+
+      - name: Merge appcast and sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          python3 Scripts/merge-appcast.py \
+            "$RUNNER_TEMP/appcast-work/existing-appcast.xml" \
+            "$RUNNER_TEMP/appcast-new/appcast.xml" \
+            "$RUNNER_TEMP/appcast-work/appcast-merged.xml"
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            "$RUNNER_TEMP/bin/sign_update" -f - "$RUNNER_TEMP/appcast-work/appcast-merged.xml"
+
+          cp "$RUNNER_TEMP/appcast-work/appcast-merged.xml" "$RUNNER_TEMP/appcast.xml"
+
+      - name: The published feed offers this release
+        env:
+          DMG: ${{ steps.version.outputs.dmg }}
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          import xml.etree.ElementTree as ET
+
+          sparkle = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+          dmg = os.environ["DMG"]
+          tag = os.environ["GITHUB_REF_NAME"]
+
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "appcast.xml")).getroot()
+          for item in root.findall("channel/item"):
+              enclosure = item.find("enclosure")
+              if enclosure is None:
+                  continue
+              url = enclosure.get("url", "")
+              if url.rsplit("/", 1)[-1] != dmg:
+                  continue
+              problems = []
+              if f"/download/{tag}/" not in url:
+                  problems.append(f"the enclosure URL is not under this tag: {url}")
+              if not enclosure.get(f"{{{sparkle}}}edSignature"):
+                  problems.append("the enclosure carries no sparkle:edSignature")
+              if problems:
+                  sys.exit("appcast.xml: " + "; ".join(problems))
+              print(f"appcast.xml offers {dmg}, signed, at {url}")
+              break
+          else:
+              sys.exit(f"appcast.xml has no item whose enclosure is {dmg}")
+          PY
+
+      - name: Add appcast to release assets
+        run: cp "$RUNNER_TEMP/appcast.xml" artifacts/appcast.xml
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -221,6 +365,34 @@ jobs:
             --generate-notes \
             --verify-tag \
             --prerelease="$PRERELEASE"
+
+      - name: Push appcast to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLONED: ${{ steps.appcast.outputs.cloned }}
+        run: |
+          cd "$RUNNER_TEMP/appcast-work"
+
+          git config --global user.email "noreply@github.com"
+          git config --global user.name "GitHub Actions"
+
+          if [ "$CLONED" != "true" ]; then
+            mkdir -p gh-pages
+            git init -b gh-pages gh-pages
+            git -C gh-pages remote add origin \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+
+          cp appcast-merged.xml gh-pages/appcast.xml
+          cd gh-pages
+
+          git add appcast.xml
+          if git rev-parse --verify -q HEAD >/dev/null && git diff --cached --quiet; then
+            echo "appcast.xml is unchanged"
+          else
+            git commit -m "Update appcast for $GITHUB_REF_NAME"
+          fi
+          git push --set-upstream origin gh-pages
 
       - name: Remove the signing material
         if: always()

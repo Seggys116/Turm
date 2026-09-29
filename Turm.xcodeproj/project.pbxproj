@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C0105A02306BFD46008BD457 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = C0105A01306BFD46008BD457 /* SwiftTerm */; };
+		C0105A12306BFD46008BD457 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0105A11306BFD46008BD457 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				C0105A02306BFD46008BD457 /* SwiftTerm in Frameworks */,
+				C0105A12306BFD46008BD457 /* Sparkle in Frameworks */,
 			);
 		};
 		C010564B306BFD46008BD457 /* Frameworks */ = {
@@ -110,6 +112,7 @@
 			name = Turm;
 			packageProductDependencies = (
 				C0105A01306BFD46008BD457 /* SwiftTerm */,
+				C0105A11306BFD46008BD457 /* Sparkle */,
 			);
 			productName = Turm;
 			productReference = C0105641306BFD45008BD457 /* Turm.app */;
@@ -191,6 +194,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				C0105A00306BFD46008BD457 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				C0105A10306BFD46008BD457 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C0105642306BFD45008BD457 /* Products */;
@@ -389,6 +393,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Turm;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -424,6 +429,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Turm;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -570,6 +576,14 @@
 				minimumVersion = 1.20.0;
 			};
 		};
+		C0105A10306BFD46008BD457 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.5;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -577,6 +591,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C0105A00306BFD46008BD457 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		C0105A11306BFD46008BD457 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0105A10306BFD46008BD457 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
