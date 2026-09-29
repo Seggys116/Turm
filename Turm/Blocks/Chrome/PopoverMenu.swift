@@ -287,6 +287,8 @@ struct MenuRow: View {
     var detail: String?
     var isCurrent = false
     var isDestructive = false
+    var compact = false
+    var trailingSymbol: String?
     let action: () -> Void
     @State private var hovering = false
 
@@ -306,7 +308,7 @@ struct MenuRow: View {
                 .foregroundStyle(isDestructive ? Theme.removed.color : Theme.secondaryText.color)
                 .frame(width: 14)
                 Text(title)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: compact ? 11 : 12, design: .monospaced))
                     .foregroundStyle(isDestructive ? Theme.removed.color : Theme.text.color)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -322,9 +324,14 @@ struct MenuRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.secondaryText.color)
                 }
+                if let trailingSymbol {
+                    Image(systemName: trailingSymbol)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.secondaryText.color)
+                }
             }
             .padding(.horizontal, 8)
-            .frame(height: 24)
+            .frame(height: compact ? 22 : 24)
             .background(
                 RoundedRectangle(cornerRadius: menuRadius - menuPadding)
                     .fill(hovering ? Color.accentColor.opacity(0.28) : Color.clear)

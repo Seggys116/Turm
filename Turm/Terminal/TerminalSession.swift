@@ -18,6 +18,9 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var git: GitStatus?
     private(set) var project = ProjectSnapshot.empty
     private(set) var variantChoices: [String: Int] = [:]
+    private(set) var toolChoice: String?
+    let runner = ActionRunner()
+    private(set) var isAuxiliary: Bool
     private(set) var phase = Phase.starting
     private(set) var altScreen: AltScreenHost?
     private(set) var failure: String?
@@ -34,6 +37,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     @ObservationIgnored var onFocus: () -> Void = {}
     @ObservationIgnored var onExit: () -> Void = {}
+    @ObservationIgnored var onPopOut: (TerminalSession) -> Void = { _ in }
 
     @ObservationIgnored private var process: LocalProcess!
     @ObservationIgnored private var parser = ShellStreamParser()
@@ -57,7 +61,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var appObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var submission = ShellIntegration.Submission.bracketedPaste
 
-    init(directory: String = NSHomeDirectory()) {
+    init(directory: String = NSHomeDirectory(), auxiliary: Bool = false) {
+        self.isAuxiliary = auxiliary
         super.init()
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue {
@@ -73,7 +78,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         process = LocalProcess(delegate: self)
         startShell()
-        refreshProject(for: self.directory)
+        if !auxiliary { refreshProject(for: self.directory) }
         let center = NotificationCenter.default
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             appObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -121,7 +126,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     /// Query at close time: background and suspended jobs can outlive a command block.
     var hasRunningJobs: Bool {
         guard isOpen else { return false }
-        if isRunning || phase == .starting { return true }
+        if isRunning || phase == .starting || runner.isRunning { return true }
         guard process.shellPid > 0 else { return false }
 
         var capacity = 16
@@ -150,6 +155,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     func terminate() {
+        runner.dismiss()
         guard !didExit else { return }
         didExit = true
         process.terminate()
@@ -168,7 +174,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         blocks.append(block)
         hasSubmittedCommand = true
         phase = .submitted
-        CommandHistory.shared.record(command)
+        if !isAuxiliary { CommandHistory.shared.record(command) }
         write(payload)
     }
 
@@ -327,7 +333,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             directory = path
             phase = .ready
             refreshGit(for: path)
-            refreshProject(for: path)
+            if !isAuxiliary { refreshProject(for: path) }
         }
     }
 
@@ -452,20 +458,45 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             if found != project {
                 project = found
                 variantChoices = VariantStore.load(roots: found.roots, variants: found.variants)
+                toolChoice = ToolChoiceStore.load(roots: found.roots)
             }
         }
     }
 
     func run(_ action: ProjectAction) {
-        submit(project.commandLine(for: action, selection: variantChoices, from: directory))
+        if ResolvedBar.resolve(project, preferences: .current).subShell {
+            runner.start(action, command: project.commandLine(for: action, selection: variantChoices, from: action.root))
+        } else {
+            submit(project.commandLine(for: action, selection: variantChoices, from: directory))
+        }
     }
 
     func cycle(_ variant: ProjectVariant) {
-        guard variant.options.count > 1 else { return }
         let current = variantChoices[variant.id].flatMap { variant.options.indices.contains($0) ? $0 : nil } ?? variant.defaultIndex
-        let next = (current + 1) % variant.options.count
-        variantChoices[variant.id] = next
-        VariantStore.save(index: next, variant: variant.id, roots: project.roots)
+        choose(variant, index: (current + 1) % max(variant.options.count, 1))
+    }
+
+    /// Turns the hidden action shell into an ordinary shell owned by the workspace.
+    func popOutAction() {
+        guard let sub = runner.release() else { return }
+        onPopOut(sub)
+    }
+
+    /// Makes a former action shell behave like any other: history, project detection.
+    func adopt() {
+        isAuxiliary = false
+        refreshProject(for: directory)
+    }
+
+    func chooseTool(_ id: String) {
+        toolChoice = id
+        ToolChoiceStore.save(id, roots: project.roots)
+    }
+
+    func choose(_ variant: ProjectVariant, index: Int) {
+        guard variant.options.indices.contains(index) else { return }
+        variantChoices[variant.id] = index
+        VariantStore.save(index: index, variant: variant.id, roots: project.roots)
     }
 
     private func refreshGit(for path: String) {

@@ -52,10 +52,41 @@ nonisolated struct ProjectManifest: Decodable {
         var defaultOption: Int?
     }
 
+    struct Bar: Decodable {
+        struct Ecosystem: Decodable {
+            var title: String?
+            var icon: String?
+            var hidden: Bool?
+        }
+
+        var pinned: [String]?
+        var icons: [String: String]?
+        var ecosystems: [String: Ecosystem]?
+        var titles: String?
+        var alignment: String?
+        var order: [String]?
+        var subShell: Bool?
+
+        var overrides: BarOverrides {
+            var result = BarOverrides()
+            result.pinned = pinned
+            result.icons = icons ?? [:]
+            result.ecosystems = (ecosystems ?? [:]).mapValues {
+                BarOverrides.Ecosystem(title: $0.title, symbol: $0.icon, hidden: $0.hidden ?? false)
+            }
+            result.titles = titles.flatMap { TitleMode(rawValue: $0.lowercased()) }
+            result.alignment = alignment.flatMap { BarAlignment(rawValue: $0.lowercased()) }
+            result.order = order?.compactMap { BarSection(rawValue: $0.lowercased()) }
+            result.subShell = subShell
+            return result
+        }
+    }
+
     var inherit: Bool?
     var hide: [String]?
     var variants: [Variant]?
     var actions: [Action]?
+    var bar: Bar?
 
     static func decode(_ data: Data) throws -> ProjectManifest {
         try JSONDecoder().decode(ProjectManifest.self, from: data)
@@ -145,7 +176,9 @@ nonisolated enum ProjectDetection {
 
         if manifest?.inherit != false {
             for detection in detections {
-                snapshot.kinds.append(detection.kind)
+                snapshot.ecosystems.append(ProjectEcosystem(
+                    id: detection.id, title: detection.kind, symbol: ProjectEcosystem.symbol(for: detection.id)
+                ))
                 snapshot.actions.append(contentsOf: detection.actions)
                 snapshot.variants.append(contentsOf: detection.variants)
             }
@@ -165,7 +198,7 @@ nonisolated enum ProjectDetection {
             let options = variant.options.filter { !$0.label.isEmpty }.map { ProjectVariant.Option(label: $0.label, value: $0.value) }
             guard !variant.id.isEmpty, !options.isEmpty else { continue }
             let resolved = ProjectVariant(
-                id: variant.id, title: variant.title ?? variant.id, options: options,
+                id: variant.id, title: variant.title ?? variant.id, ecosystem: ProjectEcosystem.projectID, options: options,
                 defaultIndex: min(max(variant.defaultOption ?? 0, 0), options.count - 1)
             )
             snapshot.variants.removeAll { $0.id == resolved.id }
@@ -177,18 +210,25 @@ nonisolated enum ProjectDetection {
             let command = spec.command.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty, !command.isEmpty else { continue }
             let category = spec.category.flatMap { ActionCategory(rawValue: $0.lowercased()) } ?? .other
-            let action = ProjectAction(
+            var action = ProjectAction(
                 id: spec.id ?? "turm.\(index)", title: title, command: command, category: category,
-                symbol: spec.icon, featured: spec.featured ?? true, root: root, environment: spec.env ?? [:]
+                ecosystem: ProjectEcosystem.projectID, symbol: spec.icon, featured: spec.featured ?? true, root: root, environment: spec.env ?? [:]
             )
             if let existing = snapshot.actions.firstIndex(where: { $0.id == action.id }) {
+                action.ecosystem = snapshot.actions[existing].ecosystem
+                action.featured = spec.featured ?? snapshot.actions[existing].featured
                 snapshot.actions[existing] = action
             } else {
                 custom.append(action)
             }
         }
         snapshot.actions.insert(contentsOf: custom, at: 0)
-        if !custom.isEmpty { snapshot.kinds.insert(ProjectManifest.fileName, at: 0) }
+        if !custom.isEmpty || snapshot.variants.contains(where: { $0.ecosystem == ProjectEcosystem.projectID }) {
+            snapshot.ecosystems.insert(ProjectEcosystem(
+                id: ProjectEcosystem.projectID, title: "Project", symbol: ProjectEcosystem.symbol(for: ProjectEcosystem.projectID)
+            ), at: 0)
+        }
+        snapshot.bar = manifest.bar?.overrides ?? BarOverrides()
     }
 
     private static func describe(_ error: Error) -> String {

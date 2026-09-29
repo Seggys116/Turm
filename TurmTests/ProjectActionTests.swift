@@ -35,7 +35,7 @@ struct ProjectActionTests {
     @Test func cargoBinaryOffersProfileToggle() throws {
         let path = try project(["Cargo.toml": "[package]\nname = \"x\"\n", "src/main.rs": "fn main() {}"])
         let found = snapshot(path)
-        #expect(found.kinds == ["Cargo"])
+        #expect(found.ecosystems.map(\.title) == ["Cargo"])
         #expect(try command("cargo.build", in: found) == "cargo build")
         #expect(try command("cargo.run", in: found, selection: ["cargo-profile": 1]) == "cargo run --release")
         #expect(found.featured.map(\.title) == ["Build", "Run", "Test", "Clean"])
@@ -101,7 +101,7 @@ struct ProjectActionTests {
          "dependencies":{"next":"14.0.0"}}
         """
         let found = snapshot(try project(["package.json": manifest, "pnpm-lock.yaml": ""]))
-        #expect(found.kinds == ["Next.js \u{00B7} pnpm"])
+        #expect(found.ecosystems.map(\.title) == ["Next.js \u{00B7} pnpm"])
         #expect(try command("node.s.dev", in: found) == "pnpm run dev")
         #expect(!found.actions.contains { $0.id == "node.s.test" })
         #expect(found.actions.first { $0.id == "node.s.lint" }?.category == .check)
@@ -177,7 +177,7 @@ struct ProjectActionTests {
         let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Turm.json": manifest]))
         #expect(!found.actions.contains { $0.id == "cargo.fmt" })
         #expect(found.actions.first?.title == "Deploy")
-        #expect(found.kinds.first == "Turm.json")
+        #expect(found.ecosystems.first?.id == "project")
         #expect(try command("cargo.clean", in: found) == "cargo clean && rm -rf dist")
         #expect(try command("turm.1", in: found, selection: ["env": 1]) == "env TOKEN='a b' ./deploy.sh production")
         #expect(try command("turm.1", in: found) == "env TOKEN='a b' ./deploy.sh dev")
@@ -204,7 +204,7 @@ struct ProjectActionTests {
 
     @Test func variantChoicesPersistPerProject() throws {
         let suite = UserDefaults(suiteName: "turm.tests.\(UUID().uuidString)")!
-        let variant = ProjectVariant(id: "p", title: "P", options: [.init(label: "A", value: ""), .init(label: "B", value: "b")])
+        let variant = ProjectVariant(id: "p", title: "P", ecosystem: "x", options: [.init(label: "A", value: ""), .init(label: "B", value: "b")])
         VariantStore.save(index: 1, variant: "p", roots: ["/x"], defaults: suite)
         #expect(VariantStore.load(roots: ["/x"], variants: [variant], defaults: suite) == ["p": 1])
         #expect(VariantStore.load(roots: ["/y"], variants: [variant], defaults: suite).isEmpty)
@@ -215,5 +215,146 @@ struct ProjectActionTests {
         #expect(ActionClassifier.category(forName: "build-release") == .build)
         #expect(ActionClassifier.category(forName: "lint") == .check)
         #expect(ActionClassifier.category(forName: "seed-db") == .other)
+    }
+
+    private func resolved(_ found: ProjectSnapshot, _ preferences: StatusBarPreferences = StatusBarPreferences()) -> ResolvedBar {
+        ResolvedBar.resolve(found, preferences: preferences)
+    }
+
+    @Test func eachDetectedEcosystemGetsItsOwnGroup() throws {
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Makefile": "all:\n\techo\n"]))
+        let bar = resolved(found)
+        #expect(bar.groups.map(\.id) == ["cargo", "make"])
+        #expect(bar.groups[0].variants.map(\.id) == ["cargo-profile"])
+        #expect(bar.groups[0].shownVariants.map(\.id) == ["cargo-profile"])
+    }
+
+    @Test func selectorNeedsSeveralToolsAndNoManifest() throws {
+        let both = resolved(snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Makefile": "all:\n\techo\n"])))
+        let shown = both.display(choice: "make")
+        #expect(shown.selector.map(\.id) == ["cargo", "make"])
+        #expect(shown.active?.id == "make")
+        #expect(shown.pinned.allSatisfy { $0.ecosystem == "make" })
+        #expect(both.display(choice: "gone").active?.id == "cargo")
+
+        let single = resolved(snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": ""])))
+        #expect(single.display(choice: nil).selector.isEmpty)
+        #expect(single.display(choice: nil).pinned.map(\.id) == ["cargo.build", "cargo.run", "cargo.test", "cargo.clean"])
+
+        let withManifest = resolved(snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Makefile": "all:\n\techo\n", "Turm.json": "{}"])))
+        let all = withManifest.display(choice: nil)
+        #expect(all.selector.isEmpty && all.active == nil)
+        #expect(Set(all.pinned.map(\.ecosystem)) == ["cargo", "make"])
+    }
+
+    @Test func customActionsStayVisibleNextToTheSelectedTool() throws {
+        let manifest = #"{"actions": [{"title": "Go", "command": "true"}]}"#
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Turm.json": manifest]))
+        let shown = resolved(found).display(choice: nil)
+        #expect(shown.selector.isEmpty)
+        #expect(shown.pinned.first?.title == "Go")
+    }
+
+    @Test func barItemsFollowThePreferenceOrder() throws {
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": ""]))
+        var preferences = StatusBarPreferences()
+        preferences.setItems(["cargo.test", "cargo.clippy", "cargo.build"], for: "cargo")
+        var group = try #require(resolved(found, preferences).groups.first)
+        #expect(group.pinned.map(\.id) == ["cargo.test", "cargo.clippy", "cargo.build"])
+        #expect(group.shownVariants.isEmpty)
+
+        preferences.setItems(["cargo-profile", "cargo.run", "missing"], for: "cargo")
+        group = try #require(resolved(found, preferences).groups.first)
+        #expect(group.pinned.map(\.id) == ["cargo.run"])
+        #expect(group.shownVariants.map(\.id) == ["cargo-profile"])
+    }
+
+    @Test func disabledEcosystemLeavesTheBar() throws {
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "go.mod": "module x"]))
+        var preferences = StatusBarPreferences()
+        preferences.ecosystems["cargo"] = EcosystemPreference()
+        preferences.ecosystems["cargo"]?.enabled = false
+        #expect(resolved(found, preferences).groups.map(\.id) == ["go"])
+    }
+
+    @Test func projectOverridesWin() throws {
+        let manifest = """
+        {"bar": {"pinned": ["cargo.test", "cargo.build"], "icons": {"cargo.build": "star"}, "titles": "never",
+                 "subShell": false, "order": ["options", "actions"],
+                 "ecosystems": {"cargo": {"title": "Rust", "icon": "gear"}}}}
+        """
+        let found = snapshot(try project(["Cargo.toml": "[package]\n", "src/main.rs": "", "Turm.json": manifest]))
+        var preferences = StatusBarPreferences()
+        preferences.runInSubShell = true
+        let bar = resolved(found, preferences)
+        #expect(bar.display(choice: nil).pinned.map(\.id) == ["cargo.test", "cargo.build"])
+        #expect(!bar.subShell && bar.titles == .never)
+        #expect(bar.order == [.options, .actions])
+        #expect(bar.groups.first?.title == "Rust" && bar.groups.first?.symbol == "gear")
+        let action = try #require(found.actions.first { $0.id == "cargo.build" })
+        #expect(bar.symbol(for: action) == "star")
+    }
+
+    @Test func preferencesRoundTripAndTolerateJunk() {
+        var preferences = StatusBarPreferences()
+        #expect(preferences.runInSubShell)
+        preferences.order = [.options]
+        preferences.setItems(["a"], for: "node")
+        let decoded = StatusBarPreferences(rawValue: preferences.rawValue)
+        #expect(decoded?.order == [.options, .actions])
+        #expect(decoded?.items(for: "node", defaults: []) == ["a"])
+        #expect(StatusBarPreferences(rawValue: "{\"order\": [\"ecosystems\", \"options\"]}")?.order == [.options, .actions])
+        #expect(StatusBarPreferences(rawValue: "{}")?.runInSubShell == true)
+        #expect(StatusBarPreferences(rawValue: "not json") == nil)
+    }
+
+    @Test func catalogListsEveryDetector() {
+        let ids = EcosystemCatalog.entries.map(\.id)
+        #expect(ids.count == 24)
+        #expect(EcosystemCatalog.entry("cargo")?.actions.contains { $0.id == "cargo.clippy" } == true)
+        #expect(EcosystemCatalog.entry("go")?.variants.map(\.id) == ["go-race"])
+        #expect(EcosystemCatalog.entry("go")?.defaultItems.last == "go-race")
+        #expect(EcosystemCatalog.entries.allSatisfy { !$0.defaultItems.isEmpty })
+    }
+
+    @Test func toolChoicePersistsPerProject() {
+        let suite = UserDefaults(suiteName: "turm.tests.\(UUID().uuidString)")!
+        ToolChoiceStore.save("make", roots: ["/x"], defaults: suite)
+        #expect(ToolChoiceStore.load(roots: ["/x"], defaults: suite) == "make")
+        #expect(ToolChoiceStore.load(roots: ["/y"], defaults: suite) == nil)
+    }
+
+    @Test func resultFlashFadesOnSuccessAndPulsesOnFailure() {
+        let start = Date(timeIntervalSinceReferenceDate: 1000)
+        var progress = ActionProgress(startedAt: start)
+        #expect(progress.successOpacity(at: start.addingTimeInterval(5)) == 0)
+        #expect(progress.pulse(at: start.addingTimeInterval(5)) == 0)
+
+        progress.finishedAt = start.addingTimeInterval(30)
+        progress.outcome = .succeeded
+        #expect(progress.successOpacity(at: start.addingTimeInterval(30.5)) == 1)
+        #expect(progress.successOpacity(at: start.addingTimeInterval(31)) < 1)
+        #expect(progress.isSettled(at: start.addingTimeInterval(33)))
+        #expect(progress.successOpacity(at: start.addingTimeInterval(33)) == 0)
+
+        progress.outcome = .failed
+        #expect(progress.pulse(at: start.addingTimeInterval(31)) > 0)
+        #expect(progress.pulse(at: start.addingTimeInterval(60)) == 0.35)
+        #expect(!progress.isSettled(at: start.addingTimeInterval(60)))
+    }
+
+    @MainActor
+    @Test func poppedOutActionShellBecomesItsOwnTab() {
+        let workspace = Workspace(closeCoordinator: CloseCoordinator { _ in true })
+        defer { workspace.terminateAll() }
+        let hidden = TerminalSession(directory: NSTemporaryDirectory(), auxiliary: true)
+        #expect(hidden.isAuxiliary)
+
+        workspace.adopt(hidden)
+
+        #expect(workspace.tabs.count == 2)
+        #expect(workspace.focusedSession === hidden)
+        #expect(!hidden.isAuxiliary)
+        #expect(workspace.activeTabID == workspace.tabs[1].id)
     }
 }

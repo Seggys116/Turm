@@ -39,6 +39,7 @@ nonisolated struct ProjectAction: Identifiable, Hashable, Sendable {
     var title: String
     var command: String
     var category: ActionCategory
+    var ecosystem: String
     var symbol: String?
     var featured = false
     var root: String
@@ -55,6 +56,7 @@ nonisolated struct ProjectVariant: Identifiable, Hashable, Sendable {
 
     let id: String
     var title: String
+    var ecosystem: String
     var options: [Option]
     var defaultIndex = 0
 
@@ -64,8 +66,30 @@ nonisolated struct ProjectVariant: Identifiable, Hashable, Sendable {
     }
 }
 
+nonisolated struct ProjectEcosystem: Identifiable, Hashable, Sendable {
+    static let projectID = "project"
+
+    let id: String
+    var title: String
+    var symbol: String
+
+    static let symbols: [String: String] = [
+        "cargo": "shippingbox", "swiftpm": "swift", "xcode": "hammer", "node": "curlybraces", "tauri": "macwindow",
+        "deno": "curlybraces.square", "python": "chevron.left.forwardslash.chevron.right", "go": "arrow.right.circle",
+        "cmake": "gearshape.2", "meson": "gearshape.2", "make": "gearshape", "gradle": "cube", "maven": "cube",
+        "dotnet": "number.square", "zig": "bolt", "mix": "flame", "dart": "scope", "ruby": "diamond",
+        "php": "server.rack", "nix": "snowflake", "just": "list.bullet.rectangle", "task": "list.bullet.rectangle",
+        "docker": "shippingbox.fill", "terraform": "cloud", projectID: "folder",
+    ]
+
+    static func symbol(for id: String) -> String {
+        symbols[id] ?? "terminal"
+    }
+}
+
 nonisolated struct ProjectSnapshot: Equatable, Sendable {
-    var kinds: [String] = []
+    var ecosystems: [ProjectEcosystem] = []
+    var bar = BarOverrides()
     var actions: [ProjectAction] = []
     var variants: [ProjectVariant] = []
     var notice: String?
@@ -77,6 +101,14 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
 
     var featured: [ProjectAction] {
         actions.filter(\.featured)
+    }
+
+    func actions(in ecosystem: String) -> [ProjectAction] {
+        actions.filter { $0.ecosystem == ecosystem }
+    }
+
+    func variants(in ecosystem: String) -> [ProjectVariant] {
+        variants.filter { $0.ecosystem == ecosystem }
     }
 
     var roots: [String] {
@@ -162,8 +194,20 @@ nonisolated enum VariantStore {
     }
 }
 
-nonisolated enum ProjectActionsPreference {
-    static let key = "turm.projectActions"
+/// Remembers which detected tool the bar shows, per project directory.
+nonisolated enum ToolChoiceStore {
+    static let key = "turm.projectTools"
+
+    static func load(roots: [String], defaults: UserDefaults = .standard) -> String? {
+        let stored = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        return roots.lazy.compactMap { stored[$0] }.first
+    }
+
+    static func save(_ tool: String, roots: [String], defaults: UserDefaults = .standard) {
+        var stored = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        for root in roots { stored[root] = tool }
+        defaults.set(stored, forKey: key)
+    }
 }
 
 nonisolated enum ShellQuoting {

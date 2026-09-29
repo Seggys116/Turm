@@ -210,6 +210,20 @@ final class Workspace {
         let session = directory.map { TerminalSession(directory: $0) } ?? TerminalSession()
         session.onFocus = { [weak self] in self?.focus(pane) }
         session.onExit = { [weak self] in self?.removePane(pane) }
+        session.onPopOut = { [weak self] sub in self?.adopt(sub) }
         return session
+    }
+
+    /// Opens an already running session, such as a popped-out action shell, as its own tab.
+    func adopt(_ session: TerminalSession) {
+        let pane = PaneID()
+        session.adopt()
+        session.onFocus = { [weak self] in self?.focus(pane) }
+        session.onExit = { [weak self] in self?.removePane(pane) }
+        session.onPopOut = { [weak self] sub in self?.adopt(sub) }
+        sessions[pane] = session
+        let tab = ShellTab(layout: .leaf(pane), focusedPane: pane)
+        tabs.append(tab)
+        activeTabID = tab.id
     }
 }

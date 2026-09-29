@@ -6,16 +6,28 @@ struct TerminalPaneView: View {
     let isFocused: Bool
     @State private var input = InputModel()
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ProjectActionsPreference.key) private var showsProjectBar = true
+    @AppStorage(StatusBarPreferences.key) private var barPreferences = StatusBarPreferences()
 
     private static let horizontalInset: CGFloat = 16
+
+    private var bar: ResolvedBar {
+        ResolvedBar.resolve(session.project, preferences: barPreferences)
+    }
+
+    private var showsBar: Bool {
+        barPreferences.enabled && (bar.isVisible || session.project.notice != nil)
+    }
+
+    private var isWatchingAction: Bool {
+        session.runner.isWatching && session.runner.session != nil
+    }
 
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
                 Group {
                     if let altScreen = session.altScreen {
-                        AltScreenView(host: altScreen, isFocused: isFocused)
+                        AltScreenView(host: altScreen, isFocused: isFocused && !isWatchingAction)
                             .id(ObjectIdentifier(altScreen))
                     } else {
                         VStack(spacing: 0) {
@@ -23,7 +35,7 @@ struct TerminalPaneView: View {
                             if let progress = session.progress {
                                 ProgressStrip(report: progress)
                             }
-                            InputBar(session: session, isFocused: isFocused, input: input)
+                            InputBar(session: session, isFocused: isFocused && !isWatchingAction, input: input)
                         }
                     }
                 }
@@ -46,12 +58,22 @@ struct TerminalPaneView: View {
                         SearchBar(search: session.search)
                     }
                 }
-                if showsProjectBar, !session.project.isEmpty {
-                    StatusBar(session: session)
+                .overlay(alignment: .bottom) {
+                    if isWatchingAction, let sub = session.runner.session {
+                        ActionOutputPanel(runner: session.runner, session: sub) { session.popOutAction() }
+                            .frame(height: max(proxy.size.height * 0.62, 140))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                if showsBar {
+                    StatusBar(session: session, bar: bar)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeOut(duration: 0.18), value: session.project.isEmpty)
+            .animation(.easeOut(duration: 0.18), value: showsBar)
+            .animation(.easeOut(duration: 0.2), value: isWatchingAction)
             .onChange(of: session.current?.output) { session.search.contentChanged() }
             .onChange(of: session.blocks.count) { session.search.contentChanged() }
             .onChange(of: session.current?.isRunning) { session.search.contentChanged() }

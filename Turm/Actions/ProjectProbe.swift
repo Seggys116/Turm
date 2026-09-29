@@ -1,18 +1,28 @@
 import Foundation
 
-/// Read-only view of one directory that detectors ask questions of.
 nonisolated struct ProjectProbe {
     let directory: String
     private let entries: Set<String>
+    private let virtualFiles: [String: String]?
 
     init(directory: String) {
         self.directory = directory
+        virtualFiles = nil
         entries = Set((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
+    }
+
+    init(files: [String: String]) {
+        directory = "/sample"
+        virtualFiles = files
+        entries = Set(files.keys.map { String($0.split(separator: "/").first ?? "") })
     }
 
     var isEmpty: Bool { entries.isEmpty }
 
     func has(_ path: String) -> Bool {
+        if let virtualFiles {
+            return virtualFiles[path] != nil || virtualFiles.keys.contains { $0.hasPrefix(path + "/") }
+        }
         if path.contains("/") {
             return FileManager.default.fileExists(atPath: (directory as NSString).appendingPathComponent(path))
         }
@@ -28,6 +38,7 @@ nonisolated struct ProjectProbe {
     }
 
     func text(_ path: String, limit: Int = 262_144) -> String? {
+        if let virtualFiles { return virtualFiles[path] }
         let full = (directory as NSString).appendingPathComponent(path)
         guard let handle = FileHandle(forReadingAtPath: full) else { return nil }
         defer { try? handle.close() }
@@ -46,6 +57,7 @@ nonisolated struct ProjectProbe {
 }
 
 nonisolated struct Detection {
+    var id: String
     var kind: String
     var actions: [ProjectAction]
     var variants: [ProjectVariant]
@@ -69,21 +81,21 @@ nonisolated struct DetectionBuilder {
         let full = "\(prefix).\(id)"
         guard !actions.contains(where: { $0.id == full }) else { return }
         actions.append(ProjectAction(
-            id: full, title: title, command: command, category: category,
+            id: full, title: title, command: command, category: category, ecosystem: prefix,
             symbol: symbol, featured: featured, root: root
         ))
     }
 
     mutating func variant(_ id: String, title: String, _ options: [(label: String, value: String)], defaultIndex: Int = 0) {
         variants.append(ProjectVariant(
-            id: id, title: title,
+            id: id, title: title, ecosystem: prefix,
             options: options.map { ProjectVariant.Option(label: $0.label, value: $0.value) },
             defaultIndex: defaultIndex
         ))
     }
 
     func finish(kind: String) -> Detection? {
-        actions.isEmpty ? nil : Detection(kind: kind, actions: actions, variants: variants)
+        actions.isEmpty ? nil : Detection(id: prefix, kind: kind, actions: actions, variants: variants)
     }
 }
 

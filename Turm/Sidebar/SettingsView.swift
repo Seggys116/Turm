@@ -125,6 +125,7 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
+    case statusBar = "Project Bar"
     case about = "About"
 
     var id: Self { self }
@@ -136,7 +137,6 @@ struct SettingsView: View {
     @AppStorage(AppIconPreference.key) private var appIcon = AppIconPreference.automatic
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
     @AppStorage(SidebarPlacement.key) private var sidebarPlacement = SidebarPlacement.left
-    @AppStorage(ProjectActionsPreference.key) private var showsProjectActions = true
     @State private var tab = SettingsTab.appearance
     @Environment(\.openURL) private var openURL
 
@@ -161,6 +161,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     switch tab {
                     case .appearance: appearanceTab
+                    case .statusBar: StatusBarSettings()
                     case .about: aboutTab
                     }
                 }
@@ -195,11 +196,6 @@ struct SettingsView: View {
             row("Sidebar position", detail: "Keep shells on the left, or as a tab bar under the title bar.") {
                 SlidingPicker(selection: $sidebarPlacement, options: SidebarPlacement.allCases, title: \.title)
                     .frame(width: 240)
-            }
-            row("Project actions", detail: "Show build, run and test actions in a bar under a shell when it sits in a project. Add a Turm.json to customize them.") {
-                Toggle("Project actions", isOn: $showsProjectActions)
-                    .labelsHidden()
-                    .toggleStyle(SquareToggleStyle())
             }
         }
     }
@@ -260,59 +256,19 @@ struct SettingsView: View {
     }
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText.color)
-                .padding(.leading, 4)
-            group(content: content)
-        }
+        SettingsSection(title, content: content)
     }
 
     private func group(@ViewBuilder content: () -> some View) -> some View {
-        VStack(spacing: 0) {
-            _VariadicView.Tree(DividedLayout()) { content() }
-        }
-        .frame(maxWidth: .infinity)
-        .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.chipStroke.color, lineWidth: 1))
+        SettingsGroup(content: content)
     }
 
     private func row(_ title: String, detail: String?, @ViewBuilder control: () -> some View) -> some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.text.color)
-                if let detail {
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.secondaryText.color)
-                }
-            }
-            Spacer(minLength: 16)
-            control()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 52)
+        SettingsFormRow(title, detail: detail, control: control)
     }
 }
 
-private struct DividedLayout: _VariadicView_UnaryViewRoot {
-    func body(children: _VariadicView.Children) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(children.enumerated()), id: \.offset) { index, child in
-                if index > 0 {
-                    Rectangle().fill(Theme.subtleDivider.color).frame(height: 1)
-                }
-                child
-            }
-        }
-    }
-}
-
-private enum SettingsMotion {
+enum SettingsMotion {
     static let slide = Animation.spring(duration: 0.32, bounce: 0.12)
     static let thumbFill = ThemeColor(light: 0xFFFFFF, dark: 0x303036)
 }
@@ -355,7 +311,7 @@ private struct SettingsTabBar: View {
     }
 }
 
-private struct SlidingPicker<Value: Hashable & Identifiable>: View {
+struct SlidingPicker<Value: Hashable & Identifiable>: View {
     @Binding var selection: Value
     let options: [Value]
     let title: KeyPath<Value, String>
@@ -432,7 +388,7 @@ private struct AppIconPicker: View {
     }
 }
 
-private struct SquareToggleStyle: ToggleStyle {
+struct SquareToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -458,7 +414,7 @@ private struct SquareToggleStyle: ToggleStyle {
     }
 }
 
-private struct SettingsButtonStyle: ButtonStyle {
+struct SettingsButtonStyle: ButtonStyle {
     var prominent = false
     @Environment(\.isEnabled) private var isEnabled
 
