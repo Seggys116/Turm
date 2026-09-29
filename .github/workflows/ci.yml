@@ -17,7 +17,7 @@ permissions:
 jobs:
   test:
     name: Build and test
-    runs-on: macos-26
+    runs-on: macos-latest
     timeout-minutes: 45
     env:
       NSUnbufferedIO: "YES"
@@ -55,7 +55,7 @@ jobs:
 
   release-build:
     name: Release build
-    runs-on: macos-26
+    runs-on: macos-latest
     timeout-minutes: 45
     env:
       NSUnbufferedIO: "YES"
