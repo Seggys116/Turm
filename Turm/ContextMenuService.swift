@@ -18,29 +18,49 @@ final class ContextMenuService: NSObject {
         get { FIFinderSyncController.isExtensionEnabled }
         set {
             UserDefaults.standard.set(true, forKey: configuredKey)
-            pluginkit(["-e", newValue ? "use" : "ignore", "-i", extensionIdentifier])
+            pluginkit([["-e", newValue ? "use" : "ignore", "-i", extensionIdentifier]])
         }
+    }
+
+    private static let pluginkitQueue = DispatchQueue(label: "turm.pluginkit", qos: .utility)
+    private static let pluginkitTimeout: TimeInterval = 5
+
+    private static var isTestHost: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
     private static var extensionURL: URL? {
         Bundle.main.builtInPlugInsURL?.appendingPathComponent("TurmFinder.appex")
     }
 
-    @discardableResult
-    private static func pluginkit(_ arguments: [String]) -> Bool {
+    private static func pluginkit(_ commands: [[String]]) {
+        guard !isTestHost else { return }
+        pluginkitQueue.async {
+            for arguments in commands { runPluginkit(arguments) }
+        }
+    }
+
+    private static func runPluginkit(_ arguments: [String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return false }
+        guard (try? process.run()) != nil else { return }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + pluginkitTimeout) {
+            if process.isRunning { process.terminate() }
+        }
         process.waitUntilExit()
-        return process.terminationStatus == 0
     }
 
     func install() {
-        if let path = Self.extensionURL?.path { Self.pluginkit(["-a", path]) }
-        if !UserDefaults.standard.bool(forKey: Self.configuredKey) { Self.isEnabled = true }
+        var commands: [[String]] = []
+        if let path = Self.extensionURL?.path { commands.append(["-a", path]) }
+        if !UserDefaults.standard.bool(forKey: Self.configuredKey) {
+            UserDefaults.standard.set(true, forKey: Self.configuredKey)
+            commands.append(["-e", "use", "-i", Self.extensionIdentifier])
+        }
+        Self.pluginkit(commands)
     }
 
     func handle(_ url: URL) {
