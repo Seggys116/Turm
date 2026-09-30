@@ -269,6 +269,13 @@ private struct RunningInput: View {
                 .foregroundStyle(.secondary)
             KeyForwarder(session: session, isFocused: isFocused)
                 .frame(width: 1, height: 1)
+            if session.sudoOffer != nil, session.sudoOffer == session.current?.id {
+                Spacer(minLength: 8)
+                Button("Fill sudo password", action: session.fillSudo)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .help("Send the saved sudo password for this host (Command-Return)")
+            }
         }
         .frame(minHeight: 20)
     }

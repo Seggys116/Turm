@@ -41,6 +41,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var userTitle: String?
     private(set) var remotes: [RemoteShell] = []
     private(set) var connection: SSHConnection?
+    private(set) var sudoOffer: UUID?
     private(set) var localDirectory: String?
     var isDropTargeted = false
 
@@ -58,6 +59,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var outputProgress = OutputProgress()
     @ObservationIgnored private var didExit = false
     @ObservationIgnored private var cols = 100
+    @ObservationIgnored private var sudoWatch: (block: UUID, tail: String, filled: Bool)?
     @ObservationIgnored private var rows = 30
     @ObservationIgnored private var startedAt: ContinuousClock.Instant?
     @ObservationIgnored private var renderPending = false
@@ -318,7 +320,41 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     func sendInput(_ bytes: [UInt8]) {
         guard phase == .running else { return }
+        if sudoOffer != nil { sudoOffer = nil }
         write(bytes)
+    }
+
+    private var sudoHost: SSHHost? {
+        guard remotes.count == 1, let host = savedRemoteHost, host.sudoFill != .off else { return nil }
+        return host
+    }
+
+    private func watchSudo(_ bytes: [UInt8]) {
+        guard let block = current, SudoPrompt.isSudo(block.command), let host = sudoHost, let user = remoteTarget?.user else { return }
+        if sudoWatch?.block != block.id { sudoWatch = (block.id, "", false) }
+        guard var watch = sudoWatch, !watch.filled else { return }
+        watch.tail = String((watch.tail + SSHConnection.printable(bytes)).suffix(256))
+        sudoWatch = watch
+        guard SudoPrompt.matches(watch.tail, user: user) else {
+            if sudoOffer != nil { sudoOffer = nil }
+            return
+        }
+        guard SSHSecrets.shared.sudoPassword(for: host) != nil else { return }
+        if host.sudoFill == .automatic {
+            fillSudo()
+        } else if sudoOffer != block.id {
+            sudoOffer = block.id
+        }
+    }
+
+    func fillSudo() {
+        guard phase == .running, let block = current, let watch = sudoWatch, watch.block == block.id, !watch.filled,
+              let host = sudoHost, let user = remoteTarget?.user, SudoPrompt.matches(watch.tail, user: user),
+              let password = SSHSecrets.shared.sudoPassword(for: host)
+        else { return }
+        sudoWatch?.filled = true
+        sudoOffer = nil
+        write(Array((password + "\r").utf8))
     }
 
     var mouseTracking: MouseTracking {
@@ -627,6 +663,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             return
         }
         guard phase == .running, let block = current else { return }
+        if isRemote { watchSudo(bytes) }
         answer(TerminalRequestScanner.scan(bytes[...]))
         var rest = bytes[...]
         while !rest.isEmpty {
@@ -686,6 +723,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func finishCommand(exitCode: Int32?) {
+        sudoOffer = nil
+        sudoWatch = nil
         altScreen = nil
         runningOutputFrame = nil
         resetProgramState()

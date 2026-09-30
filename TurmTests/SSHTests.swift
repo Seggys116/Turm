@@ -389,6 +389,54 @@ struct SSHPasswordPromptTests {
 }
 
 @MainActor
+struct SudoPromptTests {
+    @Test func recognisesOnlyCommandsThatStartWithSudo() {
+        #expect(SudoPrompt.isSudo("sudo apt update"))
+        #expect(SudoPrompt.isSudo("  sudo -v"))
+        #expect(!SudoPrompt.isSudo("echo sudo"))
+        #expect(!SudoPrompt.isSudo("sudoedit /etc/hosts"))
+        #expect(!SudoPrompt.isSudo("su -"))
+        #expect(!SudoPrompt.isSudo(""))
+    }
+
+    @Test func acceptsSudosOwnPromptForTheUser() {
+        #expect(SudoPrompt.matches("[sudo] password for bob: ", user: "bob"))
+        #expect(SudoPrompt.matches("Reading lists\n[sudo] password for bob:", user: "bob"))
+    }
+
+    @Test func rejectsAnyOtherPasswordPrompt() {
+        #expect(!SudoPrompt.matches("Password:", user: "bob"))
+        #expect(!SudoPrompt.matches("password for bob: ", user: "bob"))
+        #expect(!SudoPrompt.matches("Enter passphrase for key '/home/bob/.ssh/id_ed25519': ", user: "bob"))
+        #expect(!SudoPrompt.matches("bob@example.com's password: ", user: "bob"))
+        #expect(!SudoPrompt.matches("fake [sudo] password for bob: ", user: "bob"))
+    }
+
+    @Test func rejectsAnotherUsersPrompt() {
+        #expect(!SudoPrompt.matches("[sudo] password for root: ", user: "bob"))
+        #expect(!SudoPrompt.matches("[sudo] password for bob: ", user: ""))
+    }
+
+    @Test func rejectsAPromptThatIsNoLongerTheLastLine() {
+        #expect(!SudoPrompt.matches("[sudo] password for bob: \nSorry, try again.\n", user: "bob"))
+        #expect(!SudoPrompt.matches("[sudo] password for bob: \n", user: "bob"))
+    }
+
+    @Test func hostsSavedBeforeTheSettingDecodeWithFillOff() throws {
+        let json = #"[{"hostname":"example.com","id":"8E0F5C5A-1111-4E4B-9C43-3C1C0B8A3F11","key":"prod","remembersPassword":true,"user":"bob"}]"#
+        let hosts = try JSONDecoder().decode([SSHHost].self, from: Data(json.utf8))
+        #expect(hosts.first?.sudoFill == .off)
+        #expect(hosts.first?.remembersPassword == true)
+    }
+
+    @Test func sudoFillSurvivesARoundTrip() throws {
+        let host = SSHHost(key: "prod", hostname: "example.com", sudoFill: .ask)
+        let decoded = try JSONDecoder().decode(SSHHost.self, from: JSONEncoder().encode(host))
+        #expect(decoded == host)
+    }
+}
+
+@MainActor
 struct SSHKeysTests {
     private func publicKeyLine(comment: String) -> String {
         var blob = Data([0, 0, 0, 11])
