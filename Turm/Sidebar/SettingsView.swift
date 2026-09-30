@@ -255,7 +255,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var accessibilityTab: some View {
         section("Context menu") {
-            row(ContextMenuService.title, detail: "Right-click a file or folder in Finder to open a shell there.") {
+            row(ContextMenuService.title, detail: "Right-click a file, folder or the background of a Finder window to open a shell there.") {
                 Toggle(ContextMenuService.title, isOn: $isContextMenuEnabled)
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())

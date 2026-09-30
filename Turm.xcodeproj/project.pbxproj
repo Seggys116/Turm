@@ -10,6 +10,7 @@
 		C0105A02306BFD46008BD457 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = C0105A01306BFD46008BD457 /* SwiftTerm */; };
 		C0105A12306BFD46008BD457 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0105A11306BFD46008BD457 /* Sparkle */; };
 		C0105B02306BFD46008BD457 /* TurmDockTile.docktileplugin in Embed Dock Tile */ = {isa = PBXBuildFile; fileRef = C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		C0105C02306BFD46008BD457 /* TurmFinder.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C0105C01306BFD46008BD457 /* TurmFinder.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +35,13 @@
 			remoteGlobalIDString = C0105B10306BFD46008BD457;
 			remoteInfo = TurmDockTile;
 		};
+		C0105C03306BFD46008BD457 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0105639306BFD45008BD457 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0105C10306BFD46008BD457;
+			remoteInfo = TurmFinder;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -48,6 +56,17 @@
 			name = "Embed Dock Tile";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0105C04306BFD46008BD457 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C0105C02306BFD46008BD457 /* TurmFinder.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +74,7 @@
 		C010564E306BFD46008BD457 /* TurmTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurmTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0105658306BFD46008BD457 /* TurmUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurmUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurmDockTile.docktileplugin; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0105C01306BFD46008BD457 /* TurmFinder.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TurmFinder.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -76,6 +96,11 @@
 		C0105B05306BFD46008BD457 /* TurmDockTile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TurmDockTile;
+			sourceTree = "<group>";
+		};
+		C0105C05306BFD46008BD457 /* TurmFinder */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TurmFinder;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -103,6 +128,11 @@
 			files = (
 			);
 		};
+		C0105C06306BFD46008BD457 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -113,6 +143,7 @@
 				C0105651306BFD46008BD457 /* TurmTests */,
 				C010565B306BFD46008BD457 /* TurmUITests */,
 				C0105B05306BFD46008BD457 /* TurmDockTile */,
+				C0105C05306BFD46008BD457 /* TurmFinder */,
 				C0105642306BFD45008BD457 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -124,6 +155,7 @@
 				C010564E306BFD46008BD457 /* TurmTests.xctest */,
 				C0105658306BFD46008BD457 /* TurmUITests.xctest */,
 				C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */,
+				C0105C01306BFD46008BD457 /* TurmFinder.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -139,11 +171,13 @@
 				C010563E306BFD45008BD457 /* Frameworks */,
 				C010563F306BFD45008BD457 /* Resources */,
 				C0105B04306BFD46008BD457 /* Embed Dock Tile */,
+				C0105C04306BFD46008BD457 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				C0105B09306BFD46008BD457 /* PBXTargetDependency */,
+				C0105C09306BFD46008BD457 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C0105643306BFD45008BD457 /* Turm */,
@@ -219,6 +253,26 @@
 			productReference = C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */;
 			productType = "com.apple.product-type.bundle";
 		};
+		C0105C10306BFD46008BD457 /* TurmFinder */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0105C11306BFD46008BD457 /* Build configuration list for PBXNativeTarget "TurmFinder" */;
+			buildPhases = (
+				C0105C07306BFD46008BD457 /* Sources */,
+				C0105C06306BFD46008BD457 /* Frameworks */,
+				C0105C08306BFD46008BD457 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0105C05306BFD46008BD457 /* TurmFinder */,
+			);
+			name = TurmFinder;
+			productName = TurmFinder;
+			productReference = C0105C01306BFD46008BD457 /* TurmFinder.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -241,6 +295,9 @@
 						TestTargetID = C0105640306BFD45008BD457;
 					};
 					C0105B10306BFD46008BD457 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+					C0105C10306BFD46008BD457 = {
 						CreatedOnToolsVersion = 27.1;
 					};
 				};
@@ -267,6 +324,7 @@
 				C010564D306BFD46008BD457 /* TurmTests */,
 				C0105657306BFD46008BD457 /* TurmUITests */,
 				C0105B10306BFD46008BD457 /* TurmDockTile */,
+				C0105C10306BFD46008BD457 /* TurmFinder */,
 			);
 		};
 /* End PBXProject section */
@@ -288,6 +346,11 @@
 			);
 		};
 		C0105B08306BFD46008BD457 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		C0105C08306BFD46008BD457 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -315,6 +378,11 @@
 			files = (
 			);
 		};
+		C0105C07306BFD46008BD457 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -332,6 +400,11 @@
 			isa = PBXTargetDependency;
 			target = C0105B10306BFD46008BD457 /* TurmDockTile */;
 			targetProxy = C0105B03306BFD46008BD457 /* PBXContainerItemProxy */;
+		};
+		C0105C09306BFD46008BD457 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0105C10306BFD46008BD457 /* TurmFinder */;
+			targetProxy = C0105C03306BFD46008BD457 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -656,6 +729,62 @@
 			};
 			name = Release;
 		};
+		C0105C12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmFinder" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H2X57PJPJ6;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/TurmFinder-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Turm;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26;
+				MARKETING_VERSION = 1.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Turm.FinderSync";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C0105C13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmFinder" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H2X57PJPJ6;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/TurmFinder-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Turm;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26;
+				MARKETING_VERSION = 1.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Turm.FinderSync";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -696,6 +825,14 @@
 			buildConfigurations = (
 				C0105B12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmDockTile" */,
 				C0105B13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmDockTile" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		C0105C11306BFD46008BD457 /* Build configuration list for PBXNativeTarget "TurmFinder" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0105C12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmFinder" */,
+				C0105C13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmFinder" */,
 			);
 			defaultConfigurationName = Release;
 		};

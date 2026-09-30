@@ -241,6 +241,13 @@ struct ShellTabTests {
         #expect(ContextMenuService.directories(for: [folder, file]) == [path])
     }
 
+    @Test func finderExtensionURLCarriesPaths() throws {
+        let url = try #require(URL(string: "turm://open?path=/Users/me/My%20Folder&path=/tmp/a%26b&path=relative&other=/x"))
+        #expect(ContextMenuService.fileURLs(in: url).map(\.path) == ["/Users/me/My Folder", "/tmp/a&b"])
+        #expect(ContextMenuService.fileURLs(in: try #require(URL(string: "turm://close?path=/tmp"))).isEmpty)
+        #expect(ContextMenuService.fileURLs(in: try #require(URL(string: "https://open?path=/tmp"))).isEmpty)
+    }
+
     @Test func missingDirectoryFallsBackToHome() {
         let session = TerminalSession(directory: "/definitely/not/a/directory")
         defer { session.terminate() }

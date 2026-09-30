@@ -1,56 +1,62 @@
 import AppKit
+import FinderSync
 
-/// Handles the "Open in Turm" service that Finder shows in its context menu for files and folders.
+/// Opens folders sent by the Turm Finder extension, which adds "Open in Turm" to Finder's context menus.
 final class ContextMenuService: NSObject {
     static let shared = ContextMenuService()
 
     static let title = "Open in Turm"
-    static let message = "openInTurm"
+    static let extensionIdentifier = "com.zak-noble-clarke.Turm.FinderSync"
+
+    private static let configuredKey = "turm.finderExtension.configured"
 
     private let workspaces = NSMapTable<NSWindow, Workspace>.weakToWeakObjects()
     private weak var lastKeyWindow: NSWindow?
     private var pending: [String] = []
 
     static var isEnabled: Bool {
-        get {
-            let status = CFPreferencesCopyAppValue(statusKey as CFString, statusDomain) as? [String: Any]
-            let entry = status?[statusEntry] as? [String: Any]
-            return (entry?["enabled_context_menu"] as? NSNumber)?.boolValue ?? true
-        }
+        get { FIFinderSyncController.isExtensionEnabled }
         set {
-            var status = CFPreferencesCopyAppValue(statusKey as CFString, statusDomain) as? [String: Any] ?? [:]
-            let flag = NSNumber(value: newValue)
-            status[statusEntry] = [
-                "enabled_context_menu": flag,
-                "enabled_services_menu": flag,
-                "presentation_modes": ["ContextMenu": flag, "ServicesMenu": flag],
-            ]
-            CFPreferencesSetAppValue(statusKey as CFString, status as CFDictionary, statusDomain)
-            CFPreferencesAppSynchronize(statusDomain)
-            refreshServices()
+            UserDefaults.standard.set(true, forKey: configuredKey)
+            pluginkit(["-e", newValue ? "use" : "ignore", "-i", extensionIdentifier])
         }
     }
 
-    private static let statusDomain = "pbs" as CFString
-    private static let statusKey = "NSServicesStatus"
-
-    private static var statusEntry: String {
-        "\(Bundle.main.bundleIdentifier ?? "com.zak-noble-clarke.Turm") - \(title) - \(message)"
+    private static var extensionURL: URL? {
+        Bundle.main.builtInPlugInsURL?.appendingPathComponent("TurmFinder.appex")
     }
 
-    private static func refreshServices() {
-        NSUpdateDynamicServices()
-        let pbs = Process()
-        pbs.executableURL = URL(fileURLWithPath: "/System/Library/CoreServices/pbs")
-        pbs.arguments = ["-flush"]
-        pbs.standardOutput = FileHandle.nullDevice
-        pbs.standardError = FileHandle.nullDevice
-        try? pbs.run()
+    @discardableResult
+    private static func pluginkit(_ arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     func install() {
-        NSApp.servicesProvider = self
-        NSUpdateDynamicServices()
+        if let path = Self.extensionURL?.path { Self.pluginkit(["-a", path]) }
+        if !UserDefaults.standard.bool(forKey: Self.configuredKey) { Self.isEnabled = true }
+    }
+
+    func handle(_ url: URL) {
+        let directories = Self.directories(for: Self.fileURLs(in: url))
+        guard !directories.isEmpty else { return }
+        pending += directories
+        openPending()
+    }
+
+    static func fileURLs(in url: URL) -> [URL] {
+        guard url.scheme == "turm", url.host == "open",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return [] }
+        return items.compactMap { item in
+            guard item.name == "path", let path = item.value, path.hasPrefix("/") else { return nil }
+            return URL(fileURLWithPath: path)
+        }
     }
 
     func register(_ workspace: Workspace, in window: NSWindow) {
@@ -67,17 +73,6 @@ final class ContextMenuService: NSObject {
     func windowBecameKey(_ window: NSWindow) {
         guard workspaces.object(forKey: window) != nil else { return }
         lastKeyWindow = window
-        openPending()
-    }
-
-    @objc func openInTurm(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
-        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        let directories = Self.directories(for: urls)
-        guard !directories.isEmpty else {
-            error.pointee = "Turm could not find a folder in the selection." as NSString
-            return
-        }
-        pending += directories
         openPending()
     }
 

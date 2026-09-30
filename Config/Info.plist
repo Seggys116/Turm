@@ -4,23 +4,14 @@
 <dict>
 	<key>NSDockTilePlugIn</key>
 	<string>TurmDockTile.docktileplugin</string>
-	<key>NSServices</key>
+	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
-			<key>NSMenuItem</key>
-			<dict>
-				<key>default</key>
-				<string>Open in Turm</string>
-			</dict>
-			<key>NSMessage</key>
-			<string>openInTurm</string>
-			<key>NSPortName</key>
-			<string>Turm</string>
-			<key>NSRequiredContext</key>
-			<dict/>
-			<key>NSSendFileTypes</key>
+			<key>CFBundleURLName</key>
+			<string>com.zak-noble-clarke.Turm</string>
+			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>public.item</string>
+				<string>turm</string>
 			</array>
 		</dict>
 	</array>
