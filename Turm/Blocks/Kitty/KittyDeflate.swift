@@ -1,7 +1,7 @@
 import Compression
 import Foundation
 
-enum KittyDeflate {
+nonisolated enum KittyDeflate {
     enum Failure: Error, Equatable {
         case data(String)
         case buffer
@@ -246,7 +246,7 @@ enum KittyDeflate {
     }
 }
 
-enum KittyInflate {
+nonisolated enum KittyInflate {
     static func adler32(_ bytes: [UInt8]) -> UInt32 {
         var low: UInt32 = 1
         var high: UInt32 = 0
