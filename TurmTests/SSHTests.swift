@@ -26,8 +26,8 @@ private func execute(_ path: String, _ arguments: [String], environment: [String
     process.executableURL = URL(fileURLWithPath: path)
     process.arguments = arguments
     process.environment = environment
-    let output = Pipe()
-    let stdin = Pipe()
+    let output = SpawnGuard.pipe()
+    let stdin = SpawnGuard.pipe()
     process.standardOutput = output
     process.standardError = FileHandle.nullDevice
     process.standardInput = input == nil ? FileHandle.nullDevice : stdin

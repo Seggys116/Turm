@@ -39,7 +39,7 @@ nonisolated enum ShellScripts {
               if [[ $last == *"$_turm_file"* ]]; then
                 builtin history -s "$(<"$_turm_file")"
               fi
-              command rm -f "$_turm_file"
+              { command rm -f "$_turm_file"; } 2>/dev/null
             fi
             _turm_report_env
             _turm_emit "$code"

@@ -62,9 +62,9 @@ nonisolated enum GitInspector {
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
-        let output = Pipe()
+        let output = SpawnGuard.pipe()
         process.standardOutput = output
-        let errorPipe = Pipe()
+        let errorPipe = SpawnGuard.pipe()
         process.standardError = errorPipe
         process.standardInput = FileHandle.nullDevice
         do {

@@ -23,7 +23,7 @@ private func remoteExecute(_ path: String, _ arguments: [String], in directory: 
     process.arguments = arguments
     process.environment = remoteShellEnvironment
     if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
-    let output = Pipe()
+    let output = SpawnGuard.pipe()
     process.standardOutput = output
     process.standardError = FileHandle.nullDevice
     process.standardInput = FileHandle.nullDevice

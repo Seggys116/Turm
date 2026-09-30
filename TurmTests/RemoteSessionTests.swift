@@ -43,7 +43,7 @@ private func installRemoteFiles(into home: URL) throws {
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
     process.arguments = ["-s"]
     process.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
-    let stdin = Pipe()
+    let stdin = SpawnGuard.pipe()
     process.standardInput = stdin
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice

@@ -431,13 +431,15 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             let launch = try ShellIntegration.launch()
             submission = launch.submission
             shellKind = launch.kind
-            process.startProcess(
-                executable: launch.executable,
-                args: launch.arguments,
-                environment: launch.environment,
-                execName: launch.execName,
-                currentDirectory: directory
-            )
+            SpawnGuard.forking {
+                process.startProcess(
+                    executable: launch.executable,
+                    args: launch.arguments,
+                    environment: launch.environment,
+                    execName: launch.execName,
+                    currentDirectory: directory
+                )
+            }
             SystemCompletionEnvironment.shared.setShellProcess(pid: process.shellPid)
         } catch {
             failure = "Could not prepare the shell: \(error.localizedDescription)"

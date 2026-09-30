@@ -131,9 +131,9 @@ nonisolated enum SSHProcess {
         environment["SSH_ASKPASS_REQUIRE"] = "never"
         environment.removeValue(forKey: "DISPLAY")
         process.environment = environment
-        let output = Pipe()
-        let errors = Pipe()
-        let stdin = Pipe()
+        let output = SpawnGuard.pipe()
+        let errors = SpawnGuard.pipe()
+        let stdin = SpawnGuard.pipe()
         process.standardOutput = output
         process.standardError = errors
         process.standardInput = input == nil ? FileHandle.nullDevice : stdin

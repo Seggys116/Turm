@@ -31,7 +31,7 @@ nonisolated enum ProcessRunner {
         process.arguments = arguments
         if let environment { process.environment = environment }
         if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
-        let pipe = Pipe()
+        let pipe = SpawnGuard.pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice

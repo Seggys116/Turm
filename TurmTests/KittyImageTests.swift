@@ -901,6 +901,19 @@ struct KittyStackTextTests {
 @_silgen_name("shm_open")
 private func openSharedMemory(_ name: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32
 
+// shm_open is variadic, so its mode has to travel where C varargs do: on the stack on arm64
+private func createSharedMemoryObject(_ name: UnsafePointer<CChar>, mode: mode_t) -> Int32 {
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "shm_open") else { return -1 }
+    let flags = O_CREAT | O_RDWR | O_EXCL
+    #if arch(arm64)
+    typealias Create = @convention(c) (UnsafePointer<CChar>, Int32, Int, Int, Int, Int, Int, Int, Int) -> Int32
+    return unsafeBitCast(symbol, to: Create.self)(name, flags, 0, 0, 0, 0, 0, 0, Int(mode))
+    #else
+    typealias Create = @convention(c) (UnsafePointer<CChar>, Int32, Int) -> Int32
+    return unsafeBitCast(symbol, to: Create.self)(name, flags, Int(mode))
+    #endif
+}
+
 private func base64(_ text: String) -> String {
     Data(text.utf8).base64EncodedString()
 }
@@ -1004,7 +1017,7 @@ struct KittyMediumTests {
 }
 
 private func createSharedMemory(_ name: String, size: Int) -> Bool {
-    let descriptor = name.withCString { openSharedMemory($0, O_CREAT | O_RDWR | O_EXCL, 0o600) }
+    let descriptor = name.withCString { createSharedMemoryObject($0, mode: 0o600) }
     guard descriptor >= 0 else { return false }
     defer { close(descriptor) }
     guard ftruncate(descriptor, off_t(size)) == 0 else { return false }
