@@ -103,15 +103,17 @@ struct ShortcutTag: View {
 final class ShortcutTagLayer {
     private var hosts: [NSHostingView<ShortcutTag>] = []
 
+    @discardableResult
     func update(
         in view: NSTextView,
         shortcuts: [Shortcut],
         quote: (String) -> String,
         visible: Bool,
+        caret: Int?,
         select: @escaping (NSRange) -> Void,
         expand: @escaping (NSRange, String) -> Void,
         save: @escaping (String, NSRange) -> Void
-    ) {
+    ) -> Bool {
         let text = view.string
         let exists = { (path: String) in FileManager.default.fileExists(atPath: path) }
         var entries: [(token: Range<String.Index>, tag: ShortcutTag)] = []
@@ -126,6 +128,8 @@ final class ShortcutTagLayer {
             }
             for (key, range) in Shortcuts.unknown(text, in: shortcuts) {
                 let token = NSRange(range, in: text)
+                // a key still being typed is not missing yet
+                if NSMaxRange(token) == caret { continue }
                 entries.append((range, ShortcutTag(content: .unknown(key), primary: { save(key, token) }, alternate: { save(key, token) })))
             }
             entries.sort { $0.token.lowerBound < $1.token.lowerBound }
@@ -134,7 +138,7 @@ final class ShortcutTagLayer {
               let layout = view.layoutManager, let container = view.textContainer, let scroll = view.enclosingScrollView
         else {
             clear()
-            return
+            return false
         }
         let visibleRect = content.convert(scroll.contentView.bounds, from: scroll.contentView)
         let origin = view.textContainerOrigin
@@ -170,6 +174,7 @@ final class ShortcutTagLayer {
         }
         for host in hosts[used...] { host.removeFromSuperview() }
         hosts.removeSubrange(used...)
+        return used > 0
     }
 
     func clear() {

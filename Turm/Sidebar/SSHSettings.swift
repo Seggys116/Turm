@@ -137,6 +137,9 @@ struct SSHSettings: View {
         if SSHSecrets.shared.hasPassword(for: host) {
             parts.append(host.remembersPassword ? "password saved" : "password for this session")
         }
+        if host.sudoFill != .off {
+            parts.append(host.sudoFill == .ask ? "sudo fill: ask" : "sudo fill: automatic")
+        }
         if installed.contains(where: host.matches) {
             parts.append("Turm integration installed")
         }

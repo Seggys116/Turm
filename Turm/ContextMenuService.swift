@@ -15,11 +15,33 @@ final class ContextMenuService: NSObject {
     private var pending: [String] = []
 
     static var isEnabled: Bool {
-        get { FIFinderSyncController.isExtensionEnabled }
-        set {
-            UserDefaults.standard.set(true, forKey: configuredKey)
-            pluginkit([["-e", newValue ? "use" : "ignore", "-i", extensionIdentifier]])
+        FIFinderSyncController.isExtensionEnabled
+    }
+
+    static func setEnabled(_ enabled: Bool, then report: @escaping (Bool) -> Void) {
+        UserDefaults.standard.set(true, forKey: configuredKey)
+        guard !isTestHost else { return }
+        pluginkitQueue.async {
+            runPluginkit(["-e", enabled ? "use" : "ignore", "-i", extensionIdentifier])
+            let state = readEnabled()
+            DispatchQueue.main.async { report(state ?? enabled) }
         }
+    }
+
+    static func refreshEnabled(then report: @escaping (Bool) -> Void) {
+        guard !isTestHost else { return }
+        pluginkitQueue.async {
+            guard let state = readEnabled() else { return }
+            DispatchQueue.main.async { report(state) }
+        }
+    }
+
+    nonisolated static func isEnabled(inListing listing: String) -> Bool {
+        listing.split(whereSeparator: \.isNewline).contains { $0.drop(while: \.isWhitespace).first == "+" }
+    }
+
+    private nonisolated static func readEnabled() -> Bool? {
+        runPluginkit(["-m", "-i", extensionIdentifier]).map(isEnabled(inListing:))
     }
 
     private static let pluginkitQueue = DispatchQueue(label: "turm.pluginkit", qos: .utility)
@@ -40,17 +62,22 @@ final class ContextMenuService: NSObject {
         }
     }
 
-    private static func runPluginkit(_ arguments: [String]) {
+    @discardableResult
+    private nonisolated static func runPluginkit(_ arguments: [String]) -> String? {
         let process = Process()
+        let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
         process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
+        process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return }
+        guard (try? process.run()) != nil else { return nil }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + pluginkitTimeout) {
             if process.isRunning { process.terminate() }
         }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     func install() {

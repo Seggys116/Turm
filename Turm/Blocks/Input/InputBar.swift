@@ -12,6 +12,7 @@ struct InputBar: View {
     @State private var remotePathMenuOpen = false
     @State private var hostEditorOpen = false
     @State private var hostShortcutOpen = false
+    @State private var showsTags = false
     @AppStorage(ShortcutSuggestionTracker.enabledKey) private var suggestionsEnabled = false
     private let tracker = ShortcutSuggestionTracker.shared
 
@@ -23,12 +24,6 @@ struct InputBar: View {
             lastCommand: last?.usedShortcut == false ? last?.command : nil,
             shortcuts: ShortcutStore.shared.items
         )
-    }
-
-    private var hasTags: Bool {
-        guard session.phase == .ready, !completion.isOpen else { return false }
-        let shortcuts = ShortcutStore.shared.effective(in: session.directory)
-        return !Shortcuts.scan(input.draft, in: shortcuts).isEmpty || !Shortcuts.unknown(input.draft, in: shortcuts).isEmpty
     }
 
     var body: some View {
@@ -70,13 +65,14 @@ struct InputBar: View {
                         session.selection.claimFocus()
                     },
                     isRemote: session.isRemote,
-                    remoteChannel: session.remoteChannel
+                    remoteChannel: session.remoteChannel,
+                    onTags: { showsTags = $0 }
                 )
-                .padding(.top, hasTags ? 18 : 0)
+                .padding(.top, showsTags ? 18 : 0)
             }
         }
         .animation(.easeOut(duration: 0.14), value: completion.isOpen)
-        .animation(.easeOut(duration: 0.2), value: hasTags)
+        .animation(.easeOut(duration: 0.2), value: showsTags)
         .animation(.easeOut(duration: 0.14), value: session.connection?.showsBanner)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -269,6 +265,13 @@ private struct RunningInput: View {
                 .foregroundStyle(.secondary)
             KeyForwarder(session: session, isFocused: isFocused)
                 .frame(width: 1, height: 1)
+            if session.sudoOffer != nil, session.sudoOffer == session.current?.id {
+                Spacer(minLength: 8)
+                Button("Fill sudo password", action: session.fillSudo)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .help("Send the saved sudo password for this host (Command-Return)")
+            }
         }
         .frame(minHeight: 20)
     }

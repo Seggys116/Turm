@@ -81,7 +81,7 @@ struct OutputChunkTests {
         #expect(lines.filter { $0 == long }.count == 60)
     }
 
-    @Test func incrementalRendersMatchAColdRender() {
+    @Test func incrementalRendersMatchAColdRender() async {
         var generator = SplitMix64(state: 7)
         for trial in 0..<16 {
             let scrollback = trial.isMultiple(of: 2) ? 150 : BlockEmulator.scrollback
@@ -113,6 +113,7 @@ struct OutputChunkTests {
                 warm.feed(Array(bytes[split...]))
                 cold.feed(Array(bytes[split...]))
                 _ = warm.renderSegments()
+                await Task.yield()
             }
             let fresh = signature(cold.renderSegments())
             let seen = signature(warm.renderSegments())

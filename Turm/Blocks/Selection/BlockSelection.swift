@@ -129,6 +129,8 @@ final class BlockSelection {
     }
 
     func drag(to point: CGPoint) {
+        guard unit != nil else { return }
+        refreshLayout()
         guard let unit, let hit = hit(point, insertion: granularity == .character) else { return }
         let extended = layout.extend(from: unit, to: hit, granularity: granularity)
         anchor = extended.anchor

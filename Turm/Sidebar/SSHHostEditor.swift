@@ -8,12 +8,14 @@ struct SSHHostEditor: View {
     @State private var portText: String
     @State private var password = ""
     @State private var hasSavedPassword: Bool
+    @State private var sudoPassword = ""
+    @State private var hasSavedSudoPassword: Bool
     @State private var keys: [SSHKey] = SSHKeys.discover()
     @State private var detecting = false
     @State private var detectMessage: String?
     @FocusState private var focus: Field?
 
-    private enum Field { case key, hostname, user, port, password }
+    private enum Field { case key, hostname, user, port, password, sudoPassword }
 
     private static let chooseTag = "\u{0}choose"
 
@@ -22,6 +24,7 @@ struct SSHHostEditor: View {
         _draft = State(initialValue: host)
         _portText = State(initialValue: host.port.map(String.init) ?? "")
         _hasSavedPassword = State(initialValue: SSHSecrets.shared.hasPassword(for: host))
+        _hasSavedSudoPassword = State(initialValue: SSHSecrets.shared.hasPassword(for: host, slot: .sudo))
     }
 
     private var isNew: Bool { !store.hosts.contains { $0.id == draft.id } }
@@ -93,6 +96,7 @@ struct SSHHostEditor: View {
             }
             keyField
             passwordField
+            sudoField
             if let conflict {
                 Text("\(conflict.token) is already used by \(conflict.summary).")
                     .font(.system(size: 11))
@@ -176,6 +180,53 @@ struct SSHHostEditor: View {
         }
     }
 
+    private var sudoField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Fill sudo password")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText.color)
+                Picker("Fill sudo password", selection: $draft.sudoFill) {
+                    Text("Off").tag(SSHHost.SudoFill.off)
+                    Text("Ask").tag(SSHHost.SudoFill.ask)
+                    Text("Automatic").tag(SSHHost.SudoFill.automatic)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(sudoHint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if draft.sudoFill != .off {
+                field("Sudo Password", hint: "Leave empty to use the login password. Needs Turm integration on the host.") {
+                    HStack(spacing: 6) {
+                        SecureField(hasSavedSudoPassword ? "Saved" : "Same as login password", text: $sudoPassword)
+                            .focused($focus, equals: .sudoPassword)
+                        if hasSavedSudoPassword {
+                            Button("Clear") {
+                                SSHSecrets.shared.forget(draft.id, slot: .sudo)
+                                hasSavedSudoPassword = false
+                                sudoPassword = ""
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.secondaryText.color)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var sudoHint: String {
+        switch draft.sudoFill {
+        case .off: "Never fill sudo prompts on this host."
+        case .ask: "Offers a button when a command you typed with sudo shows its own password prompt."
+        case .automatic: "Fills once when a command you typed with sudo shows its own password prompt."
+        }
+    }
+
     private func field<Content: View>(_ title: String, hint: String?, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -241,13 +292,19 @@ struct SSHHostEditor: View {
         host.key = cleanKey
         let wasNew = isNew
         let previous = store.hosts.first { $0.id == host.id }
-        let carried = password.isEmpty && previous?.remembersPassword != host.remembersPassword
-            ? previous.flatMap { SSHSecrets.shared.password(for: $0) } : nil
+        let moved = previous?.remembersPassword != host.remembersPassword
+        let carried = password.isEmpty && moved ? previous.flatMap { SSHSecrets.shared.password(for: $0) } : nil
+        let carriedSudo = sudoPassword.isEmpty && moved ? previous.flatMap { SSHSecrets.shared.password(for: $0, slot: .sudo) } : nil
         guard store.save(host) else { return }
         if !password.isEmpty {
             SSHSecrets.shared.set(password, for: host)
         } else if let carried {
             SSHSecrets.shared.set(carried, for: host)
+        }
+        if !sudoPassword.isEmpty {
+            SSHSecrets.shared.set(sudoPassword, for: host, slot: .sudo)
+        } else if let carriedSudo {
+            SSHSecrets.shared.set(carriedSudo, for: host, slot: .sudo)
         }
         if wasNew, host.identityFile == nil {
             autoDetect(host)

@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     let updater: Updater
-    @State private var workspace = Workspace()
+    @State private var holder = WorkspaceHolder()
     @State private var isSpotlightOpen = false
     @State private var spotlight = SpotlightPresenter()
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
     @AppStorage(SidebarPlacement.key) private var placement = SidebarPlacement.left
     @Environment(\.dismiss) private var dismiss
+
+    private var workspace: Workspace { holder.workspace }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,6 +84,11 @@ struct ContentView: View {
 
 #Preview {
     ContentView(updater: Updater())
+}
+
+// @State evaluates its initial value on every view init, so the shell starts on first use instead
+final class WorkspaceHolder {
+    private(set) lazy var workspace = Workspace()
 }
 
 enum SidebarPreference {

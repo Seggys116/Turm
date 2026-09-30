@@ -14,6 +14,7 @@ final class SelectionDriver {
     var moved = false
     var clicks = 1
     var pointerX: CGFloat = 0
+    var contentOrigin = CGPoint.zero
     var viewportY: CGFloat = 0
     var task: Task<Void, Never>?
 }
@@ -35,12 +36,16 @@ struct BlockListView: View {
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .coordinateSpace(name: BlockSelection.space)
+                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.listSpace)).origin } action: {
+                    driver.contentOrigin = $0
+                }
                 .onContinuousHover(coordinateSpace: .named(BlockSelection.space)) { phase in
                     var link: URL?
                     if case .active(let point) = phase { link = session.selection.link(at: point) }
                     if link != hoveredLink { hoveredLink = link }
                 }
             }
+            .coordinateSpace(name: Self.listSpace)
             .contentShape(Rectangle())
             .gesture(selectionGesture)
             .pointerStyle(hoveredLink != nil ? PointerStyle.link : nil)
@@ -55,8 +60,8 @@ struct BlockListView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: session.blocks.count) { scrollToBottom(reader) }
-            .onChange(of: session.current?.revision) { scrollToBottom(reader) }
-            .onChange(of: session.current?.segments.count) { scrollToBottom(reader) }
+            .onChange(of: session.current?.revision) { followOutput(reader) }
+            .onChange(of: session.current?.segments.count) { followOutput(reader) }
             .onChange(of: session.search.scrollRequest) { _, request in
                 guard let request else { return }
                 reader.scrollTo(request.blockID, anchor: UnitPoint(x: 0, y: request.position))
@@ -72,9 +77,10 @@ struct BlockListView: View {
     }
 
     private static let bottom = "turm.bottom"
+    private static let listSpace = "turm.list"
 
     private var selectionGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.listSpace))
             .onChanged { value in
                 if !driver.active {
                     guard !NSEvent.modifierFlags.contains(.control) else { return }
@@ -107,7 +113,7 @@ struct BlockListView: View {
     }
 
     private func contentPoint(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: point.x, y: point.y + driver.metrics.offset)
+        CGPoint(x: point.x - driver.contentOrigin.x, y: point.y - driver.contentOrigin.y)
     }
 
     private func startAutoscroll() {
@@ -124,14 +130,25 @@ struct BlockListView: View {
                 let target = min(max(metrics.offset + step, 0), limit)
                 guard target != metrics.offset else { continue }
                 position.scrollTo(y: target)
+                driver.contentOrigin.y -= target - metrics.offset
                 driver.metrics.offset = target
-                session.selection.drag(to: CGPoint(x: driver.pointerX, y: driver.viewportY + target))
+                session.selection.drag(to: contentPoint(CGPoint(x: driver.pointerX, y: driver.viewportY)))
             }
         }
     }
 
+    private var isPinned: Bool {
+        let metrics = driver.metrics
+        return metrics.offset >= metrics.content - metrics.viewport - TerminalMetrics.lineHeight * 2
+    }
+
+    private func followOutput(_ reader: ScrollViewProxy) {
+        guard isPinned else { return }
+        scrollToBottom(reader)
+    }
+
     private func scrollToBottom(_ reader: ScrollViewProxy) {
-        guard !(session.search.isPresented && !session.search.query.isEmpty) else { return }
+        guard !driver.active, !(session.search.isPresented && !session.search.query.isEmpty) else { return }
         reader.scrollTo(Self.bottom, anchor: .bottom)
     }
 }

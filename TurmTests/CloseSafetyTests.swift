@@ -278,3 +278,31 @@ private final class OriginalWindowDelegate: NSObject, NSWindowDelegate {
         closeNotifications += 1
     }
 }
+
+@MainActor
+struct HiddenTabFocusTests {
+    @Test func aShellInAHiddenTabCannotPullItsTabToTheFront() throws {
+        let coordinator = CloseCoordinator { _ in false }
+        let workspace = Workspace(closeCoordinator: coordinator)
+        defer { coordinator.terminateAll() }
+        let shell = try #require(workspace.focusedSession)
+        let pane = workspace.focusedPane
+        workspace.openSettings()
+        let settings = workspace.activeTabID
+
+        shell.focus()
+        #expect(workspace.activeTabID == settings)
+
+        workspace.focus(pane)
+        #expect(workspace.activeTabID != settings)
+    }
+}
+
+struct FinderExtensionListingTests {
+    @Test func readsTheElectedStateFromPluginkit() {
+        #expect(ContextMenuService.isEnabled(inListing: "+    com.example.FinderSync(1.3.0)\n"))
+        #expect(!ContextMenuService.isEnabled(inListing: "-    com.example.FinderSync(1.3.0)\n"))
+        #expect(!ContextMenuService.isEnabled(inListing: "     com.example.FinderSync(1.3.0)\n"))
+        #expect(!ContextMenuService.isEnabled(inListing: ""))
+    }
+}

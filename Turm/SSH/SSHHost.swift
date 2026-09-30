@@ -11,6 +11,43 @@ nonisolated struct SSHHost: Codable, Equatable, Identifiable, Sendable {
     var port: Int?
     var identityFile: String?
     var remembersPassword = false
+    var sudoFill = SudoFill.off
+
+    enum SudoFill: String, Codable, CaseIterable, Sendable {
+        case off
+        case ask
+        case automatic
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, key, hostname, user, port, identityFile, remembersPassword, sudoFill
+    }
+
+    init(
+        id: UUID = UUID(), key: String, hostname: String, user: String = "", port: Int? = nil,
+        identityFile: String? = nil, remembersPassword: Bool = false, sudoFill: SudoFill = .off
+    ) {
+        self.id = id
+        self.key = key
+        self.hostname = hostname
+        self.user = user
+        self.port = port
+        self.identityFile = identityFile
+        self.remembersPassword = remembersPassword
+        self.sudoFill = sudoFill
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        key = try container.decode(String.self, forKey: .key)
+        hostname = try container.decode(String.self, forKey: .hostname)
+        user = try container.decode(String.self, forKey: .user)
+        port = try container.decodeIfPresent(Int.self, forKey: .port)
+        identityFile = try container.decodeIfPresent(String.self, forKey: .identityFile)
+        remembersPassword = try container.decode(Bool.self, forKey: .remembersPassword)
+        sudoFill = (try? container.decodeIfPresent(SudoFill.self, forKey: .sudoFill)) ?? .off
+    }
 
     var token: String { String(Self.sigil) + key }
 

@@ -1622,7 +1622,7 @@ struct KittyByteAccountingTests {
     }
 }
 
-private func bigEndian(_ value: UInt32) -> [UInt8] {
+private nonisolated func bigEndian(_ value: UInt32) -> [UInt8] {
     [UInt8(value >> 24), UInt8((value >> 16) & 0xFF), UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)]
 }
 
@@ -1722,7 +1722,7 @@ struct KittyPNGDataTests {
     }
 }
 
-private struct SplitMix64 {
+private nonisolated struct SplitMix64 {
     var state: UInt64
 
     mutating func next() -> UInt64 {
@@ -1734,7 +1734,8 @@ private struct SplitMix64 {
     }
 }
 
-struct KittyFastInflateTests {
+// pure decoding, so it runs off the main actor instead of stalling every other test
+nonisolated struct KittyFastInflateTests {
     private func stream(_ raw: [UInt8]) -> [UInt8] {
         var output = [UInt8](repeating: 0, count: raw.count + raw.count / 8 + 4096)
         let size = compression_encode_buffer(&output, output.count, raw, raw.count, nil, COMPRESSION_ZLIB)
