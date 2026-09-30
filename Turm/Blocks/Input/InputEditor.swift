@@ -15,6 +15,7 @@ struct InputEditor: NSViewRepresentable {
     var onSelectAllBlocks: () -> Void = {}
     var isRemote = false
     var remoteChannel: RemoteChannel?
+    var onTags: (Bool) -> Void = { _ in }
 
     private static let maxLines: CGFloat = 8
 
@@ -88,6 +89,7 @@ struct InputEditor: NSViewRepresentable {
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.parent.completion.close()
         coordinator.removeTags()
+        coordinator.reportTags(false)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
@@ -130,6 +132,7 @@ struct InputEditor: NSViewRepresentable {
         private var ghostItem: (item: CompletionItem, range: NSRange)?
         private var autoTask: Task<Void, Never>?
         private var suppressAuto = false
+        private var showsTags = false
         private var browsing = false
         private var isBrowsing: Bool { browsing && parent.completion.isOpen }
         private static let historyRows = 100
@@ -181,15 +184,25 @@ struct InputEditor: NSViewRepresentable {
                 observedWindow = window
             }
             let kind = shellKind
-            tags.update(
+            let selection = view.selectedRange()
+            let shown = tags.update(
                 in: view,
                 shortcuts: ShortcutStore.shared.effective(in: parent.directory),
                 quote: { ShellIntegration.quoted($0, for: kind) },
                 visible: parent.isEnabled && !parent.completion.isOpen,
+                caret: selection.length == 0 ? selection.location : nil,
                 select: { [weak self] in self?.selectShortcut($0) },
                 expand: { [weak self] in self?.expandShortcut($0, with: $1) },
                 save: { [weak self] in self?.offerShortcut($0, near: $1) }
             )
+            reportTags(shown)
+        }
+
+        func reportTags(_ shown: Bool) {
+            guard shown != showsTags else { return }
+            showsTags = shown
+            let report = parent.onTags
+            DispatchQueue.main.async { report(shown) }
         }
 
         private func offerShortcut(_ key: String, near range: NSRange) {
@@ -337,6 +350,7 @@ struct InputEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             updateGhost()
+            refreshTags()
         }
 
         func afterEdit() {
