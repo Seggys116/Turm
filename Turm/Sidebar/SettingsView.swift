@@ -225,9 +225,9 @@ struct SettingsView: View {
         .background(Theme.terminalBackground.color)
         .onChange(of: appearance) { _, new in new.apply(animated: true) }
         .onChange(of: appIcon) { _, new in new.apply() }
-        .onChange(of: isContextMenuEnabled) { _, new in ContextMenuService.isEnabled = new }
-        .onChange(of: tab) { _, new in
-            if new == .accessibility { isContextMenuEnabled = ContextMenuService.isEnabled }
+        .onChange(of: tab, initial: true) { _, new in
+            guard new == .accessibility else { return }
+            ContextMenuService.refreshEnabled { isContextMenuEnabled = $0 }
         }
     }
 
@@ -259,11 +259,21 @@ struct SettingsView: View {
     private var accessibilityTab: some View {
         section("Context menu") {
             row(ContextMenuService.title, detail: "Right-click a file, folder or the background of a Finder window to open a shell there.") {
-                Toggle(ContextMenuService.title, isOn: $isContextMenuEnabled)
+                Toggle(ContextMenuService.title, isOn: contextMenuBinding)
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
             }
         }
+    }
+
+    private var contextMenuBinding: Binding<Bool> {
+        Binding(
+            get: { isContextMenuEnabled },
+            set: { enabled in
+                isContextMenuEnabled = enabled
+                ContextMenuService.setEnabled(enabled) { isContextMenuEnabled = $0 }
+            }
+        )
     }
 
     @ViewBuilder

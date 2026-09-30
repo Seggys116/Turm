@@ -202,6 +202,14 @@ final class Workspace {
         if tabs[index].id != activeTabID { activeTabID = tabs[index].id }
     }
 
+    // views in hidden tabs can still become first responder, which must not pull their tab to the front
+    func focusInActiveTab(_ pane: PaneID) {
+        guard let index = tabs.firstIndex(where: { $0.layout.contains(pane) }), tabs[index].id == activeTabID,
+              tabs[index].focusedPane != pane
+        else { return }
+        tabs[index].focusedPane = pane
+    }
+
     func focusNext() {
         moveFocus(by: 1)
     }
@@ -229,7 +237,7 @@ final class Workspace {
 
     private func makeSession(for pane: PaneID, directory: String? = nil) -> TerminalSession {
         let session = directory.map { TerminalSession(directory: $0) } ?? TerminalSession()
-        session.onFocus = { [weak self] in self?.focus(pane) }
+        session.onFocus = { [weak self] in self?.focusInActiveTab(pane) }
         session.onExit = { [weak self] in self?.removePane(pane) }
         session.onPopOut = { [weak self] sub in self?.adopt(sub) }
         return session
@@ -239,7 +247,7 @@ final class Workspace {
     func adopt(_ session: TerminalSession) {
         let pane = PaneID()
         session.adopt()
-        session.onFocus = { [weak self] in self?.focus(pane) }
+        session.onFocus = { [weak self] in self?.focusInActiveTab(pane) }
         session.onExit = { [weak self] in self?.removePane(pane) }
         session.onPopOut = { [weak self] sub in self?.adopt(sub) }
         sessions[pane] = session
