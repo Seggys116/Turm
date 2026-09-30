@@ -159,21 +159,35 @@ nonisolated enum ProjectDetection {
     }
 
     static func snapshot(for directory: String, home: String = NSHomeDirectory()) -> ProjectSnapshot {
-        let places = candidates(from: directory, home: home)
+        snapshot(
+            places: candidates(from: directory, home: home),
+            probe: { ProjectProbe(directory: $0) },
+            manifest: { place in
+                guard let file = ProjectManifest.resolvedFile(in: place) else { return nil }
+                return (file, FileManager.default.contents(atPath: file))
+            }
+        )
+    }
+
+    static func snapshot(
+        places: [String],
+        probe makeProbe: (String) -> ProjectProbe,
+        manifest findManifest: (String) -> (path: String, data: Data?)?
+    ) -> ProjectSnapshot {
         var snapshot = ProjectSnapshot()
 
         var detections: [Detection] = []
         for place in places {
-            let probe = ProjectProbe(directory: place)
+            let probe = makeProbe(place)
             guard !probe.isEmpty else { continue }
             detections = detectors.compactMap { $0(probe) }
             if !detections.isEmpty { break }
         }
 
         var manifestRoot: String?
-        var manifestFile: String?
+        var manifestFile: (path: String, data: Data?)?
         for place in places {
-            if let file = ProjectManifest.resolvedFile(in: place) {
+            if let file = findManifest(place) {
                 manifestRoot = place
                 manifestFile = file
                 break
@@ -181,10 +195,10 @@ nonisolated enum ProjectDetection {
         }
 
         var manifest: ProjectManifest?
-        if let manifestRoot, let path = manifestFile {
-            snapshot.manifestPath = path
+        if manifestRoot != nil, let file = manifestFile {
+            snapshot.manifestPath = file.path
             do {
-                guard let data = FileManager.default.contents(atPath: path) else { throw CocoaError(.fileReadNoPermission) }
+                guard let data = file.data else { throw CocoaError(.fileReadNoPermission) }
                 manifest = try ProjectManifest.decode(data)
             } catch {
                 snapshot.notice = "Turm.json: \(describe(error))"

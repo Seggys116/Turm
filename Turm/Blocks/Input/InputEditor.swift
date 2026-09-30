@@ -13,6 +13,8 @@ struct InputEditor: NSViewRepresentable {
     let onAttach: ([URL]) -> Void
     let onDragTarget: (Bool) -> Void
     var onSelectAllBlocks: () -> Void = {}
+    var isRemote = false
+    var remoteChannel: RemoteChannel?
 
     private static let maxLines: CGFloat = 8
 
@@ -65,8 +67,10 @@ struct InputEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let coordinator = context.coordinator
         let wasFocused = coordinator.parent.isFocused
+        let wasRemote = coordinator.parent.isRemote
         coordinator.parent = self
         guard let view = coordinator.textView else { return }
+        if wasRemote != isRemote { coordinator.environmentChanged() }
         if view.string != text {
             view.string = text
             view.moveToEndOfDocument(nil)
@@ -133,7 +137,11 @@ struct InputEditor: NSViewRepresentable {
         private let shellKind = ShellIntegration.userKind
         private var shortcutPopover: NSPopover?
         private weak var observedWindow: NSWindow?
-        private let environment = SystemCompletionEnvironment.shared
+        private var environment: CompletionEnvironment {
+            parent.isRemote
+                ? RemoteCompletionEnvironment(base: SystemCompletionEnvironment.shared, channel: parent.remoteChannel)
+                : SystemCompletionEnvironment.shared
+        }
 
         init(_ parent: InputEditor) {
             self.parent = parent
@@ -145,7 +153,7 @@ struct InputEditor: NSViewRepresentable {
             )
         }
 
-        @objc private func environmentChanged() {
+        @objc func environmentChanged() {
             restyle()
             refreshTags()
         }

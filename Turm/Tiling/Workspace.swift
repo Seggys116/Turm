@@ -86,7 +86,7 @@ final class Workspace {
 
     func newShell(directory: String? = nil, command: String? = nil) {
         let pane = PaneID()
-        let session = makeSession(for: pane, directory: directory ?? focusedSession?.directory)
+        let session = makeSession(for: pane, directory: directory ?? focusedSession?.launchDirectory)
         sessions[pane] = session
         if let command, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { session.submitWhenReady(command) }
         let tab = ShellTab(layout: .leaf(pane), focusedPane: pane)

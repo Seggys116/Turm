@@ -8,11 +8,15 @@ struct InputBar: View {
     @State private var pathMenuOpen = false
     @State private var branchMenuOpen = false
     @State private var shortcutEditorOpen = false
+    @State private var hostMenuOpen = false
+    @State private var remotePathMenuOpen = false
+    @State private var hostEditorOpen = false
+    @State private var hostShortcutOpen = false
     @AppStorage(ShortcutSuggestionTracker.enabledKey) private var suggestionsEnabled = false
     private let tracker = ShortcutSuggestionTracker.shared
 
     private var suggestion: ShortcutSuggestion? {
-        guard suggestionsEnabled, !session.isRunning, !session.isAuxiliary else { return nil }
+        guard suggestionsEnabled, !session.isRunning, !session.isAuxiliary, !session.isRemote else { return nil }
         let last = session.blocks.last
         return tracker.suggestion(
             currentDirectory: session.directory,
@@ -32,6 +36,10 @@ struct InputBar: View {
         VStack(alignment: .leading, spacing: 8) {
             if !input.attachments.isEmpty {
                 AttachmentStrip(input: input)
+            }
+            if let connection = session.connection, connection.showsBanner {
+                RemoteBanner(session: session, connection: connection)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             if let suggestion {
                 SuggestionRow(suggestion: suggestion) { tracker.dismiss(suggestion) }
@@ -55,18 +63,21 @@ struct InputBar: View {
                     onSubmit: submit,
                     onClear: session.clearBlocks,
                     onFocus: session.focus,
-                    onAttach: input.attach,
+                    onAttach: attach,
                     onDragTarget: { session.isDropTargeted = $0 },
                     onSelectAllBlocks: {
                         session.selection.selectAll()
                         session.selection.claimFocus()
-                    }
+                    },
+                    isRemote: session.isRemote,
+                    remoteChannel: session.remoteChannel
                 )
                 .padding(.top, hasTags ? 18 : 0)
             }
         }
         .animation(.easeOut(duration: 0.14), value: completion.isOpen)
         .animation(.easeOut(duration: 0.2), value: hasTags)
+        .animation(.easeOut(duration: 0.14), value: session.connection?.showsBanner)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -79,49 +90,107 @@ struct InputBar: View {
         .onAppear { recordVisit() }
         .onChange(of: session.directory) { recordVisit() }
         .onChange(of: session.isRunning) { wasRunning, isRunning in
-            guard wasRunning, !isRunning, let block = session.blocks.last else { return }
+            guard wasRunning, !isRunning, let block = session.blocks.last, block.host == nil else { return }
             SystemCompletionEnvironment.shared.commandFinished(block.command, directory: session.directory)
             if suggestionsEnabled, !session.isAuxiliary, !block.usedShortcut { tracker.recordCommand(block.command) }
         }
     }
 
     private func recordVisit() {
-        guard suggestionsEnabled, !session.isAuxiliary else { return }
+        guard suggestionsEnabled, !session.isAuxiliary, !session.isRemote else { return }
         tracker.recordVisit(session.directory)
     }
 
     private var chips: some View {
         HStack(spacing: 6) {
-            Chip(text: ShortcutStore.shared.label(for: session.directory), isActive: pathMenuOpen || shortcutEditorOpen) {
-                Image(systemName: "folder").chipIcon()
-            }
-                .help(Block.abbreviate(session.directory))
-                .onTapGesture { toggle(path: true) }
-                .anchoredMenu(isOpen: $pathMenuOpen) {
-                    PathMenu(path: session.directory, close: { pathMenuOpen = false }) {
-                        pathMenuOpen = false
-                        shortcutEditorOpen = true
-                    }
-                }
-                .popover(isPresented: $shortcutEditorOpen, arrowEdge: .top) {
-                    ShortcutEditor.directory(at: session.directory) { shortcutEditorOpen = false }
-                }
-            if let git = session.git {
-                Chip(text: git.branch, isActive: branchMenuOpen) { GitBranchIcon().frame(width: 12, height: 12) }
-                    .onTapGesture { toggle(path: false) }
-                    .anchoredMenu(isOpen: $branchMenuOpen) {
-                        BranchMenu(session: session) { branchMenuOpen = false }
-                    }
-                HStack(spacing: 4) {
-                    Image(systemName: "doc").chipIcon()
-                    Text("\(git.files)")
-                    Text("\u{2022}").foregroundStyle(Theme.secondaryText.color)
-                    Text("+\(git.added)").foregroundStyle(Theme.added.color)
-                    Text("-\(git.removed)").foregroundStyle(Theme.removed.color)
-                }
-                .chipStyle()
+            if let remote = session.remote {
+                remoteChips(remote)
+            } else {
+                localChips
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func remoteChips(_ remote: TerminalSession.RemoteShell) -> some View {
+        Chip(text: session.remoteLabel ?? remote.label, isActive: hostMenuOpen || hostEditorOpen || hostShortcutOpen) {
+            Image(systemName: "network").chipIcon()
+        }
+            .help("Connected to \(remote.host)")
+            .onTapGesture {
+                remotePathMenuOpen = false
+                hostMenuOpen.toggle()
+            }
+            .anchoredMenu(isOpen: $hostMenuOpen) {
+                HostMenu(
+                    session: session,
+                    close: { hostMenuOpen = false },
+                    editHost: {
+                        hostMenuOpen = false
+                        hostEditorOpen = true
+                    },
+                    saveShortcut: {
+                        hostMenuOpen = false
+                        hostShortcutOpen = true
+                    }
+                )
+            }
+            .popover(isPresented: $hostEditorOpen, arrowEdge: .top) {
+                if let draft = session.remoteHostDraft {
+                    SSHHostEditor(draft) { hostEditorOpen = false }
+                }
+            }
+            .background {
+                Color.clear.popover(isPresented: $hostShortcutOpen, arrowEdge: .top) {
+                    if let draft = session.remoteShortcutDraft {
+                        ShortcutEditor(draft) { hostShortcutOpen = false }
+                    }
+                }
+            }
+        Chip(text: session.directory, isActive: remotePathMenuOpen) {
+            Image(systemName: "folder").chipIcon()
+        }
+            .help(session.directory)
+            .onTapGesture {
+                hostMenuOpen = false
+                remotePathMenuOpen.toggle()
+            }
+            .anchoredMenu(isOpen: $remotePathMenuOpen) {
+                RemotePathMenu(session: session) { remotePathMenuOpen = false }
+            }
+    }
+
+    @ViewBuilder
+    private var localChips: some View {
+        Chip(text: ShortcutStore.shared.label(for: session.directory), isActive: pathMenuOpen || shortcutEditorOpen) {
+            Image(systemName: "folder").chipIcon()
+        }
+            .help(Block.abbreviate(session.directory))
+            .onTapGesture { toggle(path: true) }
+            .anchoredMenu(isOpen: $pathMenuOpen) {
+                PathMenu(path: session.directory, close: { pathMenuOpen = false }) {
+                    pathMenuOpen = false
+                    shortcutEditorOpen = true
+                }
+            }
+            .popover(isPresented: $shortcutEditorOpen, arrowEdge: .top) {
+                ShortcutEditor.directory(at: session.directory) { shortcutEditorOpen = false }
+            }
+        if let git = session.git {
+            Chip(text: git.branch, isActive: branchMenuOpen) { GitBranchIcon().frame(width: 12, height: 12) }
+                .onTapGesture { toggle(path: false) }
+                .anchoredMenu(isOpen: $branchMenuOpen) {
+                    BranchMenu(session: session) { branchMenuOpen = false }
+                }
+            HStack(spacing: 4) {
+                Image(systemName: "doc").chipIcon()
+                Text("\(git.files)")
+                Text("\u{2022}").foregroundStyle(Theme.secondaryText.color)
+                Text("+\(git.added)").foregroundStyle(Theme.added.color)
+                Text("-\(git.removed)").foregroundStyle(Theme.removed.color)
+            }
+            .chipStyle()
         }
     }
 
@@ -132,6 +201,17 @@ struct InputBar: View {
         } else {
             pathMenuOpen = false
             branchMenuOpen.toggle()
+        }
+    }
+
+    private func attach(_ urls: [URL]) {
+        guard let channel = session.remoteChannel else {
+            input.attach(urls)
+            return
+        }
+        Task {
+            let paths = await channel.upload(urls)
+            input.attach(urls.filter { paths[$0] != nil }, paths: paths)
         }
     }
 

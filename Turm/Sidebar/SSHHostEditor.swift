@@ -1,0 +1,281 @@
+import AppKit
+import SwiftUI
+
+struct SSHHostEditor: View {
+    let close: () -> Void
+    var store = SSHHostStore.shared
+    @State private var draft: SSHHost
+    @State private var portText: String
+    @State private var password = ""
+    @State private var hasSavedPassword: Bool
+    @State private var keys: [SSHKey] = SSHKeys.discover()
+    @State private var detecting = false
+    @State private var detectMessage: String?
+    @FocusState private var focus: Field?
+
+    private enum Field { case key, hostname, user, port, password }
+
+    private static let chooseTag = "\u{0}choose"
+
+    init(_ host: SSHHost, close: @escaping () -> Void) {
+        self.close = close
+        _draft = State(initialValue: host)
+        _portText = State(initialValue: host.port.map(String.init) ?? "")
+        _hasSavedPassword = State(initialValue: SSHSecrets.shared.hasPassword(for: host))
+    }
+
+    private var isNew: Bool { !store.hosts.contains { $0.id == draft.id } }
+    private var cleanKey: String { Shortcuts.sanitize(draft.key) }
+    private var conflict: SSHHost? { store.conflict(for: cleanKey, excluding: draft.id) }
+    private var hostnameSet: Bool { !draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private var port: Int? {
+        let text = portText.trimmingCharacters(in: .whitespaces)
+        return Int(text).flatMap { (1...65535).contains($0) ? $0 : nil }
+    }
+
+    private var portValid: Bool { portText.trimmingCharacters(in: .whitespaces).isEmpty || port != nil }
+    private var canSave: Bool { !cleanKey.isEmpty && conflict == nil && hostnameSet && portValid }
+
+    private var keyOptions: [SSHKey] {
+        guard let current = draft.identityFile, !current.isEmpty, !keys.contains(where: { $0.path == current }) else { return keys }
+        return keys + [SSHKey(path: current, type: "", comment: "", fingerprint: nil)]
+    }
+
+    private var keySelection: Binding<String> {
+        Binding(
+            get: { draft.identityFile ?? "" },
+            set: { value in
+                if value == Self.chooseTag {
+                    if let path = Self.chooseKeyFile() { draft.identityFile = path }
+                } else {
+                    draft.identityFile = value.isEmpty ? nil : value
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(isNew ? "Add" : "Edit") SSH Host")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.text.color)
+            field("Name", hint: "Type >\(cleanKey.isEmpty ? "name" : cleanKey) in the input to connect.") {
+                HStack(spacing: 2) {
+                    Text(String(SSHHost.sigil)).foregroundStyle(Theme.secondaryText.color)
+                    TextField("name", text: $draft.key)
+                        .focused($focus, equals: .key)
+                        .onChange(of: draft.key) { _, new in
+                            let cleaned = Shortcuts.sanitize(new)
+                            if cleaned != new { draft.key = cleaned }
+                        }
+                }
+            }
+            field("Host", hint: "A hostname, an address or a Host alias from ~/.ssh/config.") {
+                TextField("example.com", text: $draft.hostname)
+                    .focused($focus, equals: .hostname)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                field("User", hint: nil) {
+                    TextField("Optional", text: $draft.user)
+                        .focused($focus, equals: .user)
+                }
+                field("Port", hint: nil) {
+                    TextField("22", text: $portText)
+                        .focused($focus, equals: .port)
+                }
+                .frame(width: 80)
+            }
+            if !portValid {
+                Text("The port must be a number from 1 to 65535.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.failure.color)
+            }
+            keyField
+            passwordField
+            if let conflict {
+                Text("\(conflict.token) is already used by \(conflict.summary).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.failure.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Cancel", action: close)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: save)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
+            }
+            .buttonStyle(SettingsButtonStyle())
+        }
+        .padding(14)
+        .frame(width: 360)
+        .background(Theme.inputBackground.color)
+        .onSubmit(save)
+        .onAppear { focus = .key }
+    }
+
+    private var keyField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Key")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.secondaryText.color)
+            HStack(spacing: 8) {
+                Picker("Key", selection: keySelection) {
+                    Text("Automatic").tag("")
+                    ForEach(keyOptions) { key in
+                        Text(label(for: key)).tag(key.path)
+                    }
+                    Divider()
+                    Text("Choose File...").tag(Self.chooseTag)
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                Button(action: detect) {
+                    HStack(spacing: 6) {
+                        if detecting { ProgressView().controlSize(.small) }
+                        Text("Detect")
+                    }
+                }
+                .buttonStyle(SettingsButtonStyle())
+                .disabled(!hostnameSet || detecting)
+            }
+            if let detectMessage {
+                Text(detectMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var passwordField: some View {
+        field("Password", hint: draft.remembersPassword ? "Stored in the macOS Keychain." : "Without Remember in Keychain, the password is used only until Turm quits.") {
+            HStack(spacing: 6) {
+                SecureField(hasSavedPassword ? "Saved" : "Optional", text: $password)
+                    .focused($focus, equals: .password)
+                if hasSavedPassword {
+                    Button("Clear") {
+                        SSHSecrets.shared.forget(draft.id)
+                        hasSavedPassword = false
+                        password = ""
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText.color)
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Toggle("Remember in Keychain", isOn: $draft.remembersPassword)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.secondaryText.color)
+        }
+    }
+
+    private func field<Content: View>(_ title: String, hint: String?, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.secondaryText.color)
+            content()
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Theme.text.color)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 26)
+                .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.chipStroke.color, lineWidth: 1))
+            if let hint {
+                Text(hint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func label(for key: SSHKey) -> String {
+        [key.name, key.type.isEmpty ? nil : key.typeLabel, key.comment.isEmpty ? nil : key.comment]
+            .compactMap { $0 }
+            .joined(separator: "  ")
+    }
+
+    private func candidate() -> SSHHost {
+        var host = draft
+        host.hostname = host.hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.user = host.user.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.port = port
+        return host
+    }
+
+    private func detect() {
+        let host = candidate()
+        let found = keys
+        detecting = true
+        detectMessage = nil
+        Task {
+            let result = await SSHKeys.detect(host, keys: found)
+            detecting = false
+            switch result {
+            case .accepted(let path, let authenticated):
+                draft.identityFile = path
+                let name = (path as NSString).lastPathComponent
+                detectMessage = "Server accepts \(name)" + (authenticated ? "" : " (needs its passphrase or ssh-agent)")
+            case .none:
+                detectMessage = "No local key was accepted"
+            case .hostKeyUnknown:
+                detectMessage = "Connect once to trust this host's key, then detect again"
+            case .unreachable(let message):
+                detectMessage = message
+            }
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        var host = candidate()
+        host.key = cleanKey
+        let wasNew = isNew
+        let previous = store.hosts.first { $0.id == host.id }
+        let carried = password.isEmpty && previous?.remembersPassword != host.remembersPassword
+            ? previous.flatMap { SSHSecrets.shared.password(for: $0) } : nil
+        guard store.save(host) else { return }
+        if !password.isEmpty {
+            SSHSecrets.shared.set(password, for: host)
+        } else if let carried {
+            SSHSecrets.shared.set(carried, for: host)
+        }
+        if wasNew, host.identityFile == nil {
+            autoDetect(host)
+        }
+        close()
+    }
+
+    private func autoDetect(_ host: SSHHost) {
+        let found = keys
+        Task {
+            guard case .accepted(let path, _) = await SSHKeys.detect(host, keys: found),
+                  var current = store.hosts.first(where: { $0.id == host.id }),
+                  current.identityFile == nil
+            else { return }
+            current.identityFile = path
+            store.save(current)
+        }
+    }
+
+    private static func chooseKeyFile() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/.ssh", isDirectory: true)
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url.standardizedFileURL.path
+    }
+}

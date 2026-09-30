@@ -108,18 +108,21 @@ enum AttachmentStore {
 final class InputModel {
     var draft = ""
     private(set) var attachments: [URL] = []
+    private var inserted: [URL: String] = [:]
 
-    func attach(_ urls: [URL]) {
+    func attach(_ urls: [URL], paths: [URL: String] = [:]) {
         for url in urls {
+            let path = paths[url] ?? url.path
             if !draft.isEmpty, !draft.hasSuffix(" "), !draft.hasSuffix("\n") { draft += " " }
-            draft += PathCompleter.escape(url.path) + " "
+            draft += PathCompleter.escape(path) + " "
+            inserted[url] = path
             if AttachmentStore.isImage(url), !attachments.contains(url) { attachments.append(url) }
         }
     }
 
     func remove(_ url: URL) {
         attachments.removeAll { $0 == url }
-        let token = PathCompleter.escape(url.path)
+        let token = PathCompleter.escape(inserted.removeValue(forKey: url) ?? url.path)
         draft = draft.replacingOccurrences(of: token + " ", with: "")
         draft = draft.replacingOccurrences(of: token, with: "")
     }
@@ -127,5 +130,6 @@ final class InputModel {
     func reset() {
         draft = ""
         attachments = []
+        inserted = [:]
     }
 }

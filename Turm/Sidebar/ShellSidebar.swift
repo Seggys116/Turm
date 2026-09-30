@@ -208,7 +208,7 @@ struct ShellSidebar: View {
             )
             .frame(width: chipWidth(for: "Settings"))
         } else if let session = workspace.representative(of: tab) {
-            let title = session.customTitle ?? ShortcutStore.shared.label(for: session.directory)
+            let title = session.customTitle ?? session.location
             let sessions = workspace.sessions(in: tab)
             let activity = ShellActivity.combined(sessions.map(\.activity))
             ShellRow(
@@ -367,7 +367,7 @@ private struct ShellRow: View {
                     }
             } else {
                 MarqueeText(
-                    text: session.customTitle ?? ShortcutStore.shared.label(for: session.directory),
+                    text: session.customTitle ?? session.location,
                     isActive: isHovered,
                     trailingInset: HoverClose.coveredWidth
                 )
@@ -389,7 +389,7 @@ private struct ShellRow: View {
         .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
         .padding(.horizontal, 8)
         .frame(height: height)
-        .help(Block.abbreviate(session.directory))
+        .help(session.remote.map { $0.host + ":" + session.directory } ?? Block.abbreviate(session.directory))
         .background(
             RoundedRectangle(cornerRadius: ShellSidebar.corner)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))

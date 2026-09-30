@@ -258,6 +258,10 @@ nonisolated final class SystemCompletionEnvironment: CompletionEnvironment, @unc
         Shortcuts.merged(Shortcuts.load(), project: ProjectShortcutIndex.shared.shortcuts(for: directory))
     }
 
+    func sshHosts() -> [SSHHost] {
+        SSHHostStore.load()
+    }
+
     func commandSpec(forCommand command: String) -> CommandSpec {
         lock.lock()
         if let cached = specCache[command] {

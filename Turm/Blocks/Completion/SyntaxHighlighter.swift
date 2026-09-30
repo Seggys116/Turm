@@ -29,6 +29,10 @@ nonisolated enum SyntaxHighlighter {
 
     static func spans(for line: String, directory: String, environment env: CompletionEnvironment) -> [HighlightSpan] {
         guard !line.isEmpty, line.utf16.count <= maxLength else { return [] }
+        if let route = SSHRoute.parse(line, hosts: env.sshHosts()) {
+            let start = line.utf16.count - line.drop(while: \.isWhitespace).utf16.count
+            return [HighlightSpan(range: NSRange(location: start, length: 1 + route.token.utf16.count), kind: .alias)]
+        }
         let matches = Shortcuts.scan(line, in: env.shortcuts(in: directory))
         guard !matches.isEmpty else { return shellSpans(for: line, directory: directory, environment: env) }
         let directory = matches.first(where: \.changesDirectory)?.target ?? directory

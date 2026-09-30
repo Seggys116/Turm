@@ -9,7 +9,10 @@ final class Block: Identifiable {
     let usedShortcut: Bool
     let directory: String
     let git: GitStatus?
+    let host: String?
     let emulator: BlockEmulator
+    private(set) var connectedTo: String?
+    private(set) var notice: String?
     private(set) var output = ""
     private(set) var segments: [OutputSegment] = []
     private(set) var exitCode: Int32?
@@ -19,12 +22,26 @@ final class Block: Identifiable {
     private var rawLog: [UInt8] = []
     private static let rawLogLimit = 2_000_000
 
-    init(command: String, usedShortcut: Bool = false, directory: String, git: GitStatus?, emulator: BlockEmulator) {
+    init(
+        command: String, usedShortcut: Bool = false, directory: String, git: GitStatus?, host: String? = nil,
+        notice: String? = nil, emulator: BlockEmulator
+    ) {
         self.command = command
         self.usedShortcut = usedShortcut
         self.directory = directory
         self.git = git
+        self.host = host
+        self.notice = notice
         self.emulator = emulator
+    }
+
+    var location: String {
+        guard let host else { return ShortcutStore.shared.label(for: directory) }
+        return host + ":" + directory
+    }
+
+    func markConnected(to host: String) {
+        connectedTo = host
     }
 
     var rawBytes: [UInt8] {

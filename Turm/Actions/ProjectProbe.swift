@@ -4,22 +4,33 @@ nonisolated struct ProjectProbe {
     let directory: String
     private let entries: Set<String>
     private let virtualFiles: [String: String]?
+    private let remote: RemoteDirectory?
 
     init(directory: String) {
         self.directory = directory
         virtualFiles = nil
+        remote = nil
         entries = Set((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
     }
 
     init(files: [String: String]) {
         directory = "/sample"
         virtualFiles = files
+        remote = nil
         entries = Set(files.keys.map { String($0.split(separator: "/").first ?? "") })
+    }
+
+    init(directory: String, remote: RemoteDirectory) {
+        self.directory = directory
+        self.remote = remote
+        virtualFiles = nil
+        entries = Set(remote.entries.map(\.name))
     }
 
     var isEmpty: Bool { entries.isEmpty }
 
     func has(_ path: String) -> Bool {
+        if let remote, path.contains("/") { return remote.existing.contains(path) }
         if let virtualFiles {
             return virtualFiles[path] != nil || virtualFiles.keys.contains { $0.hasPrefix(path + "/") }
         }
@@ -39,6 +50,7 @@ nonisolated struct ProjectProbe {
 
     func text(_ path: String, limit: Int = 262_144) -> String? {
         if let virtualFiles { return virtualFiles[path] }
+        if let remote { return remote.files[path] }
         let full = (directory as NSString).appendingPathComponent(path)
         guard let handle = FileHandle(forReadingAtPath: full) else { return nil }
         defer { try? handle.close() }

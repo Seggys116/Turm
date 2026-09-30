@@ -16,7 +16,7 @@ struct SpotlightView: View {
     private static let visibleRows = 9
 
     private var directory: String {
-        workspace.focusedSession?.directory ?? NSHomeDirectory()
+        workspace.focusedSession?.launchDirectory ?? NSHomeDirectory()
     }
 
     private var rows: [SpotlightRow] {
@@ -39,11 +39,11 @@ struct SpotlightView: View {
             }
             return tab.layout.leaves.compactMap { pane in
                 guard let session = workspace.session(for: pane) else { return nil }
-                var detail = store.label(for: session.directory)
+                var detail = session.location
                 if let branch = session.git?.branch { detail += "  " + branch }
                 if session.isRunning, let command = session.current?.command { detail += "  running " + command }
                 return SpotlightShell(
-                    tab: tab.id, pane: pane, title: session.customTitle ?? store.label(for: session.directory), detail: detail,
+                    tab: tab.id, pane: pane, title: session.customTitle ?? session.location, detail: detail,
                     fields: session.searchFields, commands: session.blocks.map(\.command), isSettings: false
                 )
             }

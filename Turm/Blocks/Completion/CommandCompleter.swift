@@ -14,6 +14,12 @@ nonisolated enum CommandCompleter {
         environment env: CompletionEnvironment
     ) -> CompletionResult? {
         let typedPrefix = String(line[..<cursor])
+        if let typed = SSHRoute.partial(typedPrefix) {
+            let items = sshItems(typed, env: env)
+            guard !items.isEmpty, let sigil = typedPrefix.firstIndex(of: SSHHost.sigil) else { return nil }
+            let start = String.Index(utf16Offset: typedPrefix.utf16.distance(from: typedPrefix.startIndex, to: sigil), in: line)
+            return CompletionResult(range: start..<cursor, items: Array(items.prefix(maxItems)))
+        }
         let shortcuts = env.shortcuts(in: baseDirectory)
         if let partial = Shortcuts.partial(atEndOf: typedPrefix) {
             let items = shortcutItems(partial, shortcuts: shortcuts, env: env)
@@ -483,6 +489,20 @@ nonisolated enum CommandCompleter {
             fromHistory.append(CompletionItem(insert: entry, kind: .history, detail: nil, terminator: ""))
         }
         items += fromHistory
+        return items
+    }
+
+    static func sshItems(_ typed: String, env: CompletionEnvironment) -> [CompletionItem] {
+        let lower = typed.lowercased()
+        let saved = env.sshHosts()
+        var items = saved
+            .filter { $0.key.lowercased().hasPrefix(lower) }
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { CompletionItem(insert: $0.token, kind: .host, detail: $0.summary) }
+        let taken = Set(saved.map { $0.key.lowercased() })
+        for name in ArgumentSources.sshHosts(env) where name.lowercased().hasPrefix(lower) && !taken.contains(name.lowercased()) {
+            items.append(CompletionItem(insert: String(SSHHost.sigil) + name, kind: .host, detail: "ssh config"))
+        }
         return items
     }
 

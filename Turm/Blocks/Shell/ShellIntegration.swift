@@ -18,10 +18,13 @@ enum ShellIntegration {
 
     enum Submission {
         case bracketedPaste
+        case typed
         case sourceFile(URL)
 
         func payload(for command: String) throws -> [UInt8] {
             switch self {
+            case .typed:
+                return Array(command.replacingOccurrences(of: "\n", with: "\r").utf8) + [0x0D]
             case .bracketedPaste:
                 return [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E] + Array(command.utf8) + [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E, 0x0D]
             case .sourceFile(let url):
@@ -42,7 +45,7 @@ enum ShellIntegration {
 
     static var forcedShell: String?
 
-    private static let zshFiles: [(name: String, contents: String)] = [
+    nonisolated static let zshFiles: [(name: String, contents: String)] = [
         (".zshenv", """
         export TURM_INTEGRATION_DIR="$ZDOTDIR"
         _turm_home="${TURM_USER_ZDOTDIR:-$HOME}"
@@ -95,7 +98,9 @@ enum ShellIntegration {
         _turm_precmd() {
           local code=$?
           _turm_report_env
-          if [[ -n $_turm_ran ]]; then
+          if [[ -n $TURM_REMOTE ]]; then
+            printf '\\e]7777;R;%s;%s;%s\\a' "$TURM_REMOTE" "${_turm_ran:+$code}" "$PWD"
+          elif [[ -n $_turm_ran ]]; then
             printf '\\e]7777;P;%d;%s\\a' $code "$PWD"
           else
             printf '\\e]7777;P;;%s\\a' "$PWD"
@@ -109,6 +114,12 @@ enum ShellIntegration {
         PROMPT_EOL_MARK=''
         precmd_functions=(_turm_precmd $precmd_functions _turm_quiet)
         preexec_functions+=(_turm_preexec)
+        if [[ -n $TURM_SSH_WRAPPER ]] && (( ! $+functions[ssh] && ! $+aliases[ssh] )); then
+          ssh() { "$TURM_SSH_WRAPPER" "$@"; }
+        fi
+        if [[ -n $TURM_REMOTE ]]; then
+          printf '\\e]7777;H;%s;zsh;%s@%s\\a' "$TURM_REMOTE" "${USER:-$(id -un)}" "${HOST:-$(hostname)}"
+        fi
         _turm_quiet
 
         """),
@@ -119,11 +130,12 @@ enum ShellIntegration {
         let kind = Kind(path: shell) ?? .zsh
         var environment = ["TERM=xterm-256color", "COLORTERM=truecolor", "SHELL=\(shell)"] + TerminalIdentity.environment
         let inherited = ProcessInfo.processInfo.environment
-        var reserved: Set<String> = ["SHELL", "TURM_CMD_FILE"]
+        var reserved: Set<String> = ["SHELL", "TURM_CMD_FILE", "TURM_REMOTE", "TURM_SSH_WRAPPER", "TURM_SSH_STATE", "TURM_SSH_HOSTS"]
         if kind == .zsh { reserved.insert("ZDOTDIR") }
         for (key, value) in inherited where !isTerminalIdentity(key) && !reserved.contains(key) {
             environment.append("\(key)=\(value)")
         }
+        environment += RemoteIntegration.environment()
         if inherited["CLICOLOR"] == nil {
             environment.append("CLICOLOR=1")
         }

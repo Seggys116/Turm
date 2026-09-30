@@ -63,7 +63,7 @@ struct BranchMenu: View {
                 close()
             }
         }
-        .task { branches = await GitInspector.branches(in: session.directory) }
+        .task { branches = await session.branches() }
     }
 
     @ViewBuilder

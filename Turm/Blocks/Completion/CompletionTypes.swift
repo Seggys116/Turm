@@ -290,6 +290,7 @@ nonisolated protocol CompletionEnvironment: Sendable {
     func awsIndexPath() -> String?
     func commandSpec(forCommand command: String) -> CommandSpec
     func shortcuts(in directory: String) -> [Shortcut]
+    func sshHosts() -> [SSHHost]
 }
 
 nonisolated extension CompletionEnvironment {
@@ -304,6 +305,8 @@ nonisolated extension CompletionEnvironment {
     func awsIndexPath() -> String? { AWSCompletionIndex.locate(self) }
 
     func shortcuts(in directory: String) -> [Shortcut] { [] }
+
+    func sshHosts() -> [SSHHost] { [] }
 
     func commandSpec(forCommand command: String) -> CommandSpec {
         CommandSpec(subcommands: [], flags: flags(forCommand: command))

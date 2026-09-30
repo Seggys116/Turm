@@ -170,6 +170,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case statusBar = "Project Bar"
     case shortcuts = "Shortcuts"
+    case ssh = "SSH"
     case accessibility = "Accessibility"
     case about = "About"
 
@@ -209,6 +210,7 @@ struct SettingsView: View {
                     case .appearance: appearanceTab
                     case .statusBar: StatusBarSettings()
                     case .shortcuts: ShortcutSettings()
+                    case .ssh: SSHSettings()
                     case .accessibility: accessibilityTab
                     case .about: aboutTab
                     }

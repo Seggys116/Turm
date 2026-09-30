@@ -5,6 +5,9 @@ enum ShellEvent: Equatable {
     case promptReady(exitCode: Int32?, directory: String)
     case notification(title: String, body: String)
     case environment([String: String])
+    case sshStarted(socket: String, target: String)
+    case remoteHello(token: String, kind: String, host: String)
+    case remotePrompt(token: String, exitCode: Int32?, directory: String)
 }
 
 enum StreamPiece: Equatable {
@@ -156,6 +159,7 @@ struct ShellStreamParser {
         guard let text = String(bytes: payload, encoding: .utf8), text.hasPrefix(prefix) else { return nil }
         let body = text.dropFirst(prefix.count)
         let fields = body.split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)
+        let remote = body.split(separator: ";", maxSplits: 3, omittingEmptySubsequences: false)
         switch fields.first {
         case "C":
             return .commandStarted
@@ -164,6 +168,15 @@ struct ShellStreamParser {
             return .promptReady(exitCode: Int32(fields[1]), directory: String(fields[2]))
         case "E":
             return .environment(fields.count > 1 ? environment(fromBase64: fields[1]) : [:])
+        case "S":
+            guard fields.count == 3, !fields[1].isEmpty else { return nil }
+            return .sshStarted(socket: String(fields[1]), target: String(fields[2]))
+        case "H":
+            guard remote.count == 4, !remote[1].isEmpty else { return nil }
+            return .remoteHello(token: String(remote[1]), kind: String(remote[2]), host: String(remote[3]))
+        case "R":
+            guard remote.count == 4, !remote[1].isEmpty else { return nil }
+            return .remotePrompt(token: String(remote[1]), exitCode: Int32(remote[2]), directory: String(remote[3]))
         default:
             return nil
         }

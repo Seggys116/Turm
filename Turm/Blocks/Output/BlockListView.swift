@@ -147,12 +147,14 @@ struct BlockView: View {
                 .popover(isPresented: $shortcutEditorOpen, arrowEdge: .bottom) {
                     ShortcutEditor(commandShortcut) { shortcutEditorOpen = false }
                 }
-            PieceText(
-                chunk: TextChunk(commandText),
-                highlights: session.search.commandHighlights(for: block),
-                piece: PieceRef(id: PieceID(blockID: block.id, target: .command), host: session.selection)
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if !block.command.isEmpty {
+                PieceText(
+                    chunk: TextChunk(commandText),
+                    highlights: session.search.commandHighlights(for: block),
+                    piece: PieceRef(id: PieceID(blockID: block.id, target: .command), host: session.selection)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if block.hasOutput {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(block.segments.enumerated()), id: \.offset) { index, segment in
@@ -192,7 +194,7 @@ struct BlockView: View {
             Button("Copy Output") { copy(block.plainOutput) }
                 .disabled(block.output.isEmpty)
             Button("Run Again") { session.submit(block.command) }
-                .disabled(session.phase != .ready)
+                .disabled(session.phase != .ready || block.command.isEmpty || block.host != session.remote?.label)
             Divider()
             Button(existingShortcut == nil ? "Save as Command Shortcut..." : "Edit Command Shortcut...") {
                 shortcutEditorOpen = true
@@ -229,7 +231,11 @@ struct BlockView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(ShortcutStore.shared.label(for: block.directory))
+            if let notice = block.notice {
+                Text(notice)
+            } else {
+                Text(block.location)
+            }
             if let git = block.git {
                 Text("git:(\(git.branch))")
                 Text("\(git.files) \u{2022} +\(git.added) -\(git.removed)")
@@ -237,7 +243,9 @@ struct BlockView: View {
             if let code = block.exitCode, code != 0 {
                 Text("exit \(code)").foregroundStyle(Theme.failure.color)
             }
-            if let duration = block.duration {
+            if let host = block.connectedTo {
+                Text("connected to \(host)").foregroundStyle(Theme.added.color)
+            } else if let duration = block.duration {
                 Text("(\(Block.formatDuration(duration)))")
             } else if block.isRunning {
                 Text("running")

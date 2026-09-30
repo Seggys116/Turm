@@ -1,6 +1,6 @@
 import Foundation
 
-enum ShellScripts {
+nonisolated enum ShellScripts {
     static let bash = #"""
         _turm_file=$TURM_CMD_FILE
         unset TURM_CMD_FILE
@@ -24,6 +24,13 @@ enum ShellScripts {
             printf '\e]7777;E;%s\a' "$encoded"
           fi
         }
+        _turm_emit() {
+          if [[ -n $TURM_REMOTE ]]; then
+            printf '\e]7777;R;%s;%s;%s\a' "$TURM_REMOTE" "$1" "$PWD"
+          else
+            printf '\e]7777;P;%s;%s\a' "$1" "$PWD"
+          fi
+        }
         _turm_prompt() {
           local code=$?
           if [[ -n $_turm_ran ]]; then
@@ -35,10 +42,10 @@ enum ShellScripts {
               command rm -f "$_turm_file"
             fi
             _turm_report_env
-            printf '\e]7777;P;%d;%s\a' "$code" "$PWD"
+            _turm_emit "$code"
           else
             _turm_report_env
-            printf '\e]7777;P;;%s\a' "$PWD"
+            _turm_emit ''
           fi
           _turm_ran=
           return $code
@@ -73,6 +80,17 @@ enum ShellScripts {
           PROMPT_COMMAND=(_turm_prompt "${PROMPT_COMMAND[@]}" _turm_arm)
         else
           PROMPT_COMMAND=$'_turm_prompt\n'"$PROMPT_COMMAND"$'\n_turm_arm'
+        fi
+        if [[ -n $TURM_SSH_WRAPPER ]] && ! declare -F ssh >/dev/null && ! alias ssh >/dev/null 2>&1; then
+          ssh() { "$TURM_SSH_WRAPPER" "$@"; }
+        fi
+        if [[ -n $TURM_REMOTE ]]; then
+          _turm_kind=bash-legacy
+          if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+            bind 'set enable-bracketed-paste on' 2>/dev/null && _turm_kind=bash
+          fi
+          printf '\e]7777;H;%s;%s;%s@%s\a' "$TURM_REMOTE" "$_turm_kind" "${USER:-$(id -un)}" "${HOSTNAME:-$(hostname)}"
+          unset _turm_kind
         fi
         _turm_quiet
         """#
@@ -109,13 +127,30 @@ enum ShellScripts {
             set -l code $status
             if set -q _turm_ran
                 _turm_report_env
-                printf '\e]7777;P;%d;%s\a' $code $PWD
+                _turm_emit $code
                 set -e _turm_ran
             else if set -q _turm_pending
                 _turm_report_env
-                printf '\e]7777;P;;%s\a' $PWD
+                _turm_emit ''
             end
             set -e _turm_pending
+        end
+
+        function _turm_emit
+            if set -q TURM_REMOTE
+                printf '\e]7777;R;%s;%s;%s\a' $TURM_REMOTE $argv[1] $PWD
+            else
+                printf '\e]7777;P;%s;%s\a' $argv[1] $PWD
+            end
+        end
+
+        if set -q TURM_SSH_WRAPPER; and not functions -q ssh
+            function ssh --wraps ssh
+                $TURM_SSH_WRAPPER $argv
+            end
+        end
+        if set -q TURM_REMOTE
+            printf '\e]7777;H;%s;fish;%s@%s\a' $TURM_REMOTE (id -un) (hostname)
         end
         """#
 }
