@@ -15,7 +15,8 @@ struct KeyForwarder: NSViewRepresentable {
         view.session = session
         guard isFocused else { return }
         DispatchQueue.main.async {
-            guard let window = view.window, window.firstResponder !== view,
+            // a forwarder fading out after its command ended must not pull focus from the input
+            guard view.session?.isRunning == true, let window = view.window, window.firstResponder !== view,
                   !(window.firstResponder is SelectionResponderView)
             else { return }
             window.makeFirstResponder(view)

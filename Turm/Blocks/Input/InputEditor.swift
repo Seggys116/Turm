@@ -80,7 +80,7 @@ struct InputEditor: NSViewRepresentable {
         }
         view.isEditable = isEnabled
         if !isEnabled { completion.close() }
-        if isFocused, !wasFocused || !coordinator.didFocus {
+        if isFocused, !wasFocused || !coordinator.didFocus || view.window?.firstResponder === view.window {
             coordinator.attached()
         }
         coordinator.refreshTags()
