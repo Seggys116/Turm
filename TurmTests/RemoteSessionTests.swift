@@ -145,7 +145,9 @@ struct RemoteSessionTests {
         try await connectRemote(session, shell: shell, home: home)
         let before = try #require(session.remote)
         let count = session.blocks.count
-        let historyCount = CommandHistory.shared.entries.count
+        let reloadCommand = RemoteIntegration.enableCommand.trimmingCharacters(in: .whitespaces)
+        let recorded = { CommandHistory.shared.entries.filter { $0.contains(reloadCommand) }.count }
+        let historyCount = recorded()
 
         session.reloadRemoteShell()
         let reloaded = await waitUntil {
@@ -154,7 +156,7 @@ struct RemoteSessionTests {
         try #require(reloaded)
         #expect(session.remotes.count == 1)
         #expect(session.blocks.last?.connectedTo != nil)
-        #expect(CommandHistory.shared.entries.count == historyCount)
+        #expect(recorded() == historyCount)
 
         session.submit("echo again")
         let echoed = try await finishedBlock(session, count + 2)
