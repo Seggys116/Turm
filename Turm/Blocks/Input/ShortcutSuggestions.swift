@@ -35,11 +35,15 @@ nonisolated struct ShortcutStats: Codable, Equatable, Sendable {
         Self.trim(&directories)
     }
 
+    static func isTrackable(_ text: String) -> Bool {
+        guard text.count >= minimumCommandLength, let first = text.first, ShortcutKind(sigil: first) == nil else { return false }
+        let program = text.prefix { !$0.isWhitespace }
+        return !["cd", "pushd", "popd"].contains(program)
+    }
+
     mutating func recordCommand(_ command: String) {
         let text = Self.normalized(command)
-        guard text.count >= Self.minimumCommandLength,
-              let first = text.first, ShortcutKind(sigil: first) == nil
-        else { return }
+        guard Self.isTrackable(text) else { return }
         commands[text, default: 0] += 1
         Self.trim(&commands)
     }
@@ -57,10 +61,13 @@ nonisolated struct ShortcutStats: Codable, Equatable, Sendable {
         if let lastCommand {
             let command = Self.normalized(lastCommand)
             let taken = shortcuts.contains { $0.kind == .command && Self.normalized($0.value) == command }
-            if (commands[command] ?? 0) >= Self.commandThreshold, !taken,
+            if Self.isTrackable(command), (commands[command] ?? 0) >= Self.commandThreshold, !taken,
                !dismissed.contains(Self.identifier(.command, command)) {
                 let draft = Shortcut(
-                    kind: .command, key: ShortcutSuggestions.commandKey(for: command, in: shortcuts), name: "", value: command
+                    kind: .command,
+                    key: ShortcutSuggestions.commandKey(for: command, in: shortcuts),
+                    name: ShortcutSuggestions.commandWords(command).joined(separator: " "),
+                    value: command
                 )
                 return ShortcutSuggestion(kind: .command, value: command, draft: draft)
             }
@@ -91,13 +98,54 @@ nonisolated struct ShortcutStats: Codable, Equatable, Sendable {
 }
 
 nonisolated enum ShortcutSuggestions {
+    private static let wrappers: Set<String> = ["sudo", "env", "time", "nohup", "exec", "command", "caffeinate", "noglob"]
+    private static let runners: Set<String> = ["npm", "pnpm", "yarn", "bun", "npx", "bunx", "uv", "poetry", "pipenv", "mise"]
+    private static let runVerbs: Set<String> = ["run", "exec", "x", "run-script"]
+    private static let interpreters: Set<String> = ["python", "python3", "node", "ruby", "bash", "sh", "zsh", "deno", "perl", "php"]
+    private static let scriptExtensions: Set<String> = ["py", "js", "mjs", "cjs", "ts", "rb", "sh", "zsh", "bash", "pl", "php"]
+
     static func commandKey(for command: String, in shortcuts: [Shortcut]) -> String {
-        let words = command.split(whereSeparator: \.isWhitespace).map(String.init)
-        var parts: [String] = []
-        if let first = words.first { parts.append(Shortcuts.sanitize(first)) }
-        if words.count > 1, !words[1].hasPrefix("-") { parts.append(Shortcuts.sanitize(words[1])) }
-        let base = parts.filter { !$0.isEmpty }.joined(separator: "-").lowercased()
+        let base = commandWords(command).joined(separator: "-")
         return unique(base.isEmpty ? "command" : base, kind: .command, in: shortcuts)
+    }
+
+    static func commandWords(_ command: String) -> [String] {
+        var words = command.split(whereSeparator: \.isWhitespace).map(String.init)[...]
+        while let first = words.first, wrappers.contains(first) || isAssignment(first) { words.removeFirst() }
+        guard let head = words.popFirst() else { return [] }
+        var program = Shortcuts.sanitize((head as NSString).lastPathComponent).lowercased()
+        if interpreters.contains(program), let script = words.first, let stem = scriptStem(script) {
+            program = stem
+            words.removeFirst()
+        }
+        guard !program.isEmpty else { return [] }
+        var parts = [program]
+        for word in words {
+            if parts.count == 1, runners.contains(program), runVerbs.contains(word) { continue }
+            guard parts.count < 2, let part = argumentWord(word) else { break }
+            parts.append(part)
+        }
+        return parts
+    }
+
+    private static func isAssignment(_ word: String) -> Bool {
+        guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
+        return word[..<equals].allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+    }
+
+    private static func scriptStem(_ word: String) -> String? {
+        let name = (word as NSString).lastPathComponent
+        let ext = (name as NSString).pathExtension.lowercased()
+        guard scriptExtensions.contains(ext) else { return nil }
+        let stem = Shortcuts.sanitize((name as NSString).deletingPathExtension).lowercased()
+        return stem.isEmpty ? nil : stem
+    }
+
+    private static func argumentWord(_ word: String) -> String? {
+        guard word.count <= 20, let first = word.first, first.isLetter,
+              word.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ":") })
+        else { return nil }
+        return word.replacingOccurrences(of: ":", with: "-").lowercased()
     }
 
     static func directoryKey(for folder: String, in shortcuts: [Shortcut]) -> String {
@@ -117,6 +165,7 @@ nonisolated enum ShortcutSuggestions {
 final class ShortcutSuggestionTracker {
     static let shared = ShortcutSuggestionTracker()
     static let defaultsKey = "turm.shortcutStats"
+    static let enabledKey = "turm.shortcutSuggestions"
 
     private(set) var stats: ShortcutStats
     @ObservationIgnored private let defaults: UserDefaults

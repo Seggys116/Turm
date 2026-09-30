@@ -43,6 +43,17 @@ struct ShortcutStatsTests {
         #expect(value.commands.count == 2)
     }
 
+    @Test func navigationCommandsAreNeverTracked() {
+        var value = ShortcutStats()
+        let cd = "cd /Users/tester/Projects/rust/appleutils"
+        for _ in 0..<9 {
+            value.recordCommand(cd)
+            value.recordCommand("pushd /Users/tester/Projects/rust")
+        }
+        #expect(value.commands.isEmpty)
+        #expect(suggest(stats(commands: [cd: 9]), command: cd) == nil)
+    }
+
     @Test func directorySuggestionThreshold() {
         #expect(suggest(stats(visits: ["/work/api": 4])) == nil)
         let found = suggest(stats(visits: ["/work/api": 5]))
@@ -83,7 +94,8 @@ struct ShortcutStatsTests {
         let found = suggest(stats(commands: [longCommand: 4]), command: longCommand)
         #expect(found?.kind == .command)
         #expect(found?.value == longCommand)
-        #expect(found?.draft.token == "!npm-run")
+        #expect(found?.draft.token == "!npm-build")
+        #expect(found?.draft.name == "npm build")
         #expect(found?.draft.value == longCommand)
         #expect(suggest(stats(commands: [longCommand: 9]), command: nil) == nil)
     }
@@ -116,17 +128,24 @@ struct ShortcutStatsTests {
         func key(_ command: String, _ shortcuts: [Shortcut] = []) -> String {
             ShortcutSuggestions.commandKey(for: command, in: shortcuts)
         }
-        #expect(key("npm run build") == "npm-run")
+        #expect(key("npm run build") == "npm-build")
         #expect(key("make") == "make")
         #expect(key("  Docker   Compose up -d") == "docker-compose")
         #expect(key("ls -la") == "ls")
         #expect(key("!!") == "command")
         let make = Shortcut(kind: .command, key: "make", name: "", value: "make")
         let make2 = Shortcut(kind: .command, key: "make2", name: "", value: "make all")
-        let fileMake = Shortcut(kind: .file, key: "npm-run", name: "", value: "/x")
+        let fileMake = Shortcut(kind: .file, key: "npm-build", name: "", value: "/x")
         #expect(key("make", [make]) == "make2")
         #expect(key("make", [make, make2]) == "make3")
-        #expect(key("npm run build", [fileMake]) == "npm-run")
+        #expect(key("npm run build", [fileMake]) == "npm-build")
+        #expect(key("sudo FOO=1 make install") == "make-install")
+        #expect(key("/usr/local/bin/cargo test --release") == "cargo-test")
+        #expect(key("python3 scripts/deploy.py staging") == "deploy-staging")
+        #expect(key("git -C ~/src status") == "git")
+        #expect(key("swift test --filter Foo") == "swift-test")
+        #expect(key("npm run lint:fix") == "npm-lint-fix")
+        #expect(key("ssh user@host.example.com") == "ssh")
     }
 
     @Test func statsAreCapped() {

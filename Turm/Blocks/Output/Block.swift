@@ -6,6 +6,7 @@ import SwiftUI
 final class Block: Identifiable {
     let id = UUID()
     let command: String
+    let usedShortcut: Bool
     let directory: String
     let git: GitStatus?
     let emulator: BlockEmulator
@@ -18,8 +19,9 @@ final class Block: Identifiable {
     private var rawLog: [UInt8] = []
     private static let rawLogLimit = 2_000_000
 
-    init(command: String, directory: String, git: GitStatus?, emulator: BlockEmulator) {
+    init(command: String, usedShortcut: Bool = false, directory: String, git: GitStatus?, emulator: BlockEmulator) {
         self.command = command
+        self.usedShortcut = usedShortcut
         self.directory = directory
         self.git = git
         self.emulator = emulator

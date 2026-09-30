@@ -4,9 +4,17 @@ struct ShortcutSettings: View {
     var store = ShortcutStore.shared
     @State private var editing: UUID?
     @State private var adding: Shortcut?
+    @AppStorage(ShortcutSuggestionTracker.enabledKey) private var suggestionsEnabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            SettingsSection("Suggestions") {
+                SettingsFormRow("Suggest shortcuts", detail: "Offer to save folders you open and commands you type often. Turning this off also stops counting them.") {
+                    Toggle("Suggest shortcuts", isOn: $suggestionsEnabled)
+                        .labelsHidden()
+                        .toggleStyle(SquareToggleStyle())
+                }
+            }
             ForEach(ShortcutKind.allCases) { kind in
                 section(kind)
             }

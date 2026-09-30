@@ -118,6 +118,13 @@ final class BlockTextNSView: NSTextView {
         super.viewWillDraw()
     }
 
+    // non-contiguous layout only covers the visible rect NSTextView tracks, which goes stale inside a SwiftUI scroll view
+    override func draw(_ dirtyRect: NSRect) {
+        materialize()
+        if let container = textContainer { layout.ensureLayout(for: container) }
+        super.draw(dirtyRect)
+    }
+
     override func accessibilityValue() -> String? {
         materialize()
         return super.accessibilityValue()

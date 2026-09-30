@@ -44,7 +44,7 @@ enum Theme {
     static let terminalBackground = ThemeColor(light: 0xFFFFFF, dark: 0x0B0B0C)
     static let inputBackground = ThemeColor(light: 0xF5F5F7, dark: 0x111113)
     static let topBar = ThemeColor(light: 0xE6E6EA, dark: 0x1B1B1F)
-    static let sidebar = ThemeColor(light: 0xF0F0F3, dark: 0x131316)
+    static let sidebar = ThemeColor(light: 0xEBEBEE, dark: 0x0E0E10)
     static let statusBar = ThemeColor(light: 0xECECF0, dark: 0x151518)
     static let text = ThemeColor(light: 0x1F2328, dark: 0xDCDCDC)
     static let divider = ThemeColor(
@@ -82,6 +82,12 @@ enum Theme {
     static let syntaxComment = ThemeColor(light: 0x8C959F, dark: 0x6B7280)
     static let syntaxGroup = ThemeColor(light: 0x953800, dark: 0xD19A66)
     static let syntaxError = ThemeColor(light: 0xCF222E, dark: 0xF26B78)
+    static let scrollKnob = ThemeColor(
+        light: NSColor(white: 0, alpha: 0.26), dark: NSColor(white: 1, alpha: 0.22)
+    )
+    static let scrollKnobActive = ThemeColor(
+        light: NSColor(white: 0, alpha: 0.45), dark: NSColor(white: 1, alpha: 0.4)
+    )
     static let inputGhost = ThemeColor(
         light: NSColor(white: 0, alpha: 0.32), dark: NSColor(white: 1, alpha: 0.3)
     )

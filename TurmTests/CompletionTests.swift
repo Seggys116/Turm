@@ -1041,17 +1041,6 @@ struct AutoCompletionTests {
         #expect(AutoTrigger.eligible("git c"))
     }
 
-    @Test func showsOnlyForNonEmptyWordsAndUsefulResults() {
-        let items = [CompletionItem(insert: "checkout", kind: .subcommand), CompletionItem(insert: "cherry-pick", kind: .subcommand)]
-        let text = "git c"
-        #expect(AutoTrigger.shouldShow(text: text, range: NSRange(location: 4, length: 1), items: items))
-        #expect(!AutoTrigger.shouldShow(text: text, range: NSRange(location: 5, length: 0), items: items))
-        #expect(!AutoTrigger.shouldShow(text: text, range: NSRange(location: 4, length: 1), items: []))
-        let exact = [CompletionItem(insert: "git", kind: .command)]
-        #expect(!AutoTrigger.shouldShow(text: "git", range: NSRange(location: 0, length: 3), items: exact))
-        #expect(AutoTrigger.shouldShow(text: "echo $", range: NSRange(location: 6, length: 0), items: items))
-    }
-
     @MainActor @Test func enterIsOnlyConsumedAfterTheUserEngages() {
         let model = CompletionModel()
         let items = [CompletionItem(insert: "a", kind: .file), CompletionItem(insert: "b", kind: .file), CompletionItem(insert: "c", kind: .file)]

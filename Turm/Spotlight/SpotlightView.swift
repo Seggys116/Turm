@@ -101,6 +101,7 @@ struct SpotlightView: View {
                 }
                 .padding(4)
             }
+            .squareScrollbar()
             .frame(height: CGFloat(min(rows.count, Self.visibleRows)) * Self.rowHeight + 8)
             .onChange(of: current) {
                 if rows.indices.contains(current) { proxy.scrollTo(rows[current].id) }

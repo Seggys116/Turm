@@ -49,15 +49,6 @@ nonisolated enum AutoTrigger {
         guard let last = text.last else { return false }
         return !last.isWhitespace
     }
-
-    static func shouldShow(text: String, range: NSRange, items: [CompletionItem]) -> Bool {
-        guard !items.isEmpty else { return false }
-        let typed = (text as NSString).substring(with: range)
-        let opensVariable = text.hasSuffix("$") || text.hasSuffix("${")
-        if range.length == 0 && !opensVariable { return false }
-        if items.count == 1, items[0].insert == typed || items[0].insert + items[0].terminator == typed { return false }
-        return true
-    }
 }
 
 struct CompletionList: View {
@@ -79,7 +70,8 @@ struct CompletionList: View {
                 }
                 .padding(.vertical, 4)
             }
-            .scrollIndicators(model.items.count > Self.maxRows ? .automatic : .never)
+            .squareScrollbar()
+            .onAppear { proxy.scrollTo(model.selected) }
             .onChange(of: model.selected) { _, value in
                 proxy.scrollTo(value)
             }

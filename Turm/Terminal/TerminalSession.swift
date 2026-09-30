@@ -25,6 +25,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var altScreen: AltScreenHost?
     private(set) var failure: String?
     private(set) var progress: Terminal.ProgressReport?
+    private(set) var textProgress: Double?
+    private(set) var seenOutcome: UUID?
     private(set) var programTitle: String?
     private(set) var runningOutputFrame: CGRect?
     private(set) var userTitle: String?
@@ -41,6 +43,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     @ObservationIgnored private var process: LocalProcess!
     @ObservationIgnored private var parser = ShellStreamParser()
+    @ObservationIgnored private var outputProgress = OutputProgress()
     @ObservationIgnored private var didExit = false
     @ObservationIgnored private var cols = 100
     @ObservationIgnored private var rows = 30
@@ -125,6 +128,25 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         !didExit && failure == nil
     }
 
+    var activity: ShellActivity {
+        if failure != nil { return .failed }
+        if isRunning {
+            if let progress {
+                guard progress.state != .indeterminate, let value = progress.progress else { return .working }
+                return .progress(Double(min(value, 100)))
+            }
+            return textProgress.map(ShellActivity.progress) ?? .working
+        }
+        guard let last = blocks.last, let exitCode = last.exitCode, last.id != seenOutcome else { return .inactive }
+        return exitCode == 0 ? .succeeded : .failed
+    }
+
+    func acknowledgeOutcome() {
+        runner.acknowledge()
+        guard !isRunning, let last = blocks.last, last.id != seenOutcome else { return }
+        seenOutcome = last.id
+    }
+
     /// Query at close time: background and suspended jobs can outlive a command block.
     var hasRunningJobs: Bool {
         guard isOpen else { return false }
@@ -195,10 +217,11 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .ready, !command.isEmpty else { return }
         let kind = shellKind
-        let expanded = Shortcuts.expand(command, in: shortcuts) { ShellIntegration.quoted($0, for: kind) } ?? command
+        let replaced = Shortcuts.expand(command, in: shortcuts) { ShellIntegration.quoted($0, for: kind) }
+        let expanded = replaced ?? command
         guard let payload = try? submission.payload(for: expanded) else { return }
         let emulator = makeEmulator()
-        let block = Block(command: expanded, directory: directory, git: git, emulator: emulator)
+        let block = Block(command: expanded, usedShortcut: replaced != nil, directory: directory, git: git, emulator: emulator)
         blocks.append(block)
         hasSubmittedCommand = true
         phase = .submitted
@@ -376,6 +399,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         mouseEncoding = .x10
         lastMotion = nil
         progress = nil
+        outputProgress = OutputProgress()
+        textProgress = nil
         programTitle = nil
     }
 
@@ -424,7 +449,12 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     private func deliver(_ bytes: [UInt8], to block: Block) {
         block.append(bytes)
-        altScreen?.feed(bytes)
+        if let altScreen {
+            altScreen.feed(bytes)
+        } else {
+            outputProgress.feed(bytes)
+            if textProgress != outputProgress.percent { textProgress = outputProgress.percent }
+        }
     }
 
     private func bufferSwitched() {
@@ -438,6 +468,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     private func enterAltScreen(for block: Block) {
         guard altScreen == nil else { return }
+        outputProgress = OutputProgress()
+        textProgress = nil
         let host = AltScreenHost(cols: cols, rows: rows)
         host.onInput = { [weak self] bytes in self?.write(bytes) }
         host.onFiles = { [weak self] urls in self?.pasteFiles(urls) }

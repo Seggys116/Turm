@@ -218,6 +218,7 @@ struct SettingsView: View {
                 .padding(.vertical, 28)
                 .frame(maxWidth: .infinity)
             }
+            .squareScrollbar()
         }
         .background(Theme.terminalBackground.color)
         .onChange(of: appearance) { _, new in new.apply(animated: true) }

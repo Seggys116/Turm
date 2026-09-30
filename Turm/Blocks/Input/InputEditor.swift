@@ -25,6 +25,7 @@ struct InputEditor: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
+        scroll.verticalScroller = SquareScroller()
         let view = EditorTextView()
         scroll.documentView = view
         view.minSize = NSSize(width: 0, height: 0)
@@ -54,7 +55,7 @@ struct InputEditor: NSViewRepresentable {
         view.onAttach = { context.coordinator.attached() }
         view.onFiles = { context.coordinator.parent.onAttach($0) }
         view.onDragTarget = { context.coordinator.parent.onDragTarget($0) }
-        view.onClick = { context.coordinator.parent.completion.close() }
+        view.onClick = { context.coordinator.dismissPopup() }
         view.onSelectAllBlocks = { context.coordinator.parent.onSelectAllBlocks() }
         view.extraMenuItems = { context.coordinator.shortcutMenuItems(at: $0) }
         context.coordinator.observeLayout(of: scroll)
@@ -125,6 +126,9 @@ struct InputEditor: NSViewRepresentable {
         private var ghostItem: (item: CompletionItem, range: NSRange)?
         private var autoTask: Task<Void, Never>?
         private var suppressAuto = false
+        private var browsing = false
+        private var isBrowsing: Bool { browsing && parent.completion.isOpen }
+        private static let historyRows = 100
         private let tags = ShortcutTagLayer()
         private let shellKind = ShellIntegration.userKind
         private var shortcutPopover: NSPopover?
@@ -294,6 +298,7 @@ struct InputEditor: NSViewRepresentable {
             guard let view = textView else { return }
             parent.text = view.string
             historyIndex = nil
+            endBrowsing()
             afterEdit()
             scheduleCompletion(in: view)
         }
@@ -355,10 +360,17 @@ struct InputEditor: NSViewRepresentable {
             case #selector(NSResponder.insertNewline(_:)):
                 let flags = NSApp.currentEvent?.modifierFlags ?? []
                 if flags.contains(.shift) || flags.contains(.option) {
+                    endBrowsing()
                     completion.close()
                     textView.insertNewlineIgnoringFieldEditor(nil)
+                } else if isBrowsing, parent.isEnabled {
+                    endBrowsing()
+                    parent.onSubmit()
                 } else if completion.consumesEnter {
                     accept(completion.selected)
+                } else if parent.isEnabled, !CommandCompleteness.isComplete(textView.string, fish: shellKind == .fish) {
+                    completion.close()
+                    textView.insertNewlineIgnoringFieldEditor(nil)
                 } else if parent.isEnabled {
                     autoTask?.cancel()
                     completion.close()
@@ -367,15 +379,23 @@ struct InputEditor: NSViewRepresentable {
                 }
                 return true
             case #selector(NSResponder.moveUp(_:)):
+                if isBrowsing {
+                    browse(by: -1)
+                    return true
+                }
                 if completion.isOpen {
                     completion.move(by: -1)
                     updateGhost()
                     return true
                 }
                 guard onFirstLine(textView) else { return false }
-                if canCycle(textView) { cycle(-1) } else { recall(older: true) }
+                if textView.string.isEmpty { browseHistory() } else if canCycle(textView) { cycle(-1) } else { recall(older: true) }
                 return true
             case #selector(NSResponder.moveDown(_:)):
+                if isBrowsing {
+                    browse(by: 1)
+                    return true
+                }
                 if completion.isOpen {
                     completion.move(by: 1)
                     updateGhost()
@@ -393,7 +413,10 @@ struct InputEditor: NSViewRepresentable {
                 updateGhost()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
-                if completion.isOpen {
+                if isBrowsing {
+                    endBrowsing()
+                    set("")
+                } else if completion.isOpen {
                     completion.close()
                     updateGhost()
                 } else {
@@ -420,6 +443,7 @@ struct InputEditor: NSViewRepresentable {
 
         private func set(_ value: String) {
             autoTask?.cancel()
+            browsing = false
             parent.completion.close()
             textView?.string = value
             textView?.moveToEndOfDocument(nil)
@@ -453,8 +477,52 @@ struct InputEditor: NSViewRepresentable {
             updateGhost()
         }
 
+        private func browseHistory() {
+            guard parent.isEnabled else { return }
+            let entries = Array(CommandHistory.shared.entries.suffix(Self.historyRows))
+            guard !entries.isEmpty else { return }
+            autoTask?.cancel()
+            browsing = true
+            parent.completion.show(entries.map { CompletionItem(insert: $0, kind: .history, terminator: "") }, engaged: true)
+            parent.completion.selected = entries.count - 1
+            fill(entries[entries.count - 1])
+        }
+
+        private func browse(by step: Int) {
+            let completion = parent.completion
+            let target = completion.selected + step
+            if target >= completion.items.count {
+                endBrowsing()
+                set("")
+                return
+            }
+            completion.selected = max(target, 0)
+            fill(completion.items[completion.selected].insert)
+        }
+
+        private func fill(_ value: String) {
+            guard let view = textView else { return }
+            view.string = value
+            view.moveToEndOfDocument(nil)
+            parent.text = value
+            completionRange = NSRange(location: 0, length: (value as NSString).length)
+            afterEdit()
+        }
+
+        func dismissPopup() {
+            browsing = false
+            parent.completion.close()
+        }
+
+        private func endBrowsing() {
+            guard browsing else { return }
+            browsing = false
+            parent.completion.close()
+        }
+
         private func tab() {
             guard let view = textView else { return }
+            browsing = false
             let completion = parent.completion
             if acceptChosenItem() { return }
             if let chosen = ghostItem {
@@ -618,12 +686,7 @@ struct InputEditor: NSViewRepresentable {
                 completionRange = candidates.range
                 completion.show(candidates.items, engaged: completion.engaged)
             case .auto:
-                if AutoTrigger.shouldShow(text: text, range: range, items: result.items) {
-                    completionRange = candidates.range
-                    completion.show(candidates.items, engaged: false)
-                } else {
-                    completion.close()
-                }
+                completion.close()
             case .cycle:
                 break
             case .tab:
@@ -649,6 +712,12 @@ struct InputEditor: NSViewRepresentable {
         func accept(_ index: Int) {
             let items = parent.completion.items
             guard items.indices.contains(index) else { return }
+            if isBrowsing {
+                endBrowsing()
+                fill(items[index].insert)
+                textView?.window?.makeFirstResponder(textView)
+                return
+            }
             accept(item: items[index])
         }
 

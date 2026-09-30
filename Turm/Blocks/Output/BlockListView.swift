@@ -47,7 +47,7 @@ struct BlockListView: View {
             .help(hoveredLink?.absoluteString ?? "")
             .background(SelectionResponder(selection: session.selection))
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { session.selection.listFrame = $0 }
-            .scrollPosition($position)
+            .squareScrollbar(position: $position)
             .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
                 ScrollMetrics(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
             } action: { _, metrics in

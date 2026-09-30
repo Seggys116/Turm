@@ -81,6 +81,7 @@ struct BranchMenu: View {
                     }
                 }
             }
+            .squareScrollbar()
             .frame(height: rows * Self.rowHeight)
         } else {
             ProgressView().controlSize(.small)

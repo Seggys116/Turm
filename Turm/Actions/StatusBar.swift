@@ -426,6 +426,7 @@ private struct AllActionsMenu: View {
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
+            .squareScrollbar()
             .frame(height: min(height, Self.maxHeight))
         }
     }

@@ -41,6 +41,7 @@ final class ActionRunner {
     private(set) var progress: ActionProgress?
     private(set) var exitCode: Int32?
     private(set) var session: TerminalSession?
+    private(set) var isAcknowledged = false
     var isWatching = false
 
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -51,6 +52,20 @@ final class ActionRunner {
 
     var isInteractive: Bool { session?.altScreen != nil }
 
+    var activity: ShellActivity {
+        switch progress?.outcome {
+        case .running: session.map { $0.activity.isBusy ? $0.activity : .working } ?? .working
+        case .succeeded: isAcknowledged ? .inactive : .succeeded
+        case .failed: isAcknowledged ? .inactive : .failed
+        case nil: .inactive
+        }
+    }
+
+    func acknowledge() {
+        guard let outcome = progress?.outcome, outcome != .running, !isAcknowledged else { return }
+        isAcknowledged = true
+    }
+
     func start(_ action: ProjectAction, command: String) {
         dismiss()
         let sub = TerminalSession(directory: action.root, auxiliary: true)
@@ -58,6 +73,7 @@ final class ActionRunner {
         self.action = action
         self.command = command
         exitCode = nil
+        isAcknowledged = false
         progress = ActionProgress(startedAt: .now)
         runID += 1
         let run = runID

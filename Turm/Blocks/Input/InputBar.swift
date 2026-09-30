@@ -8,13 +8,15 @@ struct InputBar: View {
     @State private var pathMenuOpen = false
     @State private var branchMenuOpen = false
     @State private var shortcutEditorOpen = false
+    @AppStorage(ShortcutSuggestionTracker.enabledKey) private var suggestionsEnabled = false
     private let tracker = ShortcutSuggestionTracker.shared
 
     private var suggestion: ShortcutSuggestion? {
-        guard !session.isRunning, !session.isAuxiliary else { return nil }
+        guard suggestionsEnabled, !session.isRunning, !session.isAuxiliary else { return nil }
+        let last = session.blocks.last
         return tracker.suggestion(
             currentDirectory: session.directory,
-            lastCommand: session.blocks.last?.command,
+            lastCommand: last?.usedShortcut == false ? last?.command : nil,
             shortcuts: ShortcutStore.shared.items
         )
     }
@@ -77,14 +79,14 @@ struct InputBar: View {
         .onAppear { recordVisit() }
         .onChange(of: session.directory) { recordVisit() }
         .onChange(of: session.isRunning) { wasRunning, isRunning in
-            guard wasRunning, !isRunning, let command = session.blocks.last?.command else { return }
-            SystemCompletionEnvironment.shared.commandFinished(command, directory: session.directory)
-            if !session.isAuxiliary { tracker.recordCommand(command) }
+            guard wasRunning, !isRunning, let block = session.blocks.last else { return }
+            SystemCompletionEnvironment.shared.commandFinished(block.command, directory: session.directory)
+            if suggestionsEnabled, !session.isAuxiliary, !block.usedShortcut { tracker.recordCommand(block.command) }
         }
     }
 
     private func recordVisit() {
-        guard !session.isAuxiliary else { return }
+        guard suggestionsEnabled, !session.isAuxiliary else { return }
         tracker.recordVisit(session.directory)
     }
 
@@ -145,23 +147,25 @@ private struct SuggestionRow: View {
     @State private var editorOpen = false
 
     private var message: String {
-        suggestion.kind == .directory ? "You often open \(Block.abbreviate(suggestion.value))" : "You run this often"
+        suggestion.kind == .directory ? "You open this folder often" : "You run this often"
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: suggestion.kind.symbol).chipIcon()
-                Text(message).lineLimit(1).truncationMode(.middle)
+                Text(message).lineLimit(1)
             }
             .chipStyle()
-            Button("Save as \(suggestion.draft.token)") { editorOpen = true }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.accentColor)
-                .popover(isPresented: $editorOpen, arrowEdge: .top) {
-                    ShortcutEditor(suggestion.draft) { editorOpen = false }
-                }
+            .help(suggestion.value)
+            Chip(text: "Save as shortcut", isActive: editorOpen) {
+                Image(systemName: "plus").chipIcon()
+            }
+            .help("Save \(suggestion.draft.token) for \(suggestion.value)")
+            .onTapGesture { editorOpen = true }
+            .popover(isPresented: $editorOpen, arrowEdge: .top) {
+                ShortcutEditor(suggestion.draft) { editorOpen = false }
+            }
             Spacer(minLength: 0)
             Button(action: onDismiss) {
                 Image(systemName: "xmark").imageScale(.small)

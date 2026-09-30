@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 
 struct ShellSidebar: View {
-    static let width: CGFloat = 240
+    static let width: CGFloat = 196
     static let stripHeight: CGFloat = 32
-    private static let gap: CGFloat = 6
-    private static let rowHeight: CGFloat = 28
+    private static let gap: CGFloat = 4
+    static let corner: CGFloat = 2
+    private static let rowHeight: CGFloat = 26
     private static let chipHeight: CGFloat = 24
     private static let chipWidthRange: ClosedRange<CGFloat> = 72...200
     /// Row padding, indicator and the spacing after it.
@@ -95,8 +96,8 @@ struct ShellSidebar: View {
         }
         .padding(.horizontal, 7)
         .frame(height: 24)
-        .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.chipStroke.color, lineWidth: 1))
+        .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: ShellSidebar.corner))
+        .overlay(RoundedRectangle(cornerRadius: ShellSidebar.corner).stroke(Theme.chipStroke.color, lineWidth: 1))
     }
 
     private var newShellButton: some View {
@@ -133,6 +134,7 @@ struct ShellSidebar: View {
                         .padding(.horizontal, Self.gap)
                     .padding(.bottom, 8)
                 }
+                .squareScrollbar()
                 .onChange(of: workspace.activeTabID) { _, id in
                     withAnimation { proxy.scrollTo(id) }
                 }
@@ -178,11 +180,14 @@ struct ShellSidebar: View {
         stripPosition.scrollTo(x: target)
     }
 
-    private func chipWidth(for title: String, paneCount: Int = 1) -> CGFloat? {
+    private func chipWidth(for title: String, paneCount: Int = 1, activity: ShellActivity = .inactive) -> CGFloat? {
         guard placement == .top else { return nil }
         var width = Self.chipChrome + Self.textWidth(title, font: Self.chipFont)
         if paneCount > 1 {
             width += 8 + Self.textWidth("\(paneCount)", font: Self.countFont)
+        }
+        if case .progress = activity {
+            width += 8 + Self.textWidth("100%", font: Self.countFont)
         }
         return min(max(width, Self.chipWidthRange.lowerBound), Self.chipWidthRange.upperBound)
     }
@@ -204,16 +209,20 @@ struct ShellSidebar: View {
             .frame(width: chipWidth(for: "Settings"))
         } else if let session = workspace.representative(of: tab) {
             let title = session.customTitle ?? ShortcutStore.shared.label(for: session.directory)
+            let sessions = workspace.sessions(in: tab)
+            let activity = ShellActivity.combined(sessions.map(\.activity))
             ShellRow(
                 session: session,
                 height: height,
                 paneCount: tab.layout.leaves.count,
-                isRunning: workspace.sessions(in: tab).contains(where: \.isRunning),
+                activity: activity,
+                actionActivity: ShellActivity.combined(sessions.map(\.runner.activity)),
                 isSelected: workspace.activeTabID == tab.id,
+                acknowledge: { sessions.forEach { $0.acknowledgeOutcome() } },
                 select: { workspace.selectTab(tab.id) },
                 close: { workspace.closeTab(tab.id) }
             )
-            .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count))
+            .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count, activity: activity))
         }
     }
 
@@ -271,7 +280,7 @@ struct ShellSidebar: View {
             row(for: tab)
                 .geometryGroup()
                 .frame(width: frame.width, height: frame.height)
-                .background(Theme.sidebar.color, in: RoundedRectangle(cornerRadius: 6))
+                .background(Theme.sidebar.color, in: RoundedRectangle(cornerRadius: ShellSidebar.corner))
                 .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
                 .offset(x: isHorizontal ? position : frame.minX, y: isHorizontal ? frame.minY : position)
                 .allowsHitTesting(false)
@@ -328,19 +337,23 @@ private struct ShellRow: View {
     let session: TerminalSession
     let height: CGFloat
     let paneCount: Int
-    let isRunning: Bool
+    let activity: ShellActivity
+    let actionActivity: ShellActivity
     let isSelected: Bool
+    let acknowledge: () -> Void
     let select: () -> Void
     let close: () -> Void
     @State private var isHovered = false
     @State private var isRenaming = false
+    @State private var pulse: OutcomePulse?
+    @State private var actionPulse: OutcomePulse?
     @State private var menuOpen = false
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            indicator
+            ActivityIndicator(activity: activity, pulse: pulse, action: actionActivity, actionPulse: actionPulse)
             if isRenaming {
                 TextField("Shell name", text: $draft)
                     .textFieldStyle(.plain)
@@ -361,6 +374,11 @@ private struct ShellRow: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.text.color)
             }
+            if case .progress(let value) = activity, !isHovered {
+                Text(ActivityIndicator.percentText(value))
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.secondaryText.color)
+            }
             if paneCount > 1, !isHovered {
                 Text("\(paneCount)")
                     .font(.system(size: 10, weight: .medium))
@@ -373,7 +391,7 @@ private struct ShellRow: View {
         .frame(height: height)
         .help(Block.abbreviate(session.directory))
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: ShellSidebar.corner)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
         )
         .contentShape(Rectangle())
@@ -402,6 +420,27 @@ private struct ShellRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .onAppear(perform: settleOutcome)
+        .onChange(of: isSelected) { settleOutcome() }
+        .onChange(of: activity) { settleOutcome() }
+        .onChange(of: actionActivity) { settleOutcome() }
+    }
+
+    /// A result stays lit only on shells out of view; the one in view flashes it and returns to idle.
+    private func settleOutcome() {
+        guard isSelected else { return }
+        let now = Date()
+        let shell = OutcomePulse(activity, at: now)
+        let action = OutcomePulse(actionActivity, at: now)
+        guard shell != nil || action != nil else { return }
+        if let shell { pulse = shell }
+        if let action { actionPulse = action }
+        acknowledge()
+        Task {
+            try? await Task.sleep(for: .seconds(OutcomePulse.duration))
+            if pulse?.start == now { pulse = nil }
+            if actionPulse?.start == now { actionPulse = nil }
+        }
     }
 
     private func beginRename() {
@@ -415,18 +454,159 @@ private struct ShellRow: View {
         isRenaming = false
         session.rename(draft)
     }
+}
+
+private struct OutcomePulse: Equatable {
+    static let duration: TimeInterval = 1.6
+
+    let failed: Bool
+    let start: Date
+
+    init?(_ activity: ShellActivity, at start: Date) {
+        switch activity {
+        case .succeeded: failed = false
+        case .failed: failed = true
+        default: return nil
+        }
+        self.start = start
+    }
+}
+
+private struct ActivityIndicator: View {
+    let activity: ShellActivity
+    let pulse: OutcomePulse?
+    var action: ShellActivity = .inactive
+    var actionPulse: OutcomePulse?
+
+    static func percentText(_ value: Double) -> String {
+        "\(Int(value.rounded(.down)))%"
+    }
+
+    private var showsAction: Bool {
+        action != .inactive || actionPulse != nil
+    }
+
+    var body: some View {
+        ZStack {
+            StatusGlyph(activity: activity, pulse: pulse, diameter: 10)
+            if showsAction {
+                Circle()
+                    .frame(width: 8, height: 8)
+                    .offset(x: 4, y: 4)
+                    .blendMode(.destinationOut)
+            }
+        }
+        .compositingGroup()
+        .overlay {
+            if showsAction {
+                StatusGlyph(activity: action, pulse: actionPulse, diameter: 5)
+                    .offset(x: 4, y: 4)
+            }
+        }
+        .frame(width: 10, height: 10)
+        .accessibilityElement()
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        let shell = switch activity {
+        case .working: "Running"
+        case .progress(let value): "Running, \(Self.percentText(value))"
+        case .succeeded: "Last command succeeded"
+        case .failed: "Last command failed"
+        case .inactive: "Idle"
+        }
+        let bar: String? = switch action {
+        case .working: "project action running"
+        case .progress(let value): "project action at \(Self.percentText(value))"
+        case .succeeded: "project action succeeded"
+        case .failed: "project action failed"
+        case .inactive: nil
+        }
+        return bar.map { "\(shell), \($0)" } ?? shell
+    }
+}
+
+private struct StatusGlyph: View {
+    let activity: ShellActivity
+    let pulse: OutcomePulse?
+    let diameter: CGFloat
+
+    private var dotSize: CGFloat { diameter * 0.6 }
+    private var lineWidth: CGFloat { max(diameter / 5, 1.25) }
+
+    var body: some View {
+        Group {
+            if let pulse, !activity.isBusy {
+                pulsing(pulse)
+            } else {
+                state
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
 
     @ViewBuilder
-    private var indicator: some View {
-        if isRunning {
-            ProgressView()
-                .controlSize(.mini)
-                .frame(width: 10, height: 10)
-        } else if session.failure != nil {
-            Circle().fill(Theme.failure.color).frame(width: 6, height: 6).frame(width: 10)
-        } else {
-            Circle().fill(Theme.secondaryText.color).frame(width: 6, height: 6).frame(width: 10)
+    private var state: some View {
+        switch activity {
+        case .working:
+            if diameter >= 10 {
+                ProgressView().controlSize(.mini)
+            } else {
+                spinner
+            }
+        case .progress(let value):
+            ZStack {
+                Circle()
+                    .stroke(Theme.subtleDivider.color, lineWidth: lineWidth)
+                Circle()
+                    .trim(from: 0, to: value / 100)
+                    .stroke(Theme.added.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.25), value: value)
+            }
+            .padding(lineWidth / 2)
+        case .succeeded:
+            dot(Theme.added.color)
+        case .failed:
+            dot(Theme.failure.color)
+        case .inactive:
+            dot(Theme.secondaryText.color)
         }
+    }
+
+    private var spinner: some View {
+        TimelineView(.animation) { timeline in
+            let turn = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9
+            Circle()
+                .trim(from: 0, to: 0.7)
+                .stroke(Theme.secondaryText.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(turn * 360))
+                .padding(lineWidth / 2)
+        }
+    }
+
+    private func pulsing(_ pulse: OutcomePulse) -> some View {
+        let color = pulse.failed ? Theme.failure.color : Theme.added.color
+        return TimelineView(.animation) { timeline in
+            let progress = min(max(timeline.date.timeIntervalSince(pulse.start) / OutcomePulse.duration, 0), 1)
+            let wave = (progress * 2).truncatingRemainder(dividingBy: 1)
+            ZStack {
+                dot(Theme.secondaryText.color)
+                dot(color).opacity(progress < 0.5 ? 1 : 1 - (progress - 0.5) * 2)
+                if progress < 1 {
+                    Circle()
+                        .stroke(color, lineWidth: max(lineWidth * 0.75, 1))
+                        .frame(width: dotSize, height: dotSize)
+                        .scaleEffect(1 + 1.4 * wave)
+                        .opacity((1 - wave) * 0.85)
+                }
+            }
+        }
+    }
+
+    private func dot(_ color: SwiftUI.Color) -> some View {
+        Circle().fill(color).frame(width: dotSize, height: dotSize)
     }
 }
 
@@ -453,7 +633,7 @@ private struct SettingsRow: View {
         .padding(.horizontal, 8)
         .frame(height: height)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: ShellSidebar.corner)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
         )
         .contentShape(Rectangle())
