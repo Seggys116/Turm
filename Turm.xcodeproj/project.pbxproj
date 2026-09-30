@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 110;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -47,21 +47,25 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		C0105B04306BFD46008BD457 /* Embed Dock Tile */ = {
 			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolder = PlugIns;
+			dstSubfolderSpec = 13;
 			files = (
 				C0105B02306BFD46008BD457 /* TurmDockTile.docktileplugin in Embed Dock Tile */,
 			);
 			name = "Embed Dock Tile";
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C0105C04306BFD46008BD457 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolder = PlugIns;
+			dstSubfolderSpec = 13;
 			files = (
 				C0105C02306BFD46008BD457 /* TurmFinder.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -239,6 +243,8 @@
 			);
 			buildRules = (
 			);
+			dependencies = (
+			);
 			fileSystemSynchronizedGroups = (
 				C0105B05306BFD46008BD457 /* TurmDockTile */,
 			);
@@ -256,6 +262,8 @@
 				C0105C08306BFD46008BD457 /* Resources */,
 			);
 			buildRules = (
+			);
+			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				C0105C05306BFD46008BD457 /* TurmFinder */,
