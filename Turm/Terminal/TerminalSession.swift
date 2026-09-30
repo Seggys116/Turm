@@ -240,7 +240,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         runner.dismiss()
         guard !didExit else { return }
         didExit = true
+        let pid = process.shellPid
         process.terminate()
+        // interactive shells ignore SIGTERM, and the pty stays open until the shell hangs up
+        if pid > 0 { kill(pid, SIGHUP) }
     }
 
     func focus() {
@@ -475,6 +478,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
                     execName: launch.execName,
                     currentDirectory: directory
                 )
+                let flags = fcntl(process.childfd, F_GETFD)
+                if flags >= 0 { _ = fcntl(process.childfd, F_SETFD, flags | FD_CLOEXEC) }
             }
             SystemCompletionEnvironment.shared.setShellProcess(pid: process.shellPid)
         } catch {
