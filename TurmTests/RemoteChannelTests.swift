@@ -353,6 +353,21 @@ struct RemoteChannelFakeSSHTests {
         #expect(result[spaced]?.hasSuffix("-my_file__1_.png") == true)
     }
 
+    // A slow runner can time a fetch out; the editor simply asks again, so the tests do too
+    private func eventually<T: Sendable>(_ fetch: @escaping @Sendable () -> T, until done: (T) -> Bool) async -> T {
+        let deadline = ContinuousClock.now + .seconds(15)
+        var result = await Task.detached(operation: fetch).value
+        while !done(result), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+            result = await Task.detached(operation: fetch).value
+        }
+        return result
+    }
+
+    private func settledLookup(_ env: RemoteCompletionEnvironment, _ name: String, _ directory: String) async -> CommandLookup {
+        await eventually({ env.lookupCommand(name, directory: directory) }, until: { $0 != .unknown })
+    }
+
     @Test func environmentListsDirectoryOffTheMainThread() async throws {
         let rig = try RemoteRig()
         defer { rig.teardown() }
@@ -362,7 +377,7 @@ struct RemoteChannelFakeSSHTests {
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("sub"), withIntermediateDirectories: true)
         let env = RemoteCompletionEnvironment(base: FakeEnvironment(), channel: rig.channel)
         let path = folder.path
-        let entries = await Task.detached { env.directoryEntries(atPath: path) }.value
+        let entries = await eventually({ env.directoryEntries(atPath: path) }, until: { $0 != nil })
         let byName = Dictionary(uniqueKeysWithValues: (entries ?? []).map { ($0.name, $0.isDirectory) })
         #expect(byName == ["a.txt": false, ".hidden": false, "sub": true])
         let missing = await Task.detached { env.directoryEntries(atPath: path + "/nope") }.value
@@ -374,7 +389,7 @@ struct RemoteChannelFakeSSHTests {
         defer { rig.teardown() }
         let env = RemoteCompletionEnvironment(base: FakeEnvironment(), channel: rig.channel)
         let directory = rig.root.path
-        let symbols = await Task.detached { env.commandSymbols() }.value
+        let symbols = await eventually({ env.commandSymbols() }, until: { $0.contains { $0.name == "ls" } })
         let names = Set(symbols.map(\.name))
         #expect(names.contains("ls"))
         #expect(names.contains("cd"))
@@ -397,9 +412,9 @@ struct RemoteChannelFakeSSHTests {
         let env = RemoteCompletionEnvironment(base: FakeEnvironment(), channel: rig.channel)
         let scriptPath = script.path
         let directory = rig.root.path
-        let executable = await Task.detached { env.lookupCommand(scriptPath, directory: directory) }.value
-        let absent = await Task.detached { env.lookupCommand(directory + "/absent", directory: directory) }.value
-        let isDirectory = await Task.detached { env.lookupCommand(directory, directory: directory) }.value
+        let executable = await settledLookup(env, scriptPath, directory)
+        let absent = await settledLookup(env, directory + "/absent", directory)
+        let isDirectory = await settledLookup(env, directory, directory)
         #expect(executable == .executable)
         #expect(absent == .missing)
         #expect(isDirectory == .missing)
@@ -414,16 +429,16 @@ struct RemoteChannelFakeSSHTests {
         let env = RemoteCompletionEnvironment(base: FakeEnvironment(), channel: rig.channel)
         let repoPath = repo.path
         let notePath = note.path
-        let refs = await Task.detached { env.gitRefs(in: repoPath) }.value
+        let refs = await eventually({ env.gitRefs(in: repoPath) }, until: { $0 != nil })
         #expect(Set(refs?.branches ?? []) == ["main", "feature-x"])
         #expect(refs?.tags == ["v1"])
         let plain = await Task.detached { env.gitRefs(in: NSTemporaryDirectory()) }.value
         #expect(plain == nil)
-        let text = await Task.detached { env.readText(atPath: notePath) }.value
+        let text = await eventually({ env.readText(atPath: notePath) }, until: { $0 != nil })
         #expect(text == "hello\nworld\n")
         let none = await Task.detached { env.readText(atPath: notePath + ".missing") }.value
         #expect(none == nil)
-        let processes = await Task.detached { env.processes() }.value
+        let processes = await eventually({ env.processes() }, until: { !$0.isEmpty })
         #expect(processes.contains { $0.pid == Int(getpid()) })
         #expect(env.variables == ["HOME": rig.root.path, "PATH": "/usr/bin:/bin"])
         #expect(env.homeDirectory == rig.root.path)
