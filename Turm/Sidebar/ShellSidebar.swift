@@ -478,6 +478,9 @@ private struct ActivityIndicator: View {
     var action: ShellActivity = .inactive
     var actionPulse: OutcomePulse?
 
+    // Room for the outcome ring, which grows past the glyph and would be cut off by the compositing group.
+    private static let bleed: CGFloat = 5
+
     static func percentText(_ value: Double) -> String {
         "\(Int(value.rounded(.down)))%"
     }
@@ -496,7 +499,9 @@ private struct ActivityIndicator: View {
                     .blendMode(.destinationOut)
             }
         }
+        .padding(Self.bleed)
         .compositingGroup()
+        .padding(-Self.bleed)
         .overlay {
             if showsAction {
                 StatusGlyph(activity: action, pulse: actionPulse, diameter: 5)
@@ -695,6 +700,8 @@ private struct HoverClose: ViewModifier {
     private static let buttonWidth: CGFloat = 16
     private static let fadeWidth: CGFloat = 14
     static let coveredWidth = buttonWidth + fadeWidth
+    // How far the mask reaches past the leading and vertical edges, so the status pulse is not cut off.
+    private static let overhang: CGFloat = 8
 
     let isVisible: Bool
     let label: String
@@ -713,6 +720,7 @@ private struct HoverClose: ViewModifier {
                     }
                     .opacity(isVisible ? 1 : 0)
                 }
+                .padding(EdgeInsets(top: -Self.overhang, leading: -Self.overhang, bottom: -Self.overhang, trailing: 0))
             }
             .overlay(alignment: .trailing) {
                 Button(action: close) {
@@ -758,7 +766,7 @@ private struct MarqueeText: View {
             .fixedSize()
             .background(WidthReader(width: $textWidth))
             .offset(x: offset)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .background(WidthReader(width: $containerWidth))
             .clipped()
             .mask(fade)
