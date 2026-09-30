@@ -75,6 +75,7 @@
 		C0105658306BFD46008BD457 /* TurmUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurmUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurmDockTile.docktileplugin; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0105C01306BFD46008BD457 /* TurmFinder.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TurmFinder.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0105D01306BFD46008BD457 /* TurmiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TurmiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -101,6 +102,11 @@
 		C0105C05306BFD46008BD457 /* TurmFinder */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TurmFinder;
+			sourceTree = "<group>";
+		};
+		C0105D05306BFD46008BD457 /* TurmiOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TurmiOS;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -133,6 +139,11 @@
 			files = (
 			);
 		};
+		C0105D06306BFD46008BD457 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -144,6 +155,7 @@
 				C010565B306BFD46008BD457 /* TurmUITests */,
 				C0105B05306BFD46008BD457 /* TurmDockTile */,
 				C0105C05306BFD46008BD457 /* TurmFinder */,
+				C0105D05306BFD46008BD457 /* TurmiOS */,
 				C0105642306BFD45008BD457 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -156,6 +168,7 @@
 				C0105658306BFD46008BD457 /* TurmUITests.xctest */,
 				C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */,
 				C0105C01306BFD46008BD457 /* TurmFinder.appex */,
+				C0105D01306BFD46008BD457 /* TurmiOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -273,6 +286,26 @@
 			productReference = C0105C01306BFD46008BD457 /* TurmFinder.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		C0105D10306BFD46008BD457 /* TurmiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0105D11306BFD46008BD457 /* Build configuration list for PBXNativeTarget "TurmiOS" */;
+			buildPhases = (
+				C0105D07306BFD46008BD457 /* Sources */,
+				C0105D06306BFD46008BD457 /* Frameworks */,
+				C0105D08306BFD46008BD457 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0105D05306BFD46008BD457 /* TurmiOS */,
+			);
+			name = TurmiOS;
+			productName = TurmiOS;
+			productReference = C0105D01306BFD46008BD457 /* TurmiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -300,6 +333,9 @@
 					C0105C10306BFD46008BD457 = {
 						CreatedOnToolsVersion = 27.1;
 					};
+					C0105D10306BFD46008BD457 = {
+						CreatedOnToolsVersion = 27.1;
+					};
 				};
 			};
 			buildConfigurationList = C010563C306BFD45008BD457 /* Build configuration list for PBXProject "Turm" */;
@@ -325,6 +361,7 @@
 				C0105657306BFD46008BD457 /* TurmUITests */,
 				C0105B10306BFD46008BD457 /* TurmDockTile */,
 				C0105C10306BFD46008BD457 /* TurmFinder */,
+				C0105D10306BFD46008BD457 /* TurmiOS */,
 			);
 		};
 /* End PBXProject section */
@@ -355,6 +392,11 @@
 			files = (
 			);
 		};
+		C0105D08306BFD46008BD457 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -379,6 +421,11 @@
 			);
 		};
 		C0105C07306BFD46008BD457 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		C0105D07306BFD46008BD457 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -785,6 +832,82 @@
 			};
 			name = Release;
 		};
+		C0105D12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmiOS" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H2X57PJPJ6;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Turm;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.TurmiOS";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C0105D13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmiOS" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = H2X57PJPJ6;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Turm;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.TurmiOS";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -833,6 +956,14 @@
 			buildConfigurations = (
 				C0105C12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmFinder" */,
 				C0105C13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmFinder" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		C0105D11306BFD46008BD457 /* Build configuration list for PBXNativeTarget "TurmiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0105D12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmiOS" */,
+				C0105D13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmiOS" */,
 			);
 			defaultConfigurationName = Release;
 		};
