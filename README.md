@@ -13,13 +13,16 @@
 
 ## Building
 
-Requires macOS and Xcode.
+Requires macOS, Xcode and Node.js.
 
 ```
 git clone https://github.com/Seggys116/Turm.git
 cd Turm
+npm ci --prefix Icons
 open Turm.xcodeproj
 ```
+
+The build fails until `npm ci --prefix Icons` has been run. It installs the pinned [Simple Icons](https://simpleicons.org) and [Lobe Icons](https://github.com/lobehub/lobe-icons) packages that the sidebar and project bar use for program and ecosystem logos, and generates `Icons/inputs.xcfilelist`, which lists the files the build phase may read. `Icons/manifest.json` lists the glyphs that are copied into the app at build time, and the build refuses any icon whose licence does not allow redistribution. Run `npm ci --prefix Icons` again after editing `Icons/manifest.json`.
 
 Then press Build. Xcode will ask you to trust the SwiftTerm package plugin.
 

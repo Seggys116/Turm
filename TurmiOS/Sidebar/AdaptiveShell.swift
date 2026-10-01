@@ -35,18 +35,22 @@ struct AdaptiveShell: View {
     @Environment(\.horizontalSizeClass) private var horizontal
     @Environment(\.verticalSizeClass) private var vertical
     @GestureState(resetTransaction: Transaction(animation: Chrome.columnMotion)) private var edgeDrag: CGFloat = 0
+    private let keyboard = KeyboardOverlap.shared
 
     var body: some View {
         ToolbarVerticalEdgeReader { rail in
             GeometryReader { proxy in
                 shell(in: proxy, rail: rail)
             }
+            .ignoresSafeArea(.keyboard)
         }
         .background(Chrome.sidebar.ignoresSafeArea())
     }
 
     private func shell(in proxy: GeometryProxy, rail: HorizontalEdge?) -> some View {
         let insets = proxy.safeAreaInsets
+        let lift = max(0, keyboard.height - insets.bottom)
+        let height = max(0, proxy.size.height - lift)
         let strip = rail == .leading ? insets.leading : rail == .trailing ? insets.trailing : 0
         let inStrip = strip >= Chrome.Metrics.minimumStrip
         let railWidth = rail == nil || inStrip ? 0 : Chrome.Metrics.railWidth
@@ -82,19 +86,20 @@ struct AdaptiveShell: View {
                 .offset(x: edgeDrag)
                 .accessibilityHidden(!detailShown)
         }
-        .frame(width: width, height: proxy.size.height, alignment: .topLeading)
+        .frame(width: width, height: height, alignment: .topLeading)
         .environment(\.splitLayout, split)
         .environment(\.chromeBarSuppressed, rail != nil)
         .modifier(ChromeBarPlacement(bar: railBar(split: split), top: nil, side: inStrip ? nil : rail))
         .overlay(alignment: rail == .leading ? .topLeading : .topTrailing) {
             if inStrip, let rail {
-                stripBar(split: split, side: rail, width: strip, insets: insets, height: proxy.size.height)
+                stripBar(split: split, side: rail, width: strip, insets: insets, lift: lift, height: proxy.size.height)
             }
         }
         .onChange(of: workspace.compactColumn) { _, column in
             guard !split else { return }
             focus(for: column)
         }
+        .frame(height: proxy.size.height, alignment: .top)
     }
 
     /// The iPhone Duo vertical bar: navigation first, then the app actions, then the open session's actions.
@@ -120,10 +125,10 @@ struct AdaptiveShell: View {
     }
 
     // the system's vertical status strip is also where Apple puts an app's vertical bar, below the camera and status
-    private func stripBar(split: Bool, side: HorizontalEdge, width: CGFloat, insets: EdgeInsets, height: CGFloat) -> some View {
+    private func stripBar(split: Bool, side: HorizontalEdge, width: CGFloat, insets: EdgeInsets, lift: CGFloat, height: CGFloat) -> some View {
         railBar(split: split)
             .environment(\.chromeBarStyle, .vertical(side))
-            .padding(.bottom, insets.bottom)
+            .padding(.bottom, insets.bottom + lift)
             .frame(width: width, height: height + insets.top + insets.bottom)
             .ignoresSafeArea()
             .offset(x: side == .trailing ? width : -width, y: -insets.top)

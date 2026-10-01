@@ -130,6 +130,12 @@ final class MacConnection: Identifiable {
 
     func send(_ message: CompanionMessage) {
         guard supports(message.kind) else { return }
+        #if targetEnvironment(simulator)
+        if connection == nil, let demo = DemoMac.shared {
+            demo.answer(message)
+            return
+        }
+        #endif
         connection?.send(message)
     }
 
@@ -449,3 +455,17 @@ final class MacConnection: Identifiable {
         }
     }
 }
+
+#if targetEnvironment(simulator)
+extension MacConnection {
+    func showDemo(shells list: [DemoShell]) {
+        DemoMac.shared = DemoMac(shells: list) { [weak self] message in self?.handle(message) }
+        state = .connected
+        sessions = list.map(\.summary)
+    }
+
+    func deliverDemo(_ message: CompanionMessage) {
+        handle(message)
+    }
+}
+#endif

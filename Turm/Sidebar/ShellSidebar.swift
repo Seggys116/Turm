@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 struct ShellSidebar: View {
     static let width: CGFloat = 196
@@ -216,6 +217,7 @@ struct ShellSidebar: View {
                 height: height,
                 paneCount: tab.layout.leaves.count,
                 activity: activity,
+                program: (sessions.first(where: { $0.activity.isBusy }) ?? session).displayedProgram,
                 actionActivity: ShellActivity.combined(sessions.map(\.runner.activity)),
                 isSelected: workspace.activeTabID == tab.id,
                 acknowledge: { sessions.forEach { $0.acknowledgeOutcome() } },
@@ -338,6 +340,7 @@ private struct ShellRow: View {
     let height: CGFloat
     let paneCount: Int
     let activity: ShellActivity
+    let program: RunningProgram?
     let actionActivity: ShellActivity
     let isSelected: Bool
     let acknowledge: () -> Void
@@ -353,7 +356,7 @@ private struct ShellRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ActivityIndicator(activity: activity, pulse: pulse, action: actionActivity, actionPulse: actionPulse)
+            ActivityIndicator(activity: activity, pulse: pulse, program: program, action: actionActivity, actionPulse: actionPulse)
             if isRenaming {
                 TextField("Shell name", text: $draft)
                     .textFieldStyle(.plain)
@@ -389,7 +392,7 @@ private struct ShellRow: View {
         .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
         .padding(.horizontal, 8)
         .frame(height: height)
-        .help(session.remote.map { $0.host + ":" + session.directory } ?? Block.abbreviate(session.directory))
+        .help((program.map { $0.name + " - " } ?? "") + (session.remote.map { $0.host + ":" + session.directory } ?? Block.abbreviate(session.directory)))
         .background(
             RoundedRectangle(cornerRadius: ShellSidebar.corner)
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
@@ -475,6 +478,7 @@ private struct OutcomePulse: Equatable {
 private struct ActivityIndicator: View {
     let activity: ShellActivity
     let pulse: OutcomePulse?
+    var program: RunningProgram?
     var action: ShellActivity = .inactive
     var actionPulse: OutcomePulse?
 
@@ -491,7 +495,7 @@ private struct ActivityIndicator: View {
 
     var body: some View {
         ZStack {
-            StatusGlyph(activity: activity, pulse: pulse, diameter: 10)
+            StatusGlyph(activity: activity, pulse: pulse, diameter: 10, program: program)
             if showsAction {
                 Circle()
                     .frame(width: 8, height: 8)
@@ -515,10 +519,10 @@ private struct ActivityIndicator: View {
 
     private var label: String {
         let shell = switch activity {
-        case .working: "Running"
-        case .progress(let value): "Running, \(Self.percentText(value))"
-        case .succeeded: "Last command succeeded"
-        case .failed: "Last command failed"
+        case .working: program.map { "\($0.name), running" } ?? "Running"
+        case .progress(let value): "\(program.map { "\($0.name), running" } ?? "Running"), \(Self.percentText(value))"
+        case .succeeded: program.map { "\($0.name), last command succeeded" } ?? "Last command succeeded"
+        case .failed: program.map { "\($0.name), last command failed" } ?? "Last command failed"
         case .inactive: "Idle"
         }
         let bar: String? = switch action {
@@ -536,6 +540,7 @@ private struct StatusGlyph: View {
     let activity: ShellActivity
     let pulse: OutcomePulse?
     let diameter: CGFloat
+    var program: RunningProgram?
 
     private var dotSize: CGFloat { diameter * 0.6 }
     private var lineWidth: CGFloat { max(diameter / 5, 1.25) }
@@ -555,28 +560,57 @@ private struct StatusGlyph: View {
     private var state: some View {
         switch activity {
         case .working:
-            if diameter >= 10 {
+            if let program, diameter >= 10 {
+                programGlyph(program)
+            } else if diameter >= 10 {
                 ProgressView().controlSize(.mini)
             } else {
                 spinner
             }
         case .progress(let value):
-            ZStack {
-                Circle()
-                    .stroke(Theme.subtleDivider.color, lineWidth: lineWidth)
-                Circle()
-                    .trim(from: 0, to: value / 100)
-                    .stroke(Theme.added.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.25), value: value)
+            if let program, usesGlyph {
+                programGlyph(program)
+            } else {
+                ZStack {
+                    Circle()
+                        .stroke(Theme.subtleDivider.color, lineWidth: lineWidth)
+                    Circle()
+                        .trim(from: 0, to: value / 100)
+                        .stroke(Theme.added.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeOut(duration: 0.25), value: value)
+                }
+                .padding(lineWidth / 2)
             }
-            .padding(lineWidth / 2)
         case .succeeded:
-            dot(Theme.added.color)
+            marker(Theme.added.color)
         case .failed:
-            dot(Theme.failure.color)
+            marker(Theme.failure.color)
         case .inactive:
             dot(Theme.secondaryText.color)
+        }
+    }
+
+    private var usesGlyph: Bool { program != nil && diameter >= 10 }
+
+    private func programImage(_ program: RunningProgram, tint: SwiftUI.Color) -> some View {
+        ProgramGlyph(program, size: diameter).foregroundStyle(tint)
+    }
+
+    private func programGlyph(_ program: RunningProgram) -> some View {
+        TimelineView(.animation) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+            programImage(program, tint: Theme.text.color)
+                .opacity(0.65 + 0.35 * (0.5 + 0.5 * sin(phase * 2 * .pi)))
+        }
+    }
+
+    @ViewBuilder
+    private func marker(_ color: SwiftUI.Color) -> some View {
+        if usesGlyph, let program {
+            programImage(program, tint: color)
+        } else {
+            dot(color)
         }
     }
 
@@ -596,15 +630,24 @@ private struct StatusGlyph: View {
         return TimelineView(.animation) { timeline in
             let progress = min(max(timeline.date.timeIntervalSince(pulse.start) / OutcomePulse.duration, 0), 1)
             let wave = (progress * 2).truncatingRemainder(dividingBy: 1)
-            ZStack {
-                dot(Theme.secondaryText.color)
-                dot(color).opacity(progress < 0.5 ? 1 : 1 - (progress - 0.5) * 2)
-                if progress < 1 {
-                    Circle()
-                        .stroke(color, lineWidth: max(lineWidth * 0.75, 1))
-                        .frame(width: dotSize, height: dotSize)
-                        .scaleEffect(1 + 1.4 * wave)
-                        .opacity((1 - wave) * 0.85)
+            if usesGlyph, let program {
+                let handoff = max(progress - 0.75, 0) / 0.25
+                ZStack {
+                    dot(Theme.secondaryText.color).opacity(handoff)
+                    programImage(program, tint: color)
+                        .opacity((1 - handoff) * (0.65 + 0.35 * (0.5 + 0.5 * cos(wave * 2 * .pi))))
+                }
+            } else {
+                ZStack {
+                    dot(Theme.secondaryText.color)
+                    dot(color).opacity(progress < 0.5 ? 1 : 1 - (progress - 0.5) * 2)
+                    if progress < 1 {
+                        Circle()
+                            .stroke(color, lineWidth: max(lineWidth * 0.75, 1))
+                            .frame(width: dotSize, height: dotSize)
+                            .scaleEffect(1 + 1.4 * wave)
+                            .opacity((1 - wave) * 0.85)
+                    }
                 }
             }
         }

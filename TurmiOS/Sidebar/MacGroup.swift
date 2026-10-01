@@ -160,7 +160,9 @@ private struct MacSessionRow: View {
                 }
             }
             Spacer(minLength: 8)
-            ActivityBadge(activity: summary.activity, phase: summary.phase)
+            ProgramMark(program: summary.program, activity: summary.activity, size: 20) {
+                ActivityBadge(activity: summary.activity, phase: summary.phase)
+            }
         }
     }
 }

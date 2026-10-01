@@ -124,6 +124,12 @@ final class MacSession: TerminalTab, BlockSession {
         return phase == .running ? .busy : .live
     }
 
+    var program: RunningProgram? { summary?.program }
+
+    var programActivity: CompanionActivity {
+        hasEnded || link != .connected ? .inactive : summary?.activity ?? .inactive
+    }
+
     var blocks: [MacBlock] { shell.blocks }
     var runningBlock: MacBlock? { shell.runningBlock }
     var commands: [String] { shell.commands }

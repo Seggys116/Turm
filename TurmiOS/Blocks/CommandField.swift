@@ -166,7 +166,15 @@ struct CommandField: UIViewRepresentable {
         field.keyBar.onBytes = { [weak field] data in field?.handle(data) }
         field.keyBar.onPaste = { [weak field] in field?.paste(nil) }
         focus.field = field
+        #if targetEnvironment(simulator)
+        if DemoContent.screen == nil {
+            DispatchQueue.main.async { _ = field.becomeFirstResponder() }
+        } else if DemoContent.focusesCommandField {
+            DemoContent.focusWhenReady(field)
+        }
+        #else
         DispatchQueue.main.async { _ = field.becomeFirstResponder() }
+        #endif
         return field
     }
 

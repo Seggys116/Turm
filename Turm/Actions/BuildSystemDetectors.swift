@@ -44,17 +44,43 @@ nonisolated enum BuildSystemDetectors {
     }
 
     static func xcode(_ probe: ProjectProbe) -> Detection? {
+        xcode(probe, destinations: probe.isRemote ? nil : DestinationCache.shared.destinations)
+    }
+
+    /// Schemes come from disk and destinations from the cache; remote projects keep the single scheme named after the container.
+    static func xcode(_ probe: ProjectProbe, destinations cached: [XcodeDestination]?) -> Detection? {
         let workspace = probe.files(withExtension: "xcworkspace").first
         let project = probe.files(withExtension: "xcodeproj").first
         guard let container = workspace ?? project else { return nil }
         let flag = workspace != nil ? "-workspace" : "-project"
-        let scheme = (container as NSString).deletingPathExtension
-        let target = "\(flag) \(ShellQuoting.word(container)) -scheme \(ShellQuoting.word(scheme)) -configuration {xcode-configuration}"
+        let name = (container as NSString).deletingPathExtension
+        let fallback = XcodeScheme(name: name, symbol: XcodeSchemes.symbol(forExtension: nil))
+        var schemes: [XcodeScheme]?
+        if !probe.isRemote {
+            let found = probe.isVirtual ? [] : XcodeSchemes.discover(container: container, in: probe.directory)
+            schemes = found.isEmpty ? [fallback] : found
+        }
+        let destinations = probe.isVirtual ? [XcodeDestination.mac] : cached
+        let scheme = schemes == nil ? ShellQuoting.word(name) : "{xcode-scheme}"
+        let destination = destinations == nil ? "" : " {xcode-destination}"
+        let base = "\(flag) \(ShellQuoting.word(container)) -scheme \(scheme) -configuration {xcode-configuration}"
+        let target = base + destination
         var b = DetectionBuilder(probe: probe, prefix: "xcode")
+        if let schemes {
+            b.variant("xcode-scheme", title: "Scheme", options: schemes.map {
+                ProjectVariant.Option(label: $0.name, value: ShellQuoting.word($0.name), symbol: $0.symbol, tags: $0.platforms)
+            })
+        }
+        if let destinations {
+            b.variant("xcode-destination", title: "Destination", options: XcodeDestinations.options(destinations), filter: "xcode-scheme")
+        }
         b.variant("xcode-configuration", title: "Configuration", [("Debug", "Debug"), ("Release", "Release")])
         b.add("build", "Build", "xcodebuild \(target) build", .build, featured: true)
+        if destinations != nil {
+            b.add("run", "Run", XcodeRun.command(arguments: "\(flag) \(ShellQuoting.word(container)) -scheme {xcode-scheme} -configuration {xcode-configuration} {xcode-destination}"), .run, featured: true)
+        }
         b.add("test", "Test", "xcodebuild \(target) test", .test, featured: true)
-        b.add("clean", "Clean", "xcodebuild \(target) clean", .clean, featured: true)
+        b.add("clean", "Clean", "xcodebuild \(base) clean", .clean, featured: true)
         b.add("archive", "Archive", "xcodebuild \(target) archive", .build, symbol: "archivebox")
         b.add("list", "List schemes", "xcodebuild -list \(flag) \(ShellQuoting.word(container))", .other, symbol: "list.bullet")
         b.add("open", "Open in Xcode", "open \(ShellQuoting.word(container))", .other, symbol: "hammer")

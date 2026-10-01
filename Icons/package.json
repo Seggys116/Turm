@@ -1,0 +1,14 @@
+{
+  "name": "turm-brand-icons",
+  "private": true,
+  "description": "Brand logos for running programs and project ecosystems, copied into the Turm app bundle at build time.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "postinstall": "node build.mjs --inputs"
+  },
+  "devDependencies": {
+    "@lobehub/icons-static-svg": "1.95.1",
+    "simple-icons": "16.33.0"
+  }
+}

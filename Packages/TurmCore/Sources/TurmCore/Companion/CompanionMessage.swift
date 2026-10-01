@@ -38,11 +38,14 @@ public nonisolated struct SessionSummary: Codable, Sendable, Equatable, Identifi
     public var windowTitle: String?
     public var branch: String?
     public var directory: String?
+    public var program: RunningProgram?
 
     public init(
         id: UUID, title: String, location: String, phase: CompanionPhase, activity: CompanionActivity = .inactive,
-        remoteLabel: String? = nil, windowTitle: String? = nil, branch: String? = nil, directory: String? = nil
+        remoteLabel: String? = nil, windowTitle: String? = nil, branch: String? = nil, directory: String? = nil,
+        program: RunningProgram? = nil
     ) {
+        self.program = program
         self.id = id
         self.title = title
         self.location = location

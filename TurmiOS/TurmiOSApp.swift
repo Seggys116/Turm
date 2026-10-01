@@ -5,6 +5,9 @@ import TurmCore
 struct TurmiOSApp: App {
     init() {
         CloudSync.shared.start()
+        #if targetEnvironment(simulator)
+        DemoContent.prepare()
+        #endif
         MacManager.shared.start()
     }
 

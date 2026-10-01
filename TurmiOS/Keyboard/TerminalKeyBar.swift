@@ -98,6 +98,15 @@ final class TerminalKeyBarView: UIInputView {
     // the keyboard below has rounded top corners, so the bar's colour runs on underneath them
     private static let backdropOverhang: CGFloat = 48
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            KeyboardOverlap.shared.track(self)
+        } else {
+            KeyboardOverlap.shared.stopTracking(self)
+        }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.shadowPath = UIBezierPath(rect: CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + Self.backdropOverhang)).cgPath
@@ -167,8 +176,12 @@ final class TerminalKeyBarView: UIInputView {
         buttons = keys.map(makeButton)
         for button in buttons { keysStack.addArrangedSubview(button) }
         let pageButton = makeButton(page == .main ? Self.functionPageKey : Self.mainPageKey)
-        pinned.addArrangedSubview(pageButton)
-        pinned.addArrangedSubview(makeButton(Self.hideKey))
+        // the scroll view has no width of its own, so the pinned keys must hug or they can take the whole bar
+        for button in [pageButton, makeButton(Self.hideKey)] {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+            pinned.addArrangedSubview(button)
+        }
         refreshModifiers()
     }
 

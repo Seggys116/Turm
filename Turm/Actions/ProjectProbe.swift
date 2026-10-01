@@ -29,6 +29,9 @@ nonisolated struct ProjectProbe {
 
     var isEmpty: Bool { entries.isEmpty }
 
+    var isRemote: Bool { remote != nil }
+    var isVirtual: Bool { virtualFiles != nil }
+
     func has(_ path: String) -> Bool {
         if let remote, path.contains("/") { return remote.existing.contains(path) }
         if let virtualFiles {
@@ -103,6 +106,14 @@ nonisolated struct DetectionBuilder {
             id: id, title: title, ecosystem: prefix,
             options: options.map { ProjectVariant.Option(label: $0.label, value: $0.value) },
             defaultIndex: defaultIndex
+        ))
+    }
+
+    mutating func variant(
+        _ id: String, title: String, options: [ProjectVariant.Option], defaultIndex: Int = 0, filter: String? = nil
+    ) {
+        variants.append(ProjectVariant(
+            id: id, title: title, ecosystem: prefix, options: options, defaultIndex: defaultIndex, filter: filter
         ))
     }
 

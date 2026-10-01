@@ -58,6 +58,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored var onPopOut: (TerminalSession) -> Void = { _ in }
 
     @ObservationIgnored private var process: LocalProcess!
+    @ObservationIgnored private var foregroundProgram: (block: UUID, program: RunningProgram)?
+    @ObservationIgnored private var foregroundMiss: (block: UUID, at: Date)?
+    private static let foregroundRecheck: TimeInterval = 1
+    @ObservationIgnored private var finishedProgram: (block: UUID, program: RunningProgram?)?
     @ObservationIgnored private var parser = ShellStreamParser()
     @ObservationIgnored private var outputProgress = OutputProgress()
     @ObservationIgnored private var didExit = false
@@ -198,6 +202,32 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         guard let last = blocks.last, let exitCode = last.exitCode, last.id != seenOutcome else { return .inactive }
         return exitCode == 0 ? .succeeded : .failed
+    }
+
+    /// The program behind the running command, falling back to the pty's foreground process for aliases.
+    var runningProgram: RunningProgram? {
+        guard isRunning, let block = current else { return nil }
+        if let miss = foregroundMiss, miss.block == block.id, Date().timeIntervalSince(miss.at) < Self.foregroundRecheck { return nil }
+        if let program = RunningProgram.resolve(command: block.command) { return program }
+        if let cached = foregroundProgram, cached.block == block.id { return cached.program }
+        guard process.childfd >= 0 else { return nil }
+        let group = tcgetpgrp(process.childfd)
+        guard group > 0, group != process.shellPid, let program = RunningProgram.resolve(processID: group) else {
+            foregroundMiss = (block.id, Date())
+            return nil
+        }
+        foregroundProgram = (block.id, program)
+        return program
+    }
+
+    /// The program a shell row shows in place of the status dot, kept after the command finishes.
+    var displayedProgram: RunningProgram? {
+        if isRunning { return runningProgram }
+        guard let last = blocks.last else { return nil }
+        if let cached = finishedProgram, cached.block == last.id { return cached.program }
+        let program = RunningProgram.displayed(isRunning: false, running: nil, lastCommand: last.command)
+        finishedProgram = (last.id, program)
+        return program
     }
 
     func acknowledgeOutcome() {
@@ -800,15 +830,25 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         projectGeneration += 1
         let generation = projectGeneration
         Task {
+            let coldCache = DestinationCache.shared.destinations == nil
             let found = await ProjectDetection.detect(in: path)
-            guard generation == projectGeneration else { return }
-            ProjectShortcutIndex.shared.set(found.shortcuts, for: path)
-            if found != project {
-                project = found
-                variantChoices = VariantStore.load(roots: found.roots, variants: found.variants)
-                toolChoice = ToolChoiceStore.load(roots: found.roots)
-            }
+            guard apply(found, for: path, generation: generation) else { return }
+            guard coldCache, ProjectDetection.usesXcode(found) else { return }
+            await XcodeDestinations.prepare()
+            apply(await ProjectDetection.detect(in: path), for: path, generation: generation)
         }
+    }
+
+    @discardableResult
+    private func apply(_ found: ProjectSnapshot, for path: String, generation: Int) -> Bool {
+        guard generation == projectGeneration else { return false }
+        ProjectShortcutIndex.shared.set(found.shortcuts, for: path)
+        if found != project {
+            project = found
+            variantChoices = VariantStore.load(roots: found.roots, variants: found.variants)
+            toolChoice = ToolChoiceStore.load(roots: found.roots)
+        }
+        return true
     }
 
     func run(_ action: ProjectAction) {
@@ -844,7 +884,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     func choose(_ variant: ProjectVariant, index: Int) {
         guard variant.options.indices.contains(index) else { return }
         variantChoices[variant.id] = index
-        VariantStore.save(index: index, variant: variant.id, roots: project.roots)
+        VariantStore.save(index: index, variant: variant.id, roots: project.roots, value: variant.options[index].value)
     }
 
     private func refreshGit(for path: String) {

@@ -202,7 +202,7 @@ String values are matched case-insensitively. An unrecognised value for `titles`
 
 ### Icons
 
-Icons are SF Symbol names, the same names shown in Apple's SF Symbols app.
+Icons are SF Symbol names, the same names shown in Apple's SF Symbols app. They can also be a brand logo written as `brand:<key>`, for example `brand:docker`. The keys are the left-hand names in `Icons/manifest.json`; an unknown key shows a generic terminal symbol.
 
 ```json
 {

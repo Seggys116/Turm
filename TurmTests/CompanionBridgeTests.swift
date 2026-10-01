@@ -73,6 +73,25 @@ private struct Rig {
     }
 }
 
+// waiting for git on the main actor stalls every shell test that needs it to reach the prompt
+@concurrent
+private nonisolated func runGit(_ arguments: [String], in repo: URL) async throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", repo.path, "-c", "user.name=t", "-c", "user.email=t@t"] + arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        process.terminationHandler = { _ in continuation.resume() }
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            continuation.resume(throwing: error)
+        }
+    }
+}
+
 @MainActor
 @Suite(.serialized)
 struct CompanionBridgeTests {
@@ -528,20 +547,11 @@ struct CompanionBridgeTests {
         defer { rig.finish() }
         let repo = try rig.folder()
         defer { try? FileManager.default.removeItem(at: repo) }
-        func git(_ arguments: [String]) throws {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", repo.path, "-c", "user.name=t", "-c", "user.email=t@t"] + arguments
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            process.waitUntilExit()
-        }
-        try git(["init", "-b", "main"])
+        try await runGit(["init", "-b", "main"], in: repo)
         try Data("a".utf8).write(to: repo.appendingPathComponent("a.txt"))
-        try git(["add", "."])
-        try git(["commit", "-m", "one"])
-        try git(["branch", "other"])
+        try await runGit(["add", "."], in: repo)
+        try await runGit(["commit", "-m", "one"], in: repo)
+        try await runGit(["branch", "other"], in: repo)
         rig.workspace.newShell(directory: repo.path)
         let session = try #require(rig.workspace.sessionEntries.map(\.session).first { $0 !== rig.session })
         try #require(await wait { session.phase == .ready })

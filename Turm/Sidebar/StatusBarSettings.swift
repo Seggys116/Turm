@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct StatusBarSettings: View {
     @AppStorage(StatusBarPreferences.key) private var prefs = StatusBarPreferences()
@@ -48,8 +49,7 @@ struct StatusBarSettings: View {
                     withAnimation(SettingsMotion.slide) { selectedID = entry.id }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: entry.symbol)
-                            .font(.system(size: 11, weight: .medium))
+                        Glyph(symbol: entry.symbol, fallback: ProjectEcosystem.fallback(forSymbol: entry.symbol), size: 11, weight: .medium)
                         Text(entry.title)
                             .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)

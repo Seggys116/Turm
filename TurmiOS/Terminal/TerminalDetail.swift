@@ -197,7 +197,7 @@ private struct SessionTab: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            StatusDot(color: tab.indicator.color, size: 7)
+            TabStatusMark(tab: tab, dotSize: 7, markSize: 14)
             Text(tab.title)
                 .font(Chrome.Typeface.label)
                 .lineLimit(1)

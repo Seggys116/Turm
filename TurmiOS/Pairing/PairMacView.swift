@@ -5,8 +5,13 @@ struct PairMacView: View {
     var manager = MacManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var pairing = MacPairing()
+    #if targetEnvironment(simulator)
+    @State private var mode = DemoContent.opensPairingCode ? Mode.code : Mode.scan
+    @State private var host = DemoContent.opensPairingCode ? "studio.local" : ""
+    #else
     @State private var mode = Mode.scan
     @State private var host = ""
+    #endif
     @State private var port = String(Companion.defaultPort)
     @State private var code = ""
     @State private var choice = Choice.address

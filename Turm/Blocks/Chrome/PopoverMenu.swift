@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 extension View {
     /// Shows an animated menu attached above or below this view.
@@ -297,7 +298,7 @@ struct MenuRow: View {
             HStack(spacing: 8) {
                 Group {
                     if let symbol {
-                        Image(systemName: symbol)
+                        Glyph(symbol: symbol, fallback: ProjectEcosystem.fallback(forSymbol: symbol), size: 10)
                     } else if isCurrent {
                         Image(systemName: "checkmark")
                     } else {

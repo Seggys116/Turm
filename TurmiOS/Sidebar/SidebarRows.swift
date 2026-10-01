@@ -76,7 +76,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(color: tab.indicator.color)
+            TabStatusMark(tab: tab)
             VStack(alignment: .leading, spacing: 2) {
                 Text(tab.title)
                     .font(Chrome.Typeface.monoBody)

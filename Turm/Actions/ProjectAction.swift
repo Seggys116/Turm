@@ -53,6 +53,10 @@ nonisolated struct ProjectVariant: Identifiable, Hashable, Sendable {
     struct Option: Hashable, Sendable {
         var label: String
         var value: String
+        var symbol: String?
+        var detail: String?
+        /// Names the groups this option belongs to, matched against the tags of the option picked in the `filter` variant.
+        var tags: [String] = []
     }
 
     let id: String
@@ -60,6 +64,7 @@ nonisolated struct ProjectVariant: Identifiable, Hashable, Sendable {
     var ecosystem: String
     var options: [Option]
     var defaultIndex = 0
+    var filter: String?
 
     func option(at index: Int?) -> Option {
         let resolved = index.flatMap { options.indices.contains($0) ? $0 : nil } ?? defaultIndex
@@ -74,7 +79,7 @@ nonisolated struct ProjectEcosystem: Identifiable, Hashable, Sendable {
     var title: String
     var symbol: String
 
-    static let symbols: [String: String] = [
+    static let fallbackSymbols: [String: String] = [
         "cargo": "shippingbox", "swiftpm": "swift", "xcode": "hammer", "node": "curlybraces", "tauri": "macwindow",
         "deno": "curlybraces.square", "python": "chevron.left.forwardslash.chevron.right", "go": "arrow.right.circle",
         "platformio": "cpu", "cmake": "gearshape.2", "meson": "gearshape.2", "make": "gearshape", "gradle": "cube", "maven": "cube",
@@ -83,8 +88,23 @@ nonisolated struct ProjectEcosystem: Identifiable, Hashable, Sendable {
         "docker": "shippingbox.fill", "terraform": "cloud", projectID: "folder",
     ]
 
+    private static let brandKeys: [String: String] = [
+        "swiftpm": "swift", "xcode": "xcode", "node": "nodejs", "deno": "deno", "python": "python",
+        "go": "go", "platformio": "platformio", "cmake": "cmake", "gradle": "gradle", "maven": "apachemaven",
+        "dotnet": "dotnet", "mix": "elixir", "dart": "dart",
+        "just": "just", "task": "task", "docker": "docker", "terraform": "terraform",
+    ]
+
+    static let symbols: [String: String] = fallbackSymbols.merging(brandKeys.mapValues { "brand:" + $0 }) { _, brand in brand }
+
     static func symbol(for id: String) -> String {
         symbols[id] ?? "terminal"
+    }
+
+    static func fallback(forSymbol symbol: String) -> String {
+        guard symbol.hasPrefix("brand:") else { return symbol }
+        let id = symbols.first { $0.value == symbol }?.key
+        return id.flatMap { fallbackSymbols[$0] } ?? "terminal"
     }
 }
 
@@ -113,6 +133,22 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
         variants.filter { $0.ecosystem == ecosystem }
     }
 
+    func visibleOptions(of variant: ProjectVariant, selection: [String: Int]) -> [(index: Int, option: ProjectVariant.Option)] {
+        let all = variant.options.enumerated().map { (index: $0.offset, option: $0.element) }
+        guard let parent = variants.first(where: { $0.id == variant.filter }) else { return all }
+        let tags = Set(selectedOption(of: parent, selection: selection).option.tags)
+        guard !tags.isEmpty else { return all }
+        let kept = all.filter { $0.option.tags.isEmpty || !tags.isDisjoint(with: $0.option.tags) }
+        return kept.isEmpty ? all : kept
+    }
+
+    func selectedOption(of variant: ProjectVariant, selection: [String: Int]) -> (index: Int, option: ProjectVariant.Option) {
+        let visible = visibleOptions(of: variant, selection: selection)
+        if let hit = visible.first(where: { $0.index == selection[variant.id] }) { return hit }
+        if let hit = visible.first(where: { $0.index == variant.defaultIndex }) { return hit }
+        return visible.first ?? (index: 0, option: variant.option(at: nil))
+    }
+
     var roots: [String] {
         var seen: [String] = []
         for action in actions where !seen.contains(action.root) { seen.append(action.root) }
@@ -126,11 +162,10 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
         }
     }
 
-    /// Builds the text typed into the shell: variant placeholders filled, environment prefixed, and a `cd` when the project lives above the shell's directory.
     func commandLine(for action: ProjectAction, selection: [String: Int], from directory: String) -> String {
         var text = action.command
         for variant in variants {
-            let value = variant.option(at: selection[variant.id]).value
+            let value = selectedOption(of: variant, selection: selection).option.value
             text = text.replacingOccurrences(of: "{\(variant.id)}", with: value)
         }
         text = Self.collapseSpaces(text)
@@ -172,12 +207,22 @@ nonisolated struct ProjectSnapshot: Equatable, Sendable {
 nonisolated enum VariantStore {
     static let key = "turm.projectVariants"
 
+    static let valueKey = "turm.projectVariantValues"
+
+    /// A remembered value wins over the index so lists that change (schemes, devices) keep the same choice.
     static func load(roots: [String], variants: [ProjectVariant], defaults: UserDefaults = .standard) -> [String: Int] {
         let stored = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
+        let values = defaults.dictionary(forKey: valueKey) as? [String: String] ?? [:]
         var selection: [String: Int] = [:]
         for variant in variants {
             for root in roots {
-                if let index = stored[entry(root, variant.id)], variant.options.indices.contains(index) {
+                let name = entry(root, variant.id)
+                if let value = values[name] {
+                    guard let index = variant.options.firstIndex(where: { $0.value == value }) else { continue }
+                    selection[variant.id] = index
+                    break
+                }
+                if let index = stored[name], variant.options.indices.contains(index) {
                     selection[variant.id] = index
                     break
                 }
@@ -186,10 +231,15 @@ nonisolated enum VariantStore {
         return selection
     }
 
-    static func save(index: Int, variant: String, roots: [String], defaults: UserDefaults = .standard) {
+    static func save(index: Int, variant: String, roots: [String], value: String? = nil, defaults: UserDefaults = .standard) {
         var stored = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
-        for root in roots { stored[entry(root, variant)] = index }
+        var values = defaults.dictionary(forKey: valueKey) as? [String: String] ?? [:]
+        for root in roots {
+            stored[entry(root, variant)] = index
+            values[entry(root, variant)] = value
+        }
         defaults.set(stored, forKey: key)
+        defaults.set(values, forKey: valueKey)
     }
 
     private static func entry(_ root: String, _ variant: String) -> String {
@@ -197,7 +247,6 @@ nonisolated enum VariantStore {
     }
 }
 
-/// Remembers which detected tool the bar shows, per project directory.
 nonisolated enum ToolChoiceStore {
     static let key = "turm.projectTools"
 

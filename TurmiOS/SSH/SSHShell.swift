@@ -241,3 +241,32 @@ final class SSHShell {
         if blocks.count > Self.blockLimit { blocks.removeFirst(blocks.count - Self.blockLimit) }
     }
 }
+
+#if targetEnvironment(simulator)
+extension SSHShell {
+    func showDemo(_ history: [MacBlock], host: String, home path: String) {
+        blocks = history
+        remote = Remote(token: "demo", kind: .bash, host: host)
+        home = path
+        directory = path
+        phase = .ready
+    }
+
+    func answerDemo(with machine: DemoMachine) {
+        send = { [weak self] bytes in
+            guard let self, phase == .submitted, let token = remote?.token else { return }
+            let command = String(decoding: bytes, as: UTF8.self)
+                .replacingOccurrences(of: "\u{1B}[200~", with: "")
+                .replacingOccurrences(of: "\u{1B}[201~", with: "")
+                .trimmingCharacters(in: .newlines)
+            let reply = machine.run(command)
+            let output = reply.output.map { $0 + "\r\n" }.joined()
+            let stream = "\u{1B}]7777;C\u{07}" + output + "\u{1B}]7777;R;\(token);\(reply.exitCode);\(machine.directory)\u{07}"
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                self?.consume(Array(stream.utf8)[...])
+            }
+        }
+    }
+}
+#endif

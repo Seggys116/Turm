@@ -59,6 +59,7 @@ private struct AboutSection: View {
         ChromeSection("About") {
             ChromeActionRow("Privacy Policy", systemImage: "hand.raised") { openURL(Self.privacyURL) }
             ChromeActionRow("Support", systemImage: "questionmark.circle") { openURL(Self.supportURL) }
+            AcknowledgementsRow()
         }
     }
 }

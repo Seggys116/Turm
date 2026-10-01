@@ -23,6 +23,57 @@ struct ShellTabTests {
         #expect(workspace.activeTabID == workspace.tabs[1].id)
     }
 
+    @Test func newShellOpensDirectlyAfterTheActiveShell() {
+        let workspace = makeWorkspace(shells: 3)
+        defer { workspace.terminateAll() }
+        let ids = workspace.tabs.map(\.id)
+        workspace.selectTab(ids[0])
+
+        workspace.newShell()
+
+        #expect(workspace.tabs.count == 4)
+        #expect(workspace.tabs[0].id == ids[0])
+        #expect(workspace.tabs[1].id == workspace.activeTabID)
+        #expect(!ids.contains(workspace.tabs[1].id))
+        #expect(workspace.tabs.map(\.id).filter { ids.contains($0) } == ids)
+    }
+
+    @Test func newShellFromTheLastShellAppends() {
+        let workspace = makeWorkspace(shells: 2)
+        defer { workspace.terminateAll() }
+
+        workspace.newShell()
+
+        #expect(workspace.tabs.count == 3)
+        #expect(workspace.activeTabID == workspace.tabs[2].id)
+    }
+
+    @Test func adoptedShellOpensAfterItsOriginatingShell() {
+        let workspace = makeWorkspace(shells: 3)
+        defer { workspace.terminateAll() }
+        let ids = workspace.tabs.map(\.id)
+        let origin = workspace.tabs[0].focusedPane
+        workspace.selectTab(ids[2])
+
+        workspace.adopt(TerminalSession(directory: NSTemporaryDirectory(), auxiliary: true), from: origin)
+
+        #expect(workspace.tabs.count == 4)
+        #expect(workspace.tabs[1].id == workspace.activeTabID)
+        #expect(workspace.tabs.map(\.id).filter { ids.contains($0) } == ids)
+    }
+
+    @Test func adoptWithoutAnOriginOpensAfterTheActiveShell() {
+        let workspace = makeWorkspace(shells: 3)
+        defer { workspace.terminateAll() }
+        let ids = workspace.tabs.map(\.id)
+        workspace.selectTab(ids[1])
+
+        workspace.adopt(TerminalSession(directory: NSTemporaryDirectory(), auxiliary: true))
+
+        #expect(workspace.tabs[2].id == workspace.activeTabID)
+        #expect(workspace.tabs.count == 4)
+    }
+
     @Test func splitStaysInsideTheActiveShell() {
         let workspace = makeWorkspace()
         defer { workspace.terminateAll() }

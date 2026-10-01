@@ -10,7 +10,13 @@ extension EnvironmentValues {
 }
 
 struct ContentView: View {
-    @State private var workspace = Workspace()
+    #if targetEnvironment(simulator)
+    private static let initialWorkspace = DemoContent.workspace() ?? Workspace()
+    #else
+    private static let initialWorkspace = Workspace()
+    #endif
+
+    @State private var workspace = Self.initialWorkspace
     @State private var swipes = SwipeCoordinator()
     var macs = MacManager.shared
 
@@ -34,5 +40,8 @@ struct ContentView: View {
                 SSHHostEditorView(host) { workspace.editingHost = nil }
             }
             .focusedSceneValue(\.workspace, workspace)
+            #if targetEnvironment(simulator)
+            .task { await DemoContent.presentSheets(in: workspace) }
+            #endif
     }
 }

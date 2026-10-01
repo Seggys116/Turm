@@ -161,6 +161,17 @@ final class SSHTerminalSession: Identifiable, TerminalTab {
         }
     }
 
+    var program: RunningProgram? {
+        guard state == .connected, usesBlocks else { return nil }
+        let running = shell.runningBlock.flatMap { RunningProgram.resolve(command: $0.command) }
+        return RunningProgram.displayed(isRunning: shell.isRunning, running: running, lastCommand: shell.blocks.last?.command)
+    }
+
+    var programActivity: CompanionActivity {
+        guard state == .connected, usesBlocks else { return .inactive }
+        return .outcome(running: shell.isRunning, exitCode: shell.blocks.last?.exitCode)
+    }
+
     func connect() {
         guard !isLive else { return }
         state = .connecting
@@ -720,6 +731,17 @@ extension SSHTerminalSession: BlockSession {
         return message.isEmpty ? "Could not switch to \(name)" : message
     }
 }
+
+#if targetEnvironment(simulator)
+extension SSHTerminalSession {
+    func showDemo(_ history: [MacBlock], home: String) {
+        state = .connected
+        usesBlocks = true
+        shell.showDemo(history, host: host.key, home: home)
+        shell.answerDemo(with: DemoMachine(user: host.user.isEmpty ? "root" : host.user, host: host.key, home: home, flavor: .bash, directory: home))
+    }
+}
+#endif
 
 nonisolated enum SSHSessionError: LocalizedError {
     case missingKey

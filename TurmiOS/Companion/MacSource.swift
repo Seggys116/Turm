@@ -183,3 +183,17 @@ final class MacManager: MacSource {
         }
     }
 }
+
+#if targetEnvironment(simulator)
+extension MacManager {
+    // stands in for the paired Macs for this launch only: nothing reaches the keychain and discovery never starts
+    func showDemo(name: String, hosts: [String], shells: [DemoShell]) -> MacConnection {
+        let record = CompanionPeerRecord(id: UUID(), name: name, key: Data(count: 32), hosts: hosts, port: Companion.defaultPort)
+        let connection = MacConnection(record: record, keychain: keychain)
+        connection.showDemo(shells: shells)
+        connections = [connection]
+        started = true
+        return connection
+    }
+}
+#endif

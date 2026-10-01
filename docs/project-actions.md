@@ -26,7 +26,7 @@ An ecosystem is one detector's result and is the unit shown as a group in the ba
 |---|---|---|
 | `cargo` | `Cargo.toml` (workspaces get `--workspace`) | `cargo.build`, `cargo.run` (needs `src/main.rs`, `src/bin` or a `[[bin]]`), `cargo.test`, `cargo.clean`, `cargo.check`, `cargo.clippy`, `cargo.fmt`, `cargo.bench` (needs `benches/`), `cargo.doc`, `cargo.update`, `cargo.tree` |
 | `swiftpm` | `Package.swift` | `swiftpm.build`, `swiftpm.run` (executable target), `swiftpm.test`, `swiftpm.clean`, `swiftpm.resolve`, `swiftpm.update`, `swiftpm.describe` |
-| `xcode` | first `.xcworkspace`, else first `.xcodeproj`; the scheme is taken from its file name | `xcode.build`, `xcode.test`, `xcode.clean`, `xcode.archive`, `xcode.list`, `xcode.open` |
+| `xcode` | first `.xcworkspace`, else first `.xcodeproj`; schemes and run destinations are selectable (see [Xcode schemes and destinations](#xcode-schemes-and-destinations)) | `xcode.build`, `xcode.run` (local projects), `xcode.test`, `xcode.clean`, `xcode.archive`, `xcode.list`, `xcode.open` |
 | `node` | `package.json`; package manager from its `packageManager` field, else the lockfile (pnpm, bun, yarn), else npm. A known framework (Next.js, Nuxt, Astro, SvelteKit, Remix, Angular, Vite, Create React App, Expo, Electron) is named in the title | `node.install`, `node.s.<script>` for each package script (for example `node.s.dev`, `node.s.build`, `node.s.test`; the first 40 alphabetically), `node.fw.dev` and `node.fw.build` when a framework is present but no matching script, `node.tsc`, `node.update`, `node.outdated`, `node.list` |
 | `tauri` | a Tauri config in `src-tauri/` or the root | `tauri.dev`, `tauri.build`, `tauri.info`, `tauri.check`, `tauri.clippy` |
 | `deno` | `deno.json` or `deno.jsonc` (tasks are read from `deno.json` only) | `deno.t.<task>`, `deno.test`, `deno.check`, `deno.lint`, `deno.fmt` |
@@ -52,6 +52,8 @@ An ecosystem is one detector's result and is the unit shown as a group in the ba
 
 A group with the id `project` (titled "Project") is added first when your `Turm.json` defines custom actions or variants. Custom actions get whatever id you give them (see [Turm.json](turm-json.md)).
 
+Ecosystems with a logo show it in the bar, menus and Settings (for example `brand:swift` for Swift packages). Icons in `Turm.json` and the bar overrides accept SF Symbol names or `brand:<key>`, where the keys come from `Icons/manifest.json`. Cargo, Tauri, Meson, Make, Zig, Ruby, PHP and Nix have no bundled logo and keep SF Symbols (Cargo uses `shippingbox`), as does any build without the icons.
+
 Every action has a category: Run, Build, Test, Check, Clean, Dependencies or Other. The category sets the default icon and how actions are grouped. Actions marked as featured are the ones placed on the bar by default (see below).
 
 ## Option toggles (variants)
@@ -62,6 +64,8 @@ Some commands have a switch that changes them, such as Debug or Release. These a
 |---|---|---|
 | `cargo-profile` | `cargo` | Debug: nothing, Release: `--release` |
 | `swift-configuration` | `swiftpm` | Debug: `-c debug`, Release: `-c release` |
+| `xcode-scheme` | `xcode` | one option per scheme, each with an icon; the value is the scheme name, quoted when needed |
+| `xcode-destination` | `xcode` | My Mac, simulators and connected devices, each with an icon; the value is `-destination '<specifier>'` |
 | `xcode-configuration` | `xcode` | Debug: `Debug`, Release: `Release` |
 | `pio-env` | `platformio` | All envs (or Default envs when `default_envs` is set): nothing, then one option per `[env:<name>]`: `-e <name>` |
 | `cmake-config` | `cmake` | Debug, Release, RelWithDebInfo, MinSizeRel |
@@ -72,6 +76,16 @@ Some commands have a switch that changes them, such as Debug or Release. These a
 | `tauri-bundle` | `tauri` | Release: nothing (the default), Debug: `--debug` |
 
 When an option's value is empty, the extra space is removed from the command. Your choice is remembered per project folder and per variant. You can add your own variants in `Turm.json`, and use the detected ones in your own commands, for example `cargo run {cargo-profile} -- --verbose`.
+
+### Xcode schemes and destinations
+
+The scheme variant lists every scheme of the detected `.xcworkspace` or `.xcodeproj`. Turm reads them from disk without running `xcodebuild`: shared schemes in `xcshareddata/xcschemes`, your own in `xcuserdata/*/xcschemes`, and for a workspace also the schemes of the projects it references (`Pods.xcodeproj` is skipped). When no scheme file exists, the targets in `project.pbxproj` stand in, since Xcode creates a scheme for each. The scheme named after the container comes first and is the default.
+
+Each scheme has an icon taken from the product it builds: an app gets its platform's symbol when the target supports a single platform (`macwindow`, `iphone`, `applewatch`, `appletv`, `visionpro`) and `app` otherwise, an extension `puzzlepiece.extension`, a framework `shippingbox`, a test bundle `checkmark.diamond`, a static library `books.vertical`, a command line tool `terminal`, anything else `cube`. The platforms of a scheme come from `SUPPORTED_PLATFORMS` or `SDKROOT` of its target in `project.pbxproj` (values set only in `.xcconfig` files are not seen).
+
+The destination variant offers "My Mac" and the available simulators (from `xcrun simctl list devices available -j`) and connected devices (from `xcrun devicectl list devices`), with `desktopcomputer` or `laptopcomputer`, `iphone`, `ipad`, `applewatch`, `appletv` and `visionpro` icons. Booted simulators are marked in the menu. When the platforms of the chosen scheme are known, only matching destinations are listed. The list is gathered in the background the first time an Xcode project is detected, then refreshed in the background once it is a minute old, so a refreshed list shows up the next time the folder is detected. The chosen destination is added as `-destination` to build, run, test and archive.
+
+`xcode.run` builds the scheme, finds the built app with `xcodebuild -showBuildSettings`, then opens it (My Mac), or boots the simulator, installs and launches it with `xcrun simctl`, or installs and launches it on a device with `xcrun devicectl`. It needs a scheme that builds an app. Remote (SSH) Xcode projects keep a single scheme named after the container and have no destination or Run.
 
 ## The bar
 

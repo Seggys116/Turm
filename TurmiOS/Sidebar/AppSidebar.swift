@@ -4,7 +4,11 @@ import TurmCore
 struct AppSidebar: View {
     let workspace: Workspace
     let macs: MacManager
+    #if targetEnvironment(simulator)
+    var hosts = DemoContent.hosts ?? SSHHostStore.shared
+    #else
     var hosts = SSHHostStore.shared
+    #endif
     @Environment(\.splitLayout) private var splitLayout
 
     var body: some View {
@@ -123,7 +127,11 @@ struct AppSidebar: View {
 
 struct HostPicker: View {
     let workspace: Workspace
+    #if targetEnvironment(simulator)
+    var hosts = DemoContent.hosts ?? SSHHostStore.shared
+    #else
     var hosts = SSHHostStore.shared
+    #endif
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

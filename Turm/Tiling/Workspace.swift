@@ -90,7 +90,7 @@ final class Workspace {
         sessions[pane] = session
         if let command, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { session.submitWhenReady(command) }
         let tab = ShellTab(layout: .leaf(pane), focusedPane: pane)
-        tabs.append(tab)
+        tabs.insert(tab, at: activeIndex + 1)
         activeTabID = tab.id
     }
 
@@ -250,20 +250,21 @@ final class Workspace {
         let session = directory.map { TerminalSession(directory: $0) } ?? TerminalSession()
         session.onFocus = { [weak self] in self?.focusInActiveTab(pane) }
         session.onExit = { [weak self] in self?.removePane(pane) }
-        session.onPopOut = { [weak self] sub in self?.adopt(sub) }
+        session.onPopOut = { [weak self] sub in self?.adopt(sub, from: pane) }
         return session
     }
 
-    /// Opens an already running session, such as a popped-out action shell, as its own tab.
-    func adopt(_ session: TerminalSession) {
+    /// Opens an already running session, such as a popped-out action shell, as its own tab beside the one it came from.
+    func adopt(_ session: TerminalSession, from origin: PaneID? = nil) {
         let pane = PaneID()
         session.adopt()
         session.onFocus = { [weak self] in self?.focusInActiveTab(pane) }
         session.onExit = { [weak self] in self?.removePane(pane) }
-        session.onPopOut = { [weak self] sub in self?.adopt(sub) }
+        session.onPopOut = { [weak self] sub in self?.adopt(sub, from: pane) }
         sessions[pane] = session
         let tab = ShellTab(layout: .leaf(pane), focusedPane: pane)
-        tabs.append(tab)
+        let source = origin.flatMap { origin in tabs.firstIndex { $0.layout.contains(origin) } } ?? activeIndex
+        tabs.insert(tab, at: source + 1)
         activeTabID = tab.id
     }
 }

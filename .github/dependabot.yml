@@ -15,4 +15,18 @@ updates:
     labels:
       - ci
 
+  - package-ecosystem: npm
+    directory: /Icons
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      icons:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: icons
+    labels:
+      - dependencies
+
   # No swift entry: Dependabot reads Package.swift, and SwiftTerm lives in Turm.xcodeproj.

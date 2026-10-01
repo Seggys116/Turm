@@ -1,6 +1,7 @@
 import AppKit
 import SwiftTerm
 import SwiftUI
+import TurmCore
 import UniformTypeIdentifiers
 
 private enum BarMenu: Hashable {
@@ -117,7 +118,8 @@ struct StatusBar: View {
                     ) { session.run(action) }
                 case .variant(let variant):
                     let menu = BarMenu.variant(variant.id)
-                    BarChip(title: variant.option(at: session.variantChoices[variant.id]).label, isActive: open == menu, isQuiet: true) { toggle(menu) }
+                    let chosen = session.project.selectedOption(of: variant, selection: session.variantChoices).option
+                    BarChip(symbol: chosen.symbol, title: chosen.label, isActive: open == menu, isQuiet: true) { toggle(menu) }
                         .help(variant.title)
                         .anchoredMenu(isOpen: binding(menu)) {
                             OptionMenu(session: session, variant: variant) { open = nil }
@@ -246,8 +248,7 @@ struct BarButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.system(size: 10, weight: .semibold))
+                Glyph(symbol: symbol, fallback: ProjectEcosystem.fallback(forSymbol: symbol), size: 10, weight: .semibold)
                     .frame(width: 12)
                 if let title {
                     Text(title).lineLimit(1)
@@ -284,7 +285,8 @@ struct BarChip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 if let symbol {
-                    Image(systemName: symbol).font(.system(size: 10, weight: .semibold)).frame(width: 12)
+                    Glyph(symbol: symbol, fallback: ProjectEcosystem.fallback(forSymbol: symbol), size: 10, weight: .semibold)
+                        .frame(width: 12)
                 }
                 Text(title).lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(Theme.secondaryText.color)
@@ -349,15 +351,27 @@ private struct OptionMenu: View {
     let close: () -> Void
 
     var body: some View {
-        let current = variant.option(at: session.variantChoices[variant.id])
-        MenuSurface(width: MiniMenu.width(for: variant.options.map(\.label))) {
+        let visible = session.project.visibleOptions(of: variant, selection: session.variantChoices)
+        let current = session.project.selectedOption(of: variant, selection: session.variantChoices).index
+        let extra: CGFloat = visible.contains { $0.option.detail != nil } ? 90 : 0
+        MenuSurface(width: MiniMenu.width(for: visible.map(\.option.label), extra: extra)) {
             MiniMenu.header(variant.title)
-            ForEach(Array(variant.options.enumerated()), id: \.offset) { index, option in
-                MenuRow(title: option.label, isCurrent: option == current, compact: true) {
-                    session.choose(variant, index: index)
-                    close()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(visible, id: \.index) { entry in
+                        MenuRow(
+                            title: entry.option.label, symbol: entry.option.symbol, detail: entry.option.detail,
+                            isCurrent: entry.index == current, compact: true
+                        ) {
+                            session.choose(variant, index: entry.index)
+                            close()
+                        }
+                    }
                 }
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .squareScrollbar()
+            .frame(height: min(CGFloat(visible.count) * MiniMenu.rowHeight, MiniMenu.maxHeight))
         }
     }
 }
@@ -408,8 +422,8 @@ private struct AllActionsMenu: View {
                             MenuRow(
                                 title: variant.title,
                                 symbol: "arrow.triangle.2.circlepath",
-                                detail: variant.option(at: session.variantChoices[variant.id]).label
-                            ) { session.cycle(variant) }
+                                detail: session.project.selectedOption(of: variant, selection: session.variantChoices).option.label
+                            ) { cycle(variant) }
                         }
                     }
                     ForEach(sections, id: \.title) { section in
@@ -429,6 +443,13 @@ private struct AllActionsMenu: View {
             .squareScrollbar()
             .frame(height: min(height, Self.maxHeight))
         }
+    }
+
+    private func cycle(_ variant: ProjectVariant) {
+        let visible = session.project.visibleOptions(of: variant, selection: session.variantChoices)
+        let current = session.project.selectedOption(of: variant, selection: session.variantChoices).index
+        guard let position = visible.firstIndex(where: { $0.index == current }) else { return }
+        session.choose(variant, index: visible[(position + 1) % visible.count].index)
     }
 
     private func header(_ title: String) -> some View {

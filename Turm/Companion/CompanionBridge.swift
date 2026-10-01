@@ -315,7 +315,7 @@ final class CompanionBridge {
         return SessionSummary(
             id: id, title: session.title, location: session.location, phase: Self.phase(of: session),
             activity: Self.activity(of: session), remoteLabel: session.remoteLabel, windowTitle: entry.workspace?.focusedTitle,
-            branch: session.git?.branch, directory: session.directory
+            branch: session.git?.branch, directory: session.directory, program: session.displayedProgram
         )
     }
 

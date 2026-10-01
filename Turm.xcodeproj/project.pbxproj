@@ -193,6 +193,7 @@
 				C010563D306BFD45008BD457 /* Sources */,
 				C010563E306BFD45008BD457 /* Frameworks */,
 				C010563F306BFD45008BD457 /* Resources */,
+				C0105F01306BFD46008BD457 /* Brand Icons */,
 				C0105B04306BFD46008BD457 /* Embed Dock Tile */,
 				C0105C04306BFD46008BD457 /* Embed Foundation Extensions */,
 			);
@@ -301,6 +302,7 @@
 				C0105D07306BFD46008BD457 /* Sources */,
 				C0105D06306BFD46008BD457 /* Frameworks */,
 				C0105D08306BFD46008BD457 /* Resources */,
+				C0105F02306BFD46008BD457 /* Brand Icons */,
 			);
 			buildRules = (
 			);
@@ -412,6 +414,49 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C0105F01306BFD46008BD457 /* Brand Icons */ = {
+			isa = PBXShellScriptBuildPhase;
+			inputFileListPaths = (
+				"$(SRCROOT)/Icons/inputs.xcfilelist",
+			);
+			inputPaths = (
+				"$(SRCROOT)/Icons/inputs.xcfilelist",
+				"$(SRCROOT)/Icons/build.mjs",
+				"$(SRCROOT)/Icons/manifest.json",
+				"$(SRCROOT)/Icons/LICENSE-lobe-icons.txt",
+				"$(SRCROOT)/Icons/package-lock.json",
+			);
+			name = "Brand Icons";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrandIcons/BrandIcons.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrandIcons/NOTICES.txt",
+			);
+			shellPath = /bin/sh;
+			shellScript = "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\nif [ ! -f \"$SRCROOT/Icons/inputs.xcfilelist\" ]; then\n  echo \"error: brand icons are not installed; run: npm ci --prefix Icons\"\n  exit 1\nfi\nnode \"$SRCROOT/Icons/build.mjs\"\n";
+		};
+		C0105F02306BFD46008BD457 /* Brand Icons */ = {
+			isa = PBXShellScriptBuildPhase;
+			inputFileListPaths = (
+				"$(SRCROOT)/Icons/inputs.xcfilelist",
+			);
+			inputPaths = (
+				"$(SRCROOT)/Icons/inputs.xcfilelist",
+				"$(SRCROOT)/Icons/build.mjs",
+				"$(SRCROOT)/Icons/manifest.json",
+				"$(SRCROOT)/Icons/LICENSE-lobe-icons.txt",
+				"$(SRCROOT)/Icons/package-lock.json",
+			);
+			name = "Brand Icons";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrandIcons/BrandIcons.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrandIcons/NOTICES.txt",
+			);
+			shellPath = /bin/sh;
+			shellScript = "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\nif [ ! -f \"$SRCROOT/Icons/inputs.xcfilelist\" ]; then\n  echo \"error: brand icons are not installed; run: npm ci --prefix Icons\"\n  exit 1\nfi\nnode \"$SRCROOT/Icons/build.mjs\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C010563D306BFD45008BD457 /* Sources */ = {
@@ -857,7 +902,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/TurmiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = H2X57PJPJ6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -898,7 +943,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/TurmiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = H2X57PJPJ6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;

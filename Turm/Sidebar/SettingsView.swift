@@ -187,6 +187,7 @@ struct SettingsView: View {
     @AppStorage(SidebarPlacement.key) private var sidebarPlacement = SidebarPlacement.left
     @State private var tab = SettingsTab.appearance
     @State private var isContextMenuEnabled = ContextMenuService.isEnabled
+    @State private var showsNotices = false
     @Environment(\.openURL) private var openURL
 
     private static let repositoryURL = URL(string: "https://github.com/Seggys116/Turm")!
@@ -227,6 +228,7 @@ struct SettingsView: View {
             .squareScrollbar()
         }
         .background(Theme.terminalBackground.color)
+        .sheet(isPresented: $showsNotices) { ThirdPartyNoticesView() }
         .onChange(of: appearance) { _, new in new.apply(animated: true) }
         .onChange(of: appIcon) { _, new in new.apply() }
         .onChange(of: tab, initial: true) { _, new in
@@ -286,6 +288,10 @@ struct SettingsView: View {
             row("Turm", detail: versionDescription) { EmptyView() }
             row("Source code", detail: "github.com/Seggys116/Turm") {
                 Button("View on GitHub") { openURL(Self.repositoryURL) }
+                    .buttonStyle(SettingsButtonStyle())
+            }
+            row("Third-party notices", detail: "Licences of the open-source software and logos Turm includes.") {
+                Button("View Notices") { showsNotices = true }
                     .buttonStyle(SettingsButtonStyle())
             }
         }

@@ -157,7 +157,14 @@ nonisolated enum ProjectDetection {
 
     @concurrent
     static func detect(in directory: String) async -> ProjectSnapshot {
-        snapshot(for: directory)
+        let found = snapshot(for: directory)
+        guard usesXcode(found), DestinationCache.shared.destinations != nil else { return found }
+        await XcodeDestinations.prepare()
+        return found
+    }
+
+    static func usesXcode(_ snapshot: ProjectSnapshot) -> Bool {
+        snapshot.ecosystems.contains { $0.id == "xcode" }
     }
 
     static func snapshot(for directory: String, home: String = NSHomeDirectory()) -> ProjectSnapshot {

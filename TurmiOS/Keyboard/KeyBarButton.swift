@@ -51,7 +51,8 @@ final class KeyBarButton: UIControl {
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: Self.height)
+        let label = content.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        return CGSize(width: max(38, ceil(label) + 20), height: Self.height)
     }
 
     private func buildContent() {

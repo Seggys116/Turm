@@ -21,6 +21,8 @@ protocol TerminalTab: AnyObject {
     var title: String { get }
     var subtitle: String { get }
     var indicator: TabIndicator { get }
+    var program: RunningProgram? { get }
+    var programActivity: CompanionActivity { get }
     func close()
 }
 
