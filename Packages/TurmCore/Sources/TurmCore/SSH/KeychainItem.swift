@@ -136,6 +136,12 @@ nonisolated struct KeychainItem: SecretBacking {
     }
 
     private static func probe() -> KeychainConfig {
+        #if os(macOS)
+        guard KeychainEntitlement.allowsDataProtection else { return KeychainConfig(dataProtection: false, accessGroup: nil) }
+        if let shared = KeychainEntitlement.group(endingWith: sharedGroupSuffix) {
+            return KeychainConfig(dataProtection: true, accessGroup: shared)
+        }
+        #endif
         let service = "app.turm.keychain.probe"
         let plain = KeychainConfig(dataProtection: true, accessGroup: nil)
         guard let group = defaultGroup(service: service, config: plain) else {

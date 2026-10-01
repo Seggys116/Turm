@@ -75,6 +75,7 @@ public nonisolated final class CompanionKeychain: @unchecked Sendable {
     public init(role: Role, service: String? = nil, accessGroup: String? = nil) {
         self.service = service ?? role.service
         self.accessGroup = accessGroup
+        if !KeychainEntitlement.allowsDataProtection { memory = [:] }
     }
 
     public var isPersistent: Bool {
