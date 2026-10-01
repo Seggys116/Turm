@@ -293,14 +293,20 @@ struct ToolbarVerticalEdgeReader<Content: View>: View {
     }
 
     var body: some View {
+        #if compiler(>=6.4)
         if #available(iOS 27.1, *) {
             SystemVerticalEdge(content: content)
         } else {
             content(nil)
         }
+        #else
+        content(nil)
+        #endif
     }
 }
 
+// the vertical bar API only exists in the iOS 27.1 SDK, which ships with the Swift 6.4 compiler
+#if compiler(>=6.4)
 @available(iOS 27.1, *)
 private struct SystemVerticalEdge<Content: View>: View {
     let content: (HorizontalEdge?) -> Content
@@ -310,6 +316,7 @@ private struct SystemVerticalEdge<Content: View>: View {
         content(edge)
     }
 }
+#endif
 
 /// Places a bar in fixed slots so the content keeps its identity when the bar moves between edges.
 struct ChromeBarPlacement<Bar: View>: ViewModifier {

@@ -45,6 +45,7 @@ nonisolated struct ReservedArea: Equatable, Sendable {
 
     static func measure(_ proxy: GeometryProxy) -> ReservedArea {
         let size = proxy.size
+        #if compiler(>=6.4)
         guard #available(iOS 27.1, *) else { return ReservedArea(size: size) }
         let bounds = CGRect(origin: .zero, size: size)
         let regions = proxy.reservedRegions(kind: .occlusion) + proxy.reservedRegions(kind: .division)
@@ -53,10 +54,14 @@ nonisolated struct ReservedArea: Equatable, Sendable {
             .map { $0.frame.intersection(bounds) }
             .filter { !$0.isNull && $0.width > 0 && $0.height > 0 }
         return ReservedArea(size: size, rects: rects)
+        #else
+        return ReservedArea(size: size)
+        #endif
     }
 
     /// The x range of an active fold running top to bottom through the view, if there is one.
     static func verticalFold(in proxy: GeometryProxy) -> ClosedRange<CGFloat>? {
+        #if compiler(>=6.4)
         guard #available(iOS 27.1, *) else { return nil }
         let size = proxy.size
         let fold = proxy.reservedRegions(kind: .division)
@@ -64,6 +69,9 @@ nonisolated struct ReservedArea: Equatable, Sendable {
             .map(\.frame)
             .first { $0.minX > 0 && $0.maxX < size.width }
         return fold.map { $0.minX...$0.maxX }
+        #else
+        return nil
+        #endif
     }
 }
 
