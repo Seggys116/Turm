@@ -61,7 +61,7 @@ nonisolated extension RemoteChannel {
     static let projectReadFiles = [
         "Cargo.toml", "Package.swift", "GNUmakefile", "Makefile", "makefile",
         "build.gradle.kts", "build.gradle", "settings.gradle.kts", "settings.gradle", "pom.xml",
-        "mix.exs", "pubspec.yaml", "package.json", "deno.json", "composer.json",
+        "mix.exs", "pubspec.yaml", "platformio.ini", "package.json", "deno.json", "composer.json",
         "pyproject.toml", "requirements.txt", "tox.ini", "setup.cfg", "Gemfile",
         "justfile", "Justfile", ".justfile", "Taskfile.yml", "Taskfile.yaml", "taskfile.yml", "taskfile.yaml",
     ]

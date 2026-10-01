@@ -135,6 +135,27 @@ struct ProjectActionTests {
         #expect(try command("go.run", in: found) == "go run .")
     }
 
+    @Test func platformioEnvironmentToggleTargetsOneBoard() throws {
+        let ini = "[platformio]\ndefault_envs = uno\n\n[env:uno]\nplatform = atmelavr\n\n[env:esp32dev]\nframework = espidf\n"
+        let found = snapshot(try project(["platformio.ini": ini], directories: ["test", "src"]))
+        #expect(found.ecosystems.map(\.title) == ["PlatformIO"])
+        let variant = try #require(found.variants.first { $0.id == "pio-env" })
+        #expect(variant.options.map(\.label) == ["Default envs", "uno", "esp32dev"])
+        #expect(try command("platformio.build", in: found) == "pio run")
+        #expect(try command("platformio.upload", in: found, selection: ["pio-env": 2]) == "pio run -e esp32dev -t upload")
+        #expect(try command("platformio.monitor", in: found, selection: ["pio-env": 1]) == "pio device monitor -e uno")
+        #expect(found.featured.map(\.title) == ["Build", "Upload", "Monitor", "Test", "Clean"])
+        #expect(found.actions.contains { $0.id == "platformio.menuconfig" })
+        #expect(!found.actions.contains { $0.id == "platformio.uploadfs" })
+    }
+
+    @Test func platformioWithoutEnvironmentsHasNoToggle() throws {
+        let found = snapshot(try project(["platformio.ini": "[platformio]\n"]))
+        #expect(found.variants.isEmpty)
+        #expect(try command("platformio.clean", in: found) == "pio run -t clean")
+        #expect(!found.featured.contains { $0.title == "Test" })
+    }
+
     @Test func justAndTaskRecipesAreListed() throws {
         let just = snapshot(try project(["justfile": "version := \"1\"\nbuild:\n  cargo build\ndeploy target:\n  ./d {{target}}\ntest:\n  cargo test\n"]))
         #expect(just.actions.map(\.id) == ["just.r.build", "just.r.test"])
@@ -315,7 +336,7 @@ struct ProjectActionTests {
 
     @Test func catalogListsEveryDetector() {
         let ids = EcosystemCatalog.entries.map(\.id)
-        #expect(ids.count == 24)
+        #expect(ids.count == 25)
         #expect(EcosystemCatalog.entry("cargo")?.actions.contains { $0.id == "cargo.clippy" } == true)
         #expect(EcosystemCatalog.entry("go")?.variants.map(\.id) == ["go-race"])
         #expect(EcosystemCatalog.entry("go")?.defaultItems.last == "go-race")

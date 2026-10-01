@@ -143,6 +143,43 @@ nonisolated enum BuildSystemDetectors {
         return b.finish(kind: "Go")
     }
 
+    static func platformio(_ probe: ProjectProbe) -> Detection? {
+        guard probe.has("platformio.ini") else { return nil }
+        let text = probe.text("platformio.ini") ?? ""
+        let environments = platformioEnvironments(in: text)
+        let env = environments.isEmpty ? "" : " {pio-env}"
+        var b = DetectionBuilder(probe: probe, prefix: "platformio")
+        if !environments.isEmpty {
+            let fallback = text.range(of: #"(?m)^[ \t]*default_envs[ \t]*="#, options: .regularExpression) != nil ? "Default envs" : "All envs"
+            b.variant("pio-env", title: "Environment", [(fallback, "")] + environments.map { ($0, "-e \(ShellQuoting.word($0))") })
+        }
+        b.add("build", "Build", "pio run\(env)", .build, featured: true)
+        b.add("upload", "Upload", "pio run\(env) -t upload", .run, symbol: "arrow.up.circle", featured: true)
+        b.add("monitor", "Monitor", "pio device monitor\(env)", .run, symbol: "antenna.radiowaves.left.and.right", featured: true)
+        b.add("test", "Test", "pio test\(env)", .test, featured: probe.has("test"))
+        b.add("clean", "Clean", "pio run\(env) -t clean", .clean, featured: true)
+        b.add("upload.monitor", "Upload and monitor", "pio run\(env) -t upload -t monitor", .run, symbol: "arrow.up.circle.fill")
+        if probe.has("data") { b.add("uploadfs", "Upload filesystem", "pio run\(env) -t uploadfs", .run, symbol: "externaldrive") }
+        if text.contains("espidf") { b.add("menuconfig", "Menuconfig", "pio run\(env) -t menuconfig", .other, symbol: "slider.horizontal.3") }
+        b.add("check", "Static analysis", "pio check\(env)", .check)
+        b.add("compiledb", "Compilation database", "pio run\(env) -t compiledb", .other, symbol: "doc.text")
+        b.add("targets", "List targets", "pio run\(env) --list-targets", .other, symbol: "list.bullet")
+        b.add("devices", "List devices", "pio device list", .other, symbol: "cable.connector")
+        b.add("install", "Install libraries", "pio pkg install\(env)", .deps)
+        b.add("update", "Update libraries", "pio pkg update\(env)", .deps)
+        return b.finish(kind: "PlatformIO")
+    }
+
+    static func platformioEnvironments(in text: String) -> [String] {
+        let pattern = LinePattern(#"^[ \t]*\[env:([^\]]+)\]"#)
+        var result: [String] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let name = pattern.capture(in: line)?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { continue }
+            if !result.contains(name) { result.append(name) }
+        }
+        return result
+    }
+
     static func gradle(_ probe: ProjectProbe) -> Detection? {
         guard let script = probe.first(of: ["build.gradle.kts", "build.gradle", "settings.gradle.kts", "settings.gradle"])
         else { return nil }

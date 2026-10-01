@@ -278,6 +278,7 @@ nonisolated enum EcosystemCatalog {
         ("deno", "Deno", ["deno.json": #"{"tasks":{"dev":"x"}}"#]),
         ("python", "Python", ["pyproject.toml": "[tool.uv]\n[tool.pytest]\n[tool.ruff]\n[tool.mypy]\n[build-system]", "uv.lock": "", "main.py": ""]),
         ("go", "Go", ["go.mod": "module sample", "main.go": ""]),
+        ("platformio", "PlatformIO", ["platformio.ini": "[env:uno]\nplatform = atmelavr\n", "test": "", "data": ""]),
         ("cmake", "CMake", ["CMakeLists.txt": "project(sample)", "CMakePresets.json": "{}"]),
         ("meson", "Meson", ["meson.build": ""]),
         ("make", "Make", ["Makefile": "all:\nrun:\ntest:\nclean:\ninstall:\n"]),

@@ -32,6 +32,7 @@ An ecosystem is one detector's result and is the unit shown as a group in the ba
 | `deno` | `deno.json` or `deno.jsonc` (tasks are read from `deno.json` only) | `deno.t.<task>`, `deno.test`, `deno.check`, `deno.lint`, `deno.fmt` |
 | `python` | `pyproject.toml`, `requirements.txt`, `setup.py`, `setup.cfg`, `Pipfile`, `manage.py`, `uv.lock` or `poetry.lock`; uv, poetry, pipenv or plain pip; Django when `manage.py` exists | `python.install`, `python.run`, `python.django.run`, `python.django.migrate`, `python.django.makemigrations`, `python.django.shell`, `python.test`, `python.test.fast`, `python.ruff.check`, `python.ruff.fix`, `python.ruff.format`, `python.black`, `python.mypy`, `python.build`, `python.update`, `python.venv`, `python.outdated` |
 | `go` | `go.mod` | `go.build`, `go.run` (needs `main.go`), `go.test`, `go.clean`, `go.vet`, `go.fmt`, `go.cover`, `go.bench`, `go.tidy`, `go.get` |
+| `platformio` | `platformio.ini`; environments come from its `[env:<name>]` sections | `platformio.build`, `platformio.upload`, `platformio.monitor`, `platformio.test`, `platformio.clean`, `platformio.upload.monitor`, `platformio.uploadfs` (needs `data/`), `platformio.menuconfig` (ESP-IDF), `platformio.check`, `platformio.compiledb`, `platformio.targets`, `platformio.devices`, `platformio.install`, `platformio.update` |
 | `cmake` | `CMakeLists.txt` | `cmake.build`, `cmake.test`, `cmake.clean`, `cmake.configure`, `cmake.install`, `cmake.presets` (needs `CMakePresets.json`) |
 | `meson` | `meson.build` | `meson.build`, `meson.test`, `meson.clean`, `meson.reconfigure` |
 | `make` | `GNUmakefile`, `Makefile` or `makefile` | `make.default`, `make.t.<target>` for each target (the first 40), `make.dry` |
@@ -62,6 +63,7 @@ Some commands have a switch that changes them, such as Debug or Release. These a
 | `cargo-profile` | `cargo` | Debug: nothing, Release: `--release` |
 | `swift-configuration` | `swiftpm` | Debug: `-c debug`, Release: `-c release` |
 | `xcode-configuration` | `xcode` | Debug: `Debug`, Release: `Release` |
+| `pio-env` | `platformio` | All envs (or Default envs when `default_envs` is set): nothing, then one option per `[env:<name>]`: `-e <name>` |
 | `cmake-config` | `cmake` | Debug, Release, RelWithDebInfo, MinSizeRel |
 | `meson-buildtype` | `meson` | Debug: `--buildtype=debug`, Release: `--buildtype=release` |
 | `go-race` | `go` | Race off: nothing, Race on: `-race` |

@@ -119,6 +119,7 @@ nonisolated enum ProjectDetection {
         ScriptDetectors.deno,
         ScriptDetectors.python,
         BuildSystemDetectors.go,
+        BuildSystemDetectors.platformio,
         BuildSystemDetectors.cmake,
         BuildSystemDetectors.meson,
         BuildSystemDetectors.make,

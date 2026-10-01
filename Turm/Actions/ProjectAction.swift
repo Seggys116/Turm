@@ -77,7 +77,7 @@ nonisolated struct ProjectEcosystem: Identifiable, Hashable, Sendable {
     static let symbols: [String: String] = [
         "cargo": "shippingbox", "swiftpm": "swift", "xcode": "hammer", "node": "curlybraces", "tauri": "macwindow",
         "deno": "curlybraces.square", "python": "chevron.left.forwardslash.chevron.right", "go": "arrow.right.circle",
-        "cmake": "gearshape.2", "meson": "gearshape.2", "make": "gearshape", "gradle": "cube", "maven": "cube",
+        "platformio": "cpu", "cmake": "gearshape.2", "meson": "gearshape.2", "make": "gearshape", "gradle": "cube", "maven": "cube",
         "dotnet": "number.square", "zig": "bolt", "mix": "flame", "dart": "scope", "ruby": "diamond",
         "php": "server.rack", "nix": "snowflake", "just": "list.bullet.rectangle", "task": "list.bullet.rectangle",
         "docker": "shippingbox.fill", "terraform": "cloud", projectID: "folder",
