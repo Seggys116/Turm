@@ -1,3 +1,4 @@
+import SwiftTerm
 import SwiftUI
 import UIKit
 
