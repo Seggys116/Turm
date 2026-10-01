@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct ProjectManifest: Decodable {
     static let fileName = "Turm.json"

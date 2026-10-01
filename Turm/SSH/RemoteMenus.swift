@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct HostMenu: View {
     let session: TerminalSession

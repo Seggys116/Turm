@@ -69,6 +69,7 @@ jobs:
             -skipPackagePluginValidation \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER=""
 
@@ -110,6 +111,29 @@ jobs:
             echo "identity=$IDENTITY"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Install the provisioning profile
+        id: profile
+        env:
+          PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+        run: |
+          if [ -z "$PROVISIONING_PROFILE" ]; then
+            echo "::error::MACOS_PROVISIONING_PROFILE is not set. Turm's keychain sharing and iCloud entitlements need a Developer ID provisioning profile."
+            exit 1
+          fi
+          PROFILE_PATH="$RUNNER_TEMP/turm.provisionprofile"
+          printf '%s' "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_PATH"
+          PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$PROFILE_PATH" > "$PLIST"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PLIST")
+          NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PLIST")
+          for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$PROFILE_PATH" "$dir/$UUID.provisionprofile"
+          done
+          /bin/rm -f "$PROFILE_PATH" "$PLIST"
+          echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
       - name: Install the notary key
         env:
           NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
@@ -120,6 +144,7 @@ jobs:
           KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
           IDENTITY: ${{ steps.keychain.outputs.identity }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE: ${{ steps.profile.outputs.name }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -o pipefail
@@ -138,7 +163,7 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$IDENTITY" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
+            TURM_APP_PROFILE="$PROFILE" \
             ENABLE_HARDENED_RUNTIME=YES \
             OTHER_CODE_SIGN_FLAGS="--timestamp --keychain $KEYCHAIN"
 
@@ -176,6 +201,8 @@ jobs:
           APP="$RUNNER_TEMP/Turm.xcarchive/Products/Applications/Turm.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dvv "$APP" 2>&1 | grep -q 'flags=.*runtime'
+          codesign -d --entitlements - --xml "$APP" | grep -q 'keychain-access-groups'
+          test -f "$APP/Contents/embedded.provisionprofile"
 
       - name: Notarise and staple the app
         env:
@@ -415,3 +442,7 @@ jobs:
           fi
           security delete-keychain "$RUNNER_TEMP/turm-signing.keychain-db" 2>/dev/null || true
           /bin/rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary.p8"
+          if [ -n "${PROFILE_UUID:-}" ]; then
+            /bin/rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.provisionprofile" \
+              "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.provisionprofile"
+          fi

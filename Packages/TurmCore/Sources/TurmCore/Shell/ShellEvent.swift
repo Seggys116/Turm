@@ -1,6 +1,6 @@
 import Foundation
 
-enum ShellEvent: Equatable {
+public nonisolated enum ShellEvent: Equatable, Sendable {
     case commandStarted
     case promptReady(exitCode: Int32?, directory: String)
     case notification(title: String, body: String)
@@ -10,13 +10,13 @@ enum ShellEvent: Equatable {
     case remotePrompt(token: String, exitCode: Int32?, directory: String)
 }
 
-enum StreamPiece: Equatable {
+public nonisolated enum StreamPiece: Equatable, Sendable {
     case output([UInt8])
     case event(ShellEvent)
 }
 
-struct ShellStreamParser {
-    private enum State {
+public nonisolated struct ShellStreamParser: Sendable {
+    private enum State: Sendable {
         case ground
         case escape
         case osc
@@ -30,14 +30,16 @@ struct ShellStreamParser {
     private static let closeBracket: UInt8 = 0x5D
     private static let backslash: UInt8 = 0x5C
     private static let maxPayload = 4096
-    private static let maxEnvironmentPayload = 400_000
+    static let maxEnvironmentPayload = 400_000
     private static let prefixBytes = Array("7777;".utf8)
     private static let prefix = "7777;"
 
     private var state = State.ground
     private var payload: [UInt8] = []
 
-    mutating func consume(_ bytes: some Sequence<UInt8>) -> [StreamPiece] {
+    public init() {}
+
+    public mutating func consume(_ bytes: some Sequence<UInt8>) -> [StreamPiece] {
         var pieces: [StreamPiece] = []
         var plain: [UInt8] = []
 
@@ -205,10 +207,10 @@ struct ShellStreamParser {
     }
 }
 
-enum AltScreenSequence {
+public nonisolated enum AltScreenSequence {
     private static let modes: Set<Int> = [1049, 1047, 47]
 
-    static func firstSwitch(in bytes: ArraySlice<UInt8>, entering: Bool) -> Int? {
+    public static func firstSwitch(in bytes: ArraySlice<UInt8>, entering: Bool) -> Int? {
         let final: UInt8 = entering ? 0x68 : 0x6C
         var index = bytes.startIndex
         while index < bytes.endIndex {

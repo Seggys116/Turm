@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct InputBar: View {
     let session: TerminalSession

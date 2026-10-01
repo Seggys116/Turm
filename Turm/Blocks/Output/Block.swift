@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import TurmCore
 
 @Observable
 final class Block: Identifiable {
@@ -98,9 +99,6 @@ final class Block: Identifiable {
     }
 
     static func abbreviate(_ path: String) -> String {
-        let home = NSHomeDirectory()
-        if path == home { return "~" }
-        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
-        return path
+        PathDisplay.abbreviate(path)
     }
 }

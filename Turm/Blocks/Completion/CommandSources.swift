@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated extension CommandCompleter {
     static func sourceItems(

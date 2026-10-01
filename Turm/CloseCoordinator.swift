@@ -42,6 +42,8 @@ final class CloseCoordinator {
         self.present = present ?? { Self.presentAlert($0) }
     }
 
+    var registeredWorkspaces: [Workspace] { workspaces.allObjects }
+
     func register(_ workspace: Workspace) {
         workspaces.add(workspace)
     }

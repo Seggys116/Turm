@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TurmCore
 
 nonisolated struct ShortcutSuggestion: Equatable, Sendable {
     let kind: ShortcutKind

@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 @main
 struct TurmApp: App {
@@ -34,9 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // keychain calls can block for a long time, so the one-off migration never runs on the main thread
+        Task.detached(priority: .utility) { SecretsMigration.runIfNeeded() }
+        CloudSync.shared.start()
         AppearancePreference.stored.apply()
         AppIconPreference.stored.apply()
         ContextMenuService.shared.install()
+        CompanionServer.shared.startIfEnabled()
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
             MainActor.assumeIsolated { AppIconPreference.stored.apply() }
         }
@@ -47,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        CompanionServer.shared.stop()
         CloseCoordinator.shared.terminateAll()
     }
 

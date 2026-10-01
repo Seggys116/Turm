@@ -1,15 +1,15 @@
 import Foundation
 
-nonisolated struct ShellToken: Equatable, Sendable {
-    nonisolated enum Kind: Equatable, Sendable {
+public nonisolated struct ShellToken: Equatable, Sendable {
+    public nonisolated enum Kind: Equatable, Sendable {
         case word
         case op
         case comment
         case newline
     }
 
-    nonisolated struct Part: Equatable, Sendable {
-        nonisolated enum Kind: Equatable, Sendable {
+    public nonisolated struct Part: Equatable, Sendable {
+        public nonisolated enum Kind: Equatable, Sendable {
             case plain
             case escape
             case singleQuoted
@@ -18,23 +18,23 @@ nonisolated struct ShellToken: Equatable, Sendable {
             case substitution
         }
 
-        let kind: Kind
-        let range: Range<String.Index>
-        let text: String
-        let unterminated: Bool
+        public let kind: Kind
+        public let range: Range<String.Index>
+        public let text: String
+        public let unterminated: Bool
     }
 
-    let kind: Kind
-    let range: Range<String.Index>
-    let text: String
-    let parts: [Part]
-    let unterminated: Bool
+    public let kind: Kind
+    public let range: Range<String.Index>
+    public let text: String
+    public let parts: [Part]
+    public let unterminated: Bool
 
-    var isRedirect: Bool {
+    public var isRedirect: Bool {
         kind == .op && (text.contains(">") || text.contains("<"))
     }
 
-    var isSeparator: Bool {
+    public var isSeparator: Bool {
         switch kind {
         case .newline: return true
         case .op: return ["|", "||", "&&", ";", ";;", "&", "|&", "(", ")"].contains(text)
@@ -42,7 +42,7 @@ nonisolated struct ShellToken: Equatable, Sendable {
         }
     }
 
-    var value: String {
+    public var value: String {
         guard kind == .word else { return text }
         var result = ""
         for part in parts {
@@ -61,7 +61,7 @@ nonisolated struct ShellToken: Equatable, Sendable {
         return result
     }
 
-    var isAssignment: Bool {
+    public var isAssignment: Bool {
         guard kind == .word, let equals = text.firstIndex(of: "=") else { return false }
         let name = text[..<equals]
         guard let first = name.first, first.isLetter || first == "_" else { return false }
@@ -93,8 +93,8 @@ nonisolated struct ShellToken: Equatable, Sendable {
     }
 }
 
-nonisolated enum ShellTokenizer {
-    static func tokenize(_ line: String) -> [ShellToken] {
+public nonisolated enum ShellTokenizer {
+    public static func tokenize(_ line: String) -> [ShellToken] {
         Lexer(line).run()
     }
 

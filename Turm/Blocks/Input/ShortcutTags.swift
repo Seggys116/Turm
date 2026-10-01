@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 struct ShortcutTag: View {
     enum Content {

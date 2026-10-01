@@ -1,6 +1,7 @@
 import Foundation
 import SwiftTerm
 import Testing
+import TurmCore
 @testable import Turm
 
 private func bytes(_ text: String) -> [UInt8] {

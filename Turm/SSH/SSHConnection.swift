@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TurmCore
 
 @Observable
 final class SSHConnection {
@@ -121,7 +122,7 @@ final class SSHConnection {
         }
         if let version = probe.version {
             RemoteIntegration.markInstalled(target)
-            if version != RemoteIntegration.version {
+            if version != RemoteShellInstall.version {
                 state = .outdated(shell: probe.shell)
             } else {
                 state = integrated ? .ready : .installed

@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import SwiftUI
+import TurmCore
 
 struct ScrollMetrics: Equatable {
     var offset: CGFloat = 0

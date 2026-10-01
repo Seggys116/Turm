@@ -171,6 +171,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case statusBar = "Project Bar"
     case shortcuts = "Shortcuts"
     case ssh = "SSH"
+    case sync = "iCloud"
+    case companion = "Remote Access"
     case accessibility = "Accessibility"
     case about = "About"
 
@@ -211,6 +213,8 @@ struct SettingsView: View {
                     case .statusBar: StatusBarSettings()
                     case .shortcuts: ShortcutSettings()
                     case .ssh: SSHSettings()
+                    case .sync: SyncSettings()
+                    case .companion: CompanionSettings(updater: updater)
                     case .accessibility: accessibilityTab
                     case .about: aboutTab
                     }

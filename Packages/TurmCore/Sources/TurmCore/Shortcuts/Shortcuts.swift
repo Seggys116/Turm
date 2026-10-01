@@ -1,14 +1,14 @@
 import Foundation
 import Observation
 
-nonisolated enum ShortcutKind: String, Codable, CaseIterable, Identifiable, Sendable {
+public nonisolated enum ShortcutKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case directory
     case command
     case file
 
-    var id: Self { self }
+    public var id: Self { self }
 
-    var sigil: Character {
+    public var sigil: Character {
         switch self {
         case .directory: "@"
         case .command: "!"
@@ -16,12 +16,12 @@ nonisolated enum ShortcutKind: String, Codable, CaseIterable, Identifiable, Send
         }
     }
 
-    init?(sigil: Character) {
+    public init?(sigil: Character) {
         guard let kind = Self.allCases.first(where: { $0.sigil == sigil }) else { return nil }
         self = kind
     }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .directory: "Directory"
         case .command: "Command"
@@ -29,7 +29,7 @@ nonisolated enum ShortcutKind: String, Codable, CaseIterable, Identifiable, Send
         }
     }
 
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .directory: "folder"
         case .command: "terminal"
@@ -37,26 +37,40 @@ nonisolated enum ShortcutKind: String, Codable, CaseIterable, Identifiable, Send
         }
     }
 
-    var allowsSubpath: Bool { self == .directory }
+    public var allowsSubpath: Bool { self == .directory }
 }
 
-nonisolated struct Shortcut: Codable, Equatable, Identifiable, Sendable {
-    var id = UUID()
-    var kind: ShortcutKind
-    var key: String
-    var name: String
-    var value: String
-    var projectRoot: String?
+public nonisolated struct Shortcut: Codable, Equatable, Identifiable, Sendable {
+    public var id = UUID()
+    public var kind: ShortcutKind
+    public var key: String
+    public var name: String
+    public var value: String
+    public var projectRoot: String?
+    public var modified: Date?
 
-    var token: String { String(kind.sigil) + key }
+    public init(
+        id: UUID = UUID(), kind: ShortcutKind, key: String, name: String, value: String, projectRoot: String? = nil,
+        modified: Date? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.key = key
+        self.name = name
+        self.value = value
+        self.projectRoot = projectRoot
+        self.modified = modified
+    }
 
-    var isProject: Bool { projectRoot != nil }
+    public var token: String { String(kind.sigil) + key }
 
-    func isMissing(_ exists: (String) -> Bool) -> Bool {
+    public var isProject: Bool { projectRoot != nil }
+
+    public func isMissing(_ exists: (String) -> Bool) -> Bool {
         kind != .command && !exists(value)
     }
 
-    var placeholders: (highest: Int, all: Bool) {
+    public var placeholders: (highest: Int, all: Bool) {
         var highest = 0
         var all = false
         var rest = value[...]
@@ -70,50 +84,75 @@ nonisolated struct Shortcut: Codable, Equatable, Identifiable, Sendable {
         return (highest, all)
     }
 
-    var label: String {
+    public var label: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? key : trimmed
     }
 }
 
-nonisolated struct ShortcutMatch: Equatable, Sendable {
-    let shortcut: Shortcut
-    let subpath: String
-    let range: Range<String.Index>
-    let isLead: Bool
+public nonisolated struct ShortcutMatch: Equatable, Sendable {
+    public let shortcut: Shortcut
+    public let subpath: String
+    public let range: Range<String.Index>
+    public let isLead: Bool
 
-    var target: String {
+    public init(shortcut: Shortcut, subpath: String, range: Range<String.Index>, isLead: Bool) {
+        self.shortcut = shortcut
+        self.subpath = subpath
+        self.range = range
+        self.isLead = isLead
+    }
+
+    public var target: String {
         guard shortcut.kind != .command, !subpath.isEmpty else { return shortcut.value }
         return (shortcut.value as NSString).appendingPathComponent(subpath)
     }
 
-    var changesDirectory: Bool { isLead && shortcut.kind == .directory }
+    public var changesDirectory: Bool { isLead && shortcut.kind == .directory }
 }
 
-nonisolated struct ShortcutReplacement: Equatable, Sendable {
-    let match: ShortcutMatch
-    let range: Range<String.Index>
-    let text: String
+public nonisolated struct ShortcutReplacement: Equatable, Sendable {
+    public let match: ShortcutMatch
+    public let range: Range<String.Index>
+    public let text: String
+
+    public init(match: ShortcutMatch, range: Range<String.Index>, text: String) {
+        self.match = match
+        self.range = range
+        self.text = text
+    }
 }
 
-nonisolated struct ShortcutLaunch: Equatable, Sendable {
-    let directory: String?
-    let command: String
+public nonisolated struct ShortcutLaunch: Equatable, Sendable {
+    public let directory: String?
+    public let command: String
+
+    public init(directory: String?, command: String) {
+        self.directory = directory
+        self.command = command
+    }
 }
 
-nonisolated struct ShortcutPartial: Equatable, Sendable {
-    let kind: ShortcutKind
-    let key: String
-    let subpath: String?
-    let range: Range<String.Index>
+public nonisolated struct ShortcutPartial: Equatable, Sendable {
+    public let kind: ShortcutKind
+    public let key: String
+    public let subpath: String?
+    public let range: Range<String.Index>
+
+    public init(kind: ShortcutKind, key: String, subpath: String?, range: Range<String.Index>) {
+        self.kind = kind
+        self.key = key
+        self.subpath = subpath
+        self.range = range
+    }
 }
 
-nonisolated enum Shortcuts {
-    static let key = "turm.shortcuts"
-    static let legacyKey = "turm.knownDirs"
-    static let boundaries: Set<Character> = [";", "|", "&", "(", ")", "<", ">"]
+public nonisolated enum Shortcuts {
+    public static let key = "turm.shortcuts"
+    public static let legacyKey = "turm.knownDirs"
+    public static let boundaries: Set<Character> = [";", "|", "&", "(", ")", "<", ">"]
 
-    static func load(from defaults: UserDefaults = .standard) -> [Shortcut] {
+    public static func load(from defaults: UserDefaults = .standard) -> [Shortcut] {
         if let data = defaults.string(forKey: key)?.data(using: .utf8) {
             return (try? JSONDecoder().decode([Shortcut].self, from: data)) ?? []
         }
@@ -123,7 +162,7 @@ nonisolated enum Shortcuts {
         return legacy.map { Shortcut(kind: .directory, key: $0.key, name: $0.name, value: $0.path) }
     }
 
-    static func save(_ shortcuts: [Shortcut], to defaults: UserDefaults = .standard) {
+    public static func save(_ shortcuts: [Shortcut], to defaults: UserDefaults = .standard) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(shortcuts) else { return }
@@ -131,26 +170,26 @@ nonisolated enum Shortcuts {
         defaults.removeObject(forKey: legacyKey)
     }
 
-    static func sanitize(_ raw: String) -> String {
+    public static func sanitize(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while let first = text.first, ShortcutKind(sigil: first) != nil { text.removeFirst() }
         return String(text.filter(isKeyCharacter))
     }
 
-    static func isKeyCharacter(_ character: Character) -> Bool {
+    public static func isKeyCharacter(_ character: Character) -> Bool {
         character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_" || character == ".")
     }
 
-    static func find(_ key: String, kind: ShortcutKind, in shortcuts: [Shortcut]) -> Shortcut? {
+    public static func find(_ key: String, kind: ShortcutKind, in shortcuts: [Shortcut]) -> Shortcut? {
         shortcuts.first { $0.kind == kind && $0.key.caseInsensitiveCompare(key) == .orderedSame }
     }
 
-    static func conflict(for key: String, kind: ShortcutKind, excluding id: UUID?, in shortcuts: [Shortcut]) -> Shortcut? {
+    public static func conflict(for key: String, kind: ShortcutKind, excluding id: UUID?, in shortcuts: [Shortcut]) -> Shortcut? {
         guard let existing = find(key, kind: kind, in: shortcuts), existing.id != id else { return nil }
         return existing
     }
 
-    static func match(path: String, in shortcuts: [Shortcut]) -> (shortcut: Shortcut, rest: String)? {
+    public static func match(path: String, in shortcuts: [Shortcut]) -> (shortcut: Shortcut, rest: String)? {
         var best: (shortcut: Shortcut, rest: String)?
         for shortcut in shortcuts where shortcut.kind == .directory {
             let root = shortcut.value
@@ -167,7 +206,7 @@ nonisolated enum Shortcuts {
         return best
     }
 
-    static func scan(_ line: String, in shortcuts: [Shortcut]) -> [ShortcutMatch] {
+    public static func scan(_ line: String, in shortcuts: [Shortcut]) -> [ShortcutMatch] {
         guard !shortcuts.isEmpty else { return [] }
         var matches: [ShortcutMatch] = []
         walkTokens(line) { range in
@@ -179,7 +218,7 @@ nonisolated enum Shortcuts {
         return matches
     }
 
-    static func unknown(_ line: String, in shortcuts: [Shortcut]) -> [(key: String, range: Range<String.Index>)] {
+    public static func unknown(_ line: String, in shortcuts: [Shortcut]) -> [(key: String, range: Range<String.Index>)] {
         var unknown: [(key: String, range: Range<String.Index>)] = []
         walkTokens(line) { range in
             let token = line[range]
@@ -217,7 +256,7 @@ nonisolated enum Shortcuts {
         }
     }
 
-    static func partial(atEndOf prefix: String) -> ShortcutPartial? {
+    public static func partial(atEndOf prefix: String) -> ShortcutPartial? {
         var quote: Character?
         var escaped = false
         var start = prefix.startIndex
@@ -247,12 +286,12 @@ nonisolated enum Shortcuts {
         return ShortcutPartial(kind: kind, key: String(key), subpath: String(rest.dropFirst()), range: start..<prefix.endIndex)
     }
 
-    static func expand(_ line: String, in shortcuts: [Shortcut], quote: (String) -> String) -> String? {
+    public static func expand(_ line: String, in shortcuts: [Shortcut], quote: (String) -> String) -> String? {
         let replacements = replacements(in: line, shortcuts: shortcuts, quote: quote)
         return replacements.isEmpty ? nil : apply(replacements, to: line)
     }
 
-    static func apply(_ replacements: [ShortcutReplacement], to line: String) -> String {
+    public static func apply(_ replacements: [ShortcutReplacement], to line: String) -> String {
         var output = ""
         var cursor = line.startIndex
         for replacement in replacements {
@@ -264,7 +303,7 @@ nonisolated enum Shortcuts {
         return output
     }
 
-    static func replacements(
+    public static func replacements(
         in line: String, shortcuts: [Shortcut], quote: (String) -> String, allowLead: Bool = true
     ) -> [ShortcutReplacement] {
         let matches = scan(line, in: shortcuts).map { match in
@@ -303,7 +342,7 @@ nonisolated enum Shortcuts {
         return result
     }
 
-    static func fill(_ template: String, arguments: [String]) -> String {
+    public static func fill(_ template: String, arguments: [String]) -> String {
         var output = ""
         var rest = template[...]
         while let open = rest.firstIndex(of: "{") {
@@ -324,7 +363,7 @@ nonisolated enum Shortcuts {
         return output.trimmingCharacters(in: .whitespaces)
     }
 
-    static func launch(_ line: String, in shortcuts: [Shortcut]) -> ShortcutLaunch {
+    public static func launch(_ line: String, in shortcuts: [Shortcut]) -> ShortcutLaunch {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let lead = scan(trimmed, in: shortcuts).first, lead.changesDirectory else {
             return ShortcutLaunch(directory: nil, command: trimmed)
@@ -336,12 +375,12 @@ nonisolated enum Shortcuts {
         return ShortcutLaunch(directory: lead.target, command: rest)
     }
 
-    static func merged(_ global: [Shortcut], project: [Shortcut]) -> [Shortcut] {
+    public static func merged(_ global: [Shortcut], project: [Shortcut]) -> [Shortcut] {
         guard !project.isEmpty else { return global }
         return project + global.filter { entry in find(entry.key, kind: entry.kind, in: project) == nil }
     }
 
-    static func project(_ entries: [String: String], root: String, home: String = NSHomeDirectory()) -> (shortcuts: [Shortcut], invalid: [String]) {
+    public static func project(_ entries: [String: String], root: String, home: String = NSHomeDirectory()) -> (shortcuts: [Shortcut], invalid: [String]) {
         var shortcuts: [Shortcut] = []
         var invalid: [String] = []
         for (token, value) in entries.sorted(by: { $0.key < $1.key }) {
@@ -381,7 +420,7 @@ nonisolated enum Shortcuts {
         }
     }
 
-    static func masked(_ line: String, matches: [ShortcutMatch]) -> String {
+    public static func masked(_ line: String, matches: [ShortcutMatch]) -> String {
         guard !matches.isEmpty else { return line }
         var output = ""
         var cursor = line.startIndex
@@ -429,19 +468,21 @@ nonisolated enum Shortcuts {
     }
 }
 
-nonisolated final class ProjectShortcutIndex: @unchecked Sendable {
-    static let shared = ProjectShortcutIndex()
+public nonisolated final class ProjectShortcutIndex: @unchecked Sendable {
+    public static let shared = ProjectShortcutIndex()
 
     private let lock = NSLock()
     private var byDirectory: [String: [Shortcut]] = [:]
 
-    func set(_ shortcuts: [Shortcut], for directory: String) {
+    public init() {}
+
+    public func set(_ shortcuts: [Shortcut], for directory: String) {
         lock.lock()
         defer { lock.unlock() }
         byDirectory[directory] = shortcuts.isEmpty ? nil : shortcuts
     }
 
-    func shortcuts(for directory: String) -> [Shortcut] {
+    public func shortcuts(for directory: String) -> [Shortcut] {
         lock.lock()
         defer { lock.unlock() }
         return byDirectory[directory] ?? []
@@ -449,36 +490,37 @@ nonisolated final class ProjectShortcutIndex: @unchecked Sendable {
 }
 
 @Observable
-final class ShortcutStore {
-    static let shared = ShortcutStore()
+public final class ShortcutStore {
+    public static let shared = ShortcutStore()
 
-    private(set) var items: [Shortcut]
+    public private(set) var items: [Shortcut]
+    @ObservationIgnored public var onChange: ((RecordChange<Shortcut>) -> Void)?
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         items = Shortcuts.load(from: defaults)
     }
 
-    func effective(in directory: String) -> [Shortcut] {
+    public func effective(in directory: String) -> [Shortcut] {
         Shortcuts.merged(items, project: ProjectShortcutIndex.shared.shortcuts(for: directory))
     }
 
-    func items(of kind: ShortcutKind) -> [Shortcut] {
+    public func items(of kind: ShortcutKind) -> [Shortcut] {
         items.filter { $0.kind == kind }
     }
 
-    func directory(at path: String) -> Shortcut? {
+    public func directory(at path: String) -> Shortcut? {
         items.first { $0.kind == .directory && $0.value == path }
     }
 
-    func label(for path: String) -> String {
-        guard let match = Shortcuts.match(path: path, in: items) else { return Block.abbreviate(path) }
+    public func label(for path: String) -> String {
+        guard let match = Shortcuts.match(path: path, in: items) else { return PathDisplay.abbreviate(path) }
         return match.rest.isEmpty ? match.shortcut.label : match.shortcut.label + "/" + match.rest
     }
 
     @discardableResult
-    func save(_ shortcut: Shortcut) -> Bool {
+    public func save(_ shortcut: Shortcut) -> Bool {
         var entry = shortcut
         entry.key = Shortcuts.sanitize(shortcut.key)
         entry.name = shortcut.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -486,17 +528,43 @@ final class ShortcutStore {
         guard !entry.key.isEmpty, !entry.value.isEmpty,
               Shortcuts.conflict(for: entry.key, kind: entry.kind, excluding: entry.id, in: items) == nil
         else { return false }
+        entry.modified = Date()
         if let index = items.firstIndex(where: { $0.id == entry.id }) {
             items[index] = entry
         } else {
             items.append(entry)
         }
         persist()
+        onChange?(.saved(entry))
         return true
     }
 
-    func remove(_ id: UUID) {
+    public func remove(_ id: UUID) {
         items.removeAll { $0.id == id }
+        persist()
+        onChange?(.removed(id))
+    }
+
+    // applied without reporting back, so remote records do not echo to the cloud
+    public func applyRemote(_ incoming: [Shortcut], removing removed: [UUID]) {
+        guard !incoming.isEmpty || !removed.isEmpty else { return }
+        items.removeAll { removed.contains($0.id) }
+        for received in incoming {
+            var shortcut = received
+            shortcut.key = Shortcuts.sanitize(received.key)
+            guard !shortcut.key.isEmpty, !shortcut.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            var number = 2
+            let base = shortcut.key
+            while Shortcuts.conflict(for: shortcut.key, kind: shortcut.kind, excluding: shortcut.id, in: items) != nil {
+                shortcut.key = base + String(number)
+                number += 1
+            }
+            if let index = items.firstIndex(where: { $0.id == shortcut.id }) {
+                items[index] = shortcut
+            } else {
+                items.append(shortcut)
+            }
+        }
         persist()
     }
 

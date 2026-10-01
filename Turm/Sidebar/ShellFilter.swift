@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum ShellFilter {
     static func matches(_ query: String, fields: [String]) -> Bool {

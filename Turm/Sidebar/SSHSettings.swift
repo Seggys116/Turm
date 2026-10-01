@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct SSHSettings: View {
     var store = SSHHostStore.shared

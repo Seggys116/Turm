@@ -31,6 +31,9 @@ jobs:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
+      - name: Test the shared core and the companion protocol
+        run: swift test --package-path Packages/TurmCore
+
       - name: Test
         run: |
           set -o pipefail
@@ -44,6 +47,7 @@ jobs:
             -skipPackagePluginValidation \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER=""
 
@@ -57,6 +61,33 @@ jobs:
         with:
           path: DerivedData/SourcePackages
           key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
+  ios-build:
+    name: iOS build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the Swift package checkouts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: DerivedData/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      # the phone half of the companion protocol must compile against the same TurmCore the Mac tests ran
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Turm.xcodeproj \
+            -scheme TurmiOS \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
 
   release-build:
     name: Release build
@@ -89,6 +120,7 @@ jobs:
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER=""
 

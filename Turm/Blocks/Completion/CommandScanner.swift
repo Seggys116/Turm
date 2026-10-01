@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct WrapperRule: Sendable {
     let valueOptions: [String: ValueKind]

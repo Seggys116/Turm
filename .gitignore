@@ -2,3 +2,5 @@
 DerivedData/
 xcuserdata/
 *.xcuserstate
+Packages/*/.build/
+.swiftpm/

@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum KnownTools {
     static let subcommands: [String: [(String, String)]] = [
