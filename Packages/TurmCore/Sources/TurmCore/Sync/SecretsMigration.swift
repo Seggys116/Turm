@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-public enum SecretsMigration {
+public nonisolated enum SecretsMigration {
     @discardableResult
     public static func runIfNeeded(defaults: UserDefaults = .standard) -> Bool {
         #if os(macOS)
