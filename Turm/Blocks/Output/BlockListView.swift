@@ -56,8 +56,9 @@ struct BlockListView: View {
             .squareScrollbar(position: $position)
             .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
                 ScrollMetrics(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
-            } action: { _, metrics in
+            } action: { old, metrics in
                 driver.metrics = metrics
+                if metrics.viewport < old.viewport, Self.isPinned(old) { scrollToBottom(reader) }
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: session.blocks.count) { scrollToBottom(reader) }
@@ -138,13 +139,12 @@ struct BlockListView: View {
         }
     }
 
-    private var isPinned: Bool {
-        let metrics = driver.metrics
-        return metrics.offset >= metrics.content - metrics.viewport - TerminalMetrics.lineHeight * 2
+    private static func isPinned(_ metrics: ScrollMetrics) -> Bool {
+        metrics.offset >= metrics.content - metrics.viewport - TerminalMetrics.lineHeight * 2
     }
 
     private func followOutput(_ reader: ScrollViewProxy) {
-        guard isPinned else { return }
+        guard Self.isPinned(driver.metrics) else { return }
         scrollToBottom(reader)
     }
 
