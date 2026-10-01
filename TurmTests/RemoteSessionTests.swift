@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TurmCore
 @testable import Turm
 
 private let remoteFishPath = (
@@ -48,7 +49,7 @@ private func installRemoteFiles(into home: URL) throws {
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     try process.run()
-    try stdin.fileHandleForWriting.write(contentsOf: Data(RemoteIntegration.installScript().utf8))
+    try stdin.fileHandleForWriting.write(contentsOf: Data(RemoteShellInstall.installScript().utf8))
     try stdin.fileHandleForWriting.close()
     process.waitUntilExit()
     try #require(process.terminationStatus == 0)
@@ -145,7 +146,7 @@ struct RemoteSessionTests {
         try await connectRemote(session, shell: shell, home: home)
         let before = try #require(session.remote)
         let count = session.blocks.count
-        let reloadCommand = RemoteIntegration.enableCommand.trimmingCharacters(in: .whitespaces)
+        let reloadCommand = RemoteShellInstall.enableCommand.trimmingCharacters(in: .whitespaces)
         let recorded = { CommandHistory.shared.entries.filter { $0.contains(reloadCommand) }.count }
         let historyCount = recorded()
 

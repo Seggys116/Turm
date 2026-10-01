@@ -1,17 +1,38 @@
 import SwiftUI
 
-struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "terminal")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Turm")
-        }
-        .padding()
-    }
+extension FocusedValues {
+    @Entry var workspace: Workspace?
 }
 
-#Preview {
-    ContentView()
+extension EnvironmentValues {
+    /// Whether AdaptiveShell shows the sidebar and the detail side by side, per ShellLayout.
+    @Entry var splitLayout = false
+}
+
+struct ContentView: View {
+    @State private var workspace = Workspace()
+    @State private var swipes = SwipeCoordinator()
+    var macs = MacManager.shared
+
+    var body: some View {
+        @Bindable var workspace = workspace
+        AdaptiveShell(workspace: workspace, macs: macs)
+            .chromeOverlayHost()
+            .tint(Chrome.accent)
+            .environment(\.swipeCoordinator, swipes)
+            .toggleStyle(ChromeToggleStyle())
+            .sheet(isPresented: $workspace.showsSettings) {
+                SettingsView()
+            }
+            .sheet(isPresented: $workspace.showsHostPicker) {
+                HostPicker(workspace: workspace)
+            }
+            .sheet(isPresented: $workspace.showsPairing) {
+                PairMacView(manager: macs)
+            }
+            .sheet(item: $workspace.editingHost) { host in
+                SSHHostEditorView(host) { workspace.editingHost = nil }
+            }
+            .focusedSceneValue(\.workspace, workspace)
+    }
 }

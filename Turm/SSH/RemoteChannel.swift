@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated final class RemoteChannel: @unchecked Sendable {
     let socket: String
@@ -87,44 +88,26 @@ nonisolated final class RemoteChannel: @unchecked Sendable {
 }
 
 nonisolated extension RemoteChannel {
-    private static let gitPrelude = "export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0\n"
-
-    private func inDirectory(_ directory: String, _ body: String) -> String {
-        Self.gitPrelude + "cd " + Self.quote(directory) + " 2>/dev/null || exit 3\n" + body
-    }
-
     @concurrent
     func gitStatus(in directory: String) async -> GitStatus? {
-        let script = inDirectory(directory, """
-            branch=$(git symbolic-ref --short -q HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null) || exit 4
-            printf '%s\\n' "$branch"
-            git diff HEAD --numstat 2>/dev/null
-            """)
-        guard let result = run(script), result.status == 0 else { return nil }
+        guard let result = run(RemoteGit.statusScript(in: directory)), result.status == 0 else { return nil }
         return Self.parseGitStatus(result.output)
     }
 
     static func parseGitStatus(_ output: String) -> GitStatus? {
-        guard let newline = output.firstIndex(of: "\n") else {
-            let name = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            return name.isEmpty ? nil : GitStatus(branch: name, files: 0, added: 0, removed: 0)
-        }
-        let name = output[..<newline].trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return nil }
-        let totals = GitInspector.parseNumstat(String(output[output.index(after: newline)...]))
-        return GitStatus(branch: name, files: totals.files, added: totals.added, removed: totals.removed)
+        guard let git = RemoteGit.parseStatus(output) else { return nil }
+        return GitStatus(branch: git.branch, files: git.files, added: git.added, removed: git.removed)
     }
 
     @concurrent
     func branches(in directory: String) async -> [String] {
-        let script = inDirectory(directory, "git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads")
-        guard let result = run(script), result.status == 0 else { return [] }
-        return result.output.split(separator: "\n").map(String.init)
+        guard let result = run(RemoteGit.branchesScript(in: directory)), result.status == 0 else { return [] }
+        return RemoteGit.branches(from: result.output)
     }
 
     @concurrent
     func switchBranch(to name: String, in directory: String) async -> String? {
-        guard let result = run(inDirectory(directory, "git switch " + Self.quote(name) + " 2>&1"), timeout: 30) else {
+        guard let result = run(RemoteGit.switchScript(to: name, in: directory), timeout: 30) else {
             return "The host did not answer in time."
         }
         invalidate(prefix: "git:")

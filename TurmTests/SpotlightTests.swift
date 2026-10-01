@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TurmCore
 @testable import Turm
 
 private let api = Shortcut(kind: .directory, key: "api", name: "Backend", value: "/work/api")

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 extension FocusedValues {
     @Entry var spotlightPresented: Binding<Bool>?

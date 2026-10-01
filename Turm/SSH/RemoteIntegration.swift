@@ -1,12 +1,7 @@
-import CryptoKit
 import Foundation
+import TurmCore
 
-nonisolated enum RemoteShellKind: String, Equatable, Sendable {
-    case zsh
-    case bash
-    case legacyBash = "bash-legacy"
-    case fish
-
+nonisolated extension RemoteShellKind {
     var local: ShellIntegration.Kind {
         switch self {
         case .zsh: .zsh
@@ -14,62 +9,12 @@ nonisolated enum RemoteShellKind: String, Equatable, Sendable {
         case .fish: .fish
         }
     }
-
-    static func supports(_ shell: String) -> Bool {
-        ["zsh", "bash", "fish"].contains(shell)
-    }
-}
-
-nonisolated struct RemoteProbe: Equatable, Sendable {
-    let shell: String
-    let version: String?
-
-    init(shell: String, version: String?) {
-        self.shell = shell
-        self.version = version
-    }
-
-    init?(output: String) {
-        let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let shell = lines.first, !shell.isEmpty else { return nil }
-        self.shell = shell
-        let version = lines.dropFirst().first ?? ""
-        self.version = version.isEmpty ? nil : version
-    }
 }
 
 nonisolated enum RemoteIntegration {
-    static let remoteDirectory = "$HOME/.turm/shell"
     static let persistSeconds = 30
 
-    static let bootstrap = #"""
-        TURM_REMOTE="$$.$(date +%s).$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -d ' ')"
-        export TURM_REMOTE
-        _turm_dir="$HOME/.turm/shell"
-        _turm_shell=${SHELL:-/bin/sh}
-        case ${_turm_shell##*/} in
-          zsh)
-            if [ -n "$ZDOTDIR" ]; then TURM_USER_ZDOTDIR=$ZDOTDIR; export TURM_USER_ZDOTDIR; fi
-            ZDOTDIR="$_turm_dir/zsh"
-            export ZDOTDIR
-            exec "$_turm_shell" -l ;;
-          bash)
-            exec "$_turm_shell" --rcfile "$_turm_dir/rc.bash" -i ;;
-          fish)
-            exec "$_turm_shell" -l --init-command "source '$_turm_dir/integration.fish'" ;;
-        esac
-        unset TURM_REMOTE
-        exec "$_turm_shell" -l
-
-        """#
-
-    static let launchCommand = #"exec sh -c 'if [ -r "$HOME/.turm/shell/bootstrap.sh" ]; then exec sh "$HOME/.turm/shell/bootstrap.sh"; fi; exec "${SHELL:-/bin/sh}" -l'"#
-
-    static let enableCommand = #" exec sh "$HOME/.turm/shell/bootstrap.sh""#
-
-    static let probeCommand = #"sh -c 'printf "%s\n" "${SHELL##*/}"; cat "$HOME/.turm/shell/version" 2>/dev/null; exit 0'"#
-
-    static let uninstallCommand = #"sh -c 'rm -rf "$HOME/.turm/shell"; rmdir "$HOME/.turm" 2>/dev/null; exit 0'"#
+    static let launchCommand = #"exec sh -c 'TURM_BANNER=1; export TURM_BANNER; if [ -r "$HOME/.turm/shell/bootstrap.sh" ]; then exec sh "$HOME/.turm/shell/bootstrap.sh"; fi; exec "${SHELL:-/bin/sh}" -l'"#
 
     static var wrapper: String {
         let boot = launchCommand.replacingOccurrences(of: "'", with: #"'\''"#)
@@ -138,33 +83,6 @@ nonisolated enum RemoteIntegration {
             """#
     }
 
-    static var remoteFiles: [(path: String, contents: String)] {
-        let files = [("bootstrap.sh", bootstrap), ("rc.bash", ShellScripts.bash), ("integration.fish", ShellScripts.fish)]
-            + ShellIntegration.zshFiles.map { ("zsh/" + $0.name, $0.contents) }
-        return files.map { ($0.0, $0.1.hasSuffix("\n") ? $0.1 : $0.1 + "\n") }
-    }
-
-    static var version: String {
-        var hasher = SHA256()
-        for file in remoteFiles {
-            hasher.update(data: Data(file.path.utf8))
-            hasher.update(data: Data([0]))
-            hasher.update(data: Data(file.contents.utf8))
-        }
-        return hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
-    }
-
-    static func installScript() -> String {
-        var script = "set -e\numask 022\nd=\"\(remoteDirectory)\"\nmkdir -p \"$d/zsh\"\n"
-        for (index, file) in remoteFiles.enumerated() {
-            let marker = "TURM_FILE_\(index)_END"
-            script += "cat > \"$d/\(file.path).tmp\" <<'\(marker)'\n\(file.contents)"
-            script += "\(marker)\nmv -f \"$d/\(file.path).tmp\" \"$d/\(file.path)\"\n"
-        }
-        script += "printf '%s\\n' '\(version)' > \"$d/version\"\n"
-        return script
-    }
-
     static var socketDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("turm-ssh", isDirectory: true)
     }
@@ -211,7 +129,7 @@ nonisolated enum RemoteIntegration {
 
     static func markInstalled(_ target: SSHTarget) {
         try? FileManager.default.createDirectory(at: hostsDirectory, withIntermediateDirectories: true)
-        try? Data((version + "\n").utf8).write(to: marker(for: target), options: .atomic)
+        try? Data((RemoteShellInstall.version + "\n").utf8).write(to: marker(for: target), options: .atomic)
     }
 
     static func removeMarker(_ target: SSHTarget) {
@@ -242,13 +160,13 @@ nonisolated enum RemoteIntegration {
 
     @concurrent
     static func probe(_ socket: String) async -> RemoteProbe? {
-        guard let result = RemoteChannel.session(on: socket, ["-T", "turm", probeCommand], timeout: 15), result.status == 0 else { return nil }
+        guard let result = RemoteChannel.session(on: socket, ["-T", "turm", RemoteShellInstall.probeCommand], timeout: 15), result.status == 0 else { return nil }
         return RemoteProbe(output: result.output)
     }
 
     @concurrent
     static func install(_ socket: String) async -> String? {
-        let script = Data(installScript().utf8)
+        let script = Data(RemoteShellInstall.installScript().utf8)
         guard let result = RemoteChannel.session(on: socket, ["-T", "turm", "sh -s"], input: script, timeout: 30) else {
             return "The host did not answer in time."
         }
@@ -263,7 +181,7 @@ nonisolated enum RemoteIntegration {
     static func uninstall(_ target: SSHTarget) async -> String? {
         let arguments = [
             "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ControlPath=none", "-T",
-            "-p", String(target.port), "-l", target.user, target.hostname, uninstallCommand,
+            "-p", String(target.port), "-l", target.user, "--", target.hostname, RemoteShellInstall.uninstallCommand,
         ]
         guard let result = SSHProcess.run(arguments, timeout: 20) else { return "The host did not answer in time." }
         guard result.status == 0 else {

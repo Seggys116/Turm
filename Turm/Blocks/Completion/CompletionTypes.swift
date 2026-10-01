@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct CompletionItem: Equatable, Identifiable, Sendable {
     nonisolated enum Kind: String, Sendable {
@@ -353,8 +354,4 @@ nonisolated extension CommandLookup {
         case .keyword: self = .keyword
         }
     }
-}
-
-extension Notification.Name {
-    nonisolated static let completionEnvironmentChanged = Notification.Name("TurmCompletionEnvironmentChanged")
 }

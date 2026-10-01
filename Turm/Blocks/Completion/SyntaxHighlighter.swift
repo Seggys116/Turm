@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum HighlightKind: Equatable, Sendable {
     case command

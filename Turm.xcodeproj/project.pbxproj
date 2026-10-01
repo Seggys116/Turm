@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 110;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -11,6 +11,10 @@
 		C0105A12306BFD46008BD457 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0105A11306BFD46008BD457 /* Sparkle */; };
 		C0105B02306BFD46008BD457 /* TurmDockTile.docktileplugin in Embed Dock Tile */ = {isa = PBXBuildFile; fileRef = C0105B01306BFD46008BD457 /* TurmDockTile.docktileplugin */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C0105C02306BFD46008BD457 /* TurmFinder.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C0105C01306BFD46008BD457 /* TurmFinder.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C0105E03306BFD46008BD457 /* TurmCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0105E01306BFD46008BD457 /* TurmCore */; };
+		C0105E04306BFD46008BD457 /* TurmCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0105E02306BFD46008BD457 /* TurmCore */; };
+		C0105E06306BFD46008BD457 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = C0105E05306BFD46008BD457 /* SwiftTerm */; };
+		C0105E09306BFD46008BD457 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = C0105E08306BFD46008BD457 /* Citadel */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,25 +51,21 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		C0105B04306BFD46008BD457 /* Embed Dock Tile */ = {
 			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstSubfolder = PlugIns;
 			files = (
 				C0105B02306BFD46008BD457 /* TurmDockTile.docktileplugin in Embed Dock Tile */,
 			);
 			name = "Embed Dock Tile";
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C0105C04306BFD46008BD457 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolderSpec = 13;
+			dstSubfolder = PlugIns;
 			files = (
 				C0105C02306BFD46008BD457 /* TurmFinder.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -109,6 +109,11 @@
 			path = TurmiOS;
 			sourceTree = "<group>";
 		};
+		C0105E10306BFD46008BD457 /* SharedResources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SharedResources;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -117,6 +122,7 @@
 			files = (
 				C0105A02306BFD46008BD457 /* SwiftTerm in Frameworks */,
 				C0105A12306BFD46008BD457 /* Sparkle in Frameworks */,
+				C0105E03306BFD46008BD457 /* TurmCore in Frameworks */,
 			);
 		};
 		C010564B306BFD46008BD457 /* Frameworks */ = {
@@ -142,6 +148,9 @@
 		C0105D06306BFD46008BD457 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				C0105E04306BFD46008BD457 /* TurmCore in Frameworks */,
+				C0105E06306BFD46008BD457 /* SwiftTerm in Frameworks */,
+				C0105E09306BFD46008BD457 /* Citadel in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -156,6 +165,7 @@
 				C0105B05306BFD46008BD457 /* TurmDockTile */,
 				C0105C05306BFD46008BD457 /* TurmFinder */,
 				C0105D05306BFD46008BD457 /* TurmiOS */,
+				C0105E10306BFD46008BD457 /* SharedResources */,
 				C0105642306BFD45008BD457 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -194,11 +204,13 @@
 			);
 			fileSystemSynchronizedGroups = (
 				C0105643306BFD45008BD457 /* Turm */,
+				C0105E10306BFD46008BD457 /* SharedResources */,
 			);
 			name = Turm;
 			packageProductDependencies = (
 				C0105A01306BFD46008BD457 /* SwiftTerm */,
 				C0105A11306BFD46008BD457 /* Sparkle */,
+				C0105E01306BFD46008BD457 /* TurmCore */,
 			);
 			productName = Turm;
 			productReference = C0105641306BFD45008BD457 /* Turm.app */;
@@ -256,8 +268,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				C0105B05306BFD46008BD457 /* TurmDockTile */,
 			);
@@ -275,8 +285,6 @@
 				C0105C08306BFD46008BD457 /* Resources */,
 			);
 			buildRules = (
-			);
-			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				C0105C05306BFD46008BD457 /* TurmFinder */,
@@ -296,12 +304,16 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				C0105D05306BFD46008BD457 /* TurmiOS */,
+				C0105E10306BFD46008BD457 /* SharedResources */,
 			);
 			name = TurmiOS;
+			packageProductDependencies = (
+				C0105E02306BFD46008BD457 /* TurmCore */,
+				C0105E05306BFD46008BD457 /* SwiftTerm */,
+				C0105E08306BFD46008BD457 /* Citadel */,
+			);
 			productName = TurmiOS;
 			productReference = C0105D01306BFD46008BD457 /* TurmiOS.app */;
 			productType = "com.apple.product-type.application";
@@ -350,6 +362,8 @@
 			packageReferences = (
 				C0105A00306BFD46008BD457 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 				C0105A10306BFD46008BD457 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				C0105E07306BFD46008BD457 /* XCRemoteSwiftPackageReference "Citadel" */,
+				C0105E00306BFD46008BD457 /* XCLocalSwiftPackageReference "Packages/TurmCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C0105642306BFD45008BD457 /* Products */;
@@ -581,6 +595,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/Turm.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -602,6 +617,7 @@
 				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Turm";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "$(TURM_APP_PROFILE)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -617,6 +633,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/Turm.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -638,6 +655,7 @@
 				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.Turm";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "$(TURM_APP_PROFILE)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -835,25 +853,28 @@
 		C0105D12306BFD46008BD457 /* Debug configuration for PBXNativeTarget "TurmiOS" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/TurmiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H2X57PJPJ6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/TurmiOS-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Turm;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Turm scans the pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Turm finds and connects to Macs running Turm on your network so you can control their shells.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.TurmiOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -873,25 +894,28 @@
 		C0105D13306BFD46008BD457 /* Release configuration for PBXNativeTarget "TurmiOS" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/TurmiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H2X57PJPJ6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/TurmiOS-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Turm;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Turm scans the pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Turm finds and connects to Macs running Turm on your network so you can control their shells.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zak-noble-clarke.TurmiOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -969,6 +993,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C0105E00306BFD46008BD457 /* XCLocalSwiftPackageReference "Packages/TurmCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/TurmCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		C0105A00306BFD46008BD457 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -986,6 +1017,14 @@
 				minimumVersion = 2.9.5;
 			};
 		};
+		C0105E07306BFD46008BD457 /* XCRemoteSwiftPackageReference "Citadel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/orlandos-nl/Citadel";
+			requirement = {
+				kind = exactVersion;
+				version = 0.12.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -998,6 +1037,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C0105A10306BFD46008BD457 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		C0105E01306BFD46008BD457 /* TurmCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0105E00306BFD46008BD457 /* XCLocalSwiftPackageReference "Packages/TurmCore" */;
+			productName = TurmCore;
+		};
+		C0105E02306BFD46008BD457 /* TurmCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0105E00306BFD46008BD457 /* XCLocalSwiftPackageReference "Packages/TurmCore" */;
+			productName = TurmCore;
+		};
+		C0105E05306BFD46008BD457 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0105A00306BFD46008BD457 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+		C0105E08306BFD46008BD457 /* Citadel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0105E07306BFD46008BD457 /* XCRemoteSwiftPackageReference "Citadel" */;
+			productName = Citadel;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

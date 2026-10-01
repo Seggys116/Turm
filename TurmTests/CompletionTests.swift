@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import SQLite3
 import Testing
+import TurmCore
 @testable import Turm
 
 nonisolated struct FakeEnvironment: CompletionEnvironment {

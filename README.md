@@ -25,7 +25,7 @@ Then press Build. Xcode will ask you to trust the SwiftTerm package plugin.
 
 ## Documentation
 
-Project actions and the `Turm.json` project file are documented in [docs](docs/README.md).
+Project actions, the `Turm.json` project file, SSH, Remote Access, iCloud sync and the iOS app are documented in [docs](docs/README.md).
 
 ## License
 

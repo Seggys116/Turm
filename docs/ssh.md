@@ -23,7 +23,7 @@ Settings > SSH lists your hosts. **Add Host...** takes:
 - **Host:** a hostname, an address or a `Host` alias from your SSH config.
 - **User and Port:** both optional.
 - **Key:** Automatic lets ssh choose. You can also pick one of the keys Turm found in `~/.ssh` (files with a private key header, shown with their type and comment), or **Choose File...**. **Detect** asks the server which of your keys it accepts and selects that one. A key the server accepts but that needs its passphrase is marked as such. A new host saved with Automatic is detected once in the background.
-- **Password:** optional. With **Remember in Keychain** on, it is stored in the macOS Keychain for this Mac only. With it off, Turm holds it in memory until it quits. Turm only types it at the prompt that names this host's own `user@host`, and only once per connection, so a jump host never receives it. A key is still the better choice.
+- **Password:** optional. With **Remember in Keychain** on, it is stored in the Keychain: on this Mac only, or in iCloud Keychain for your other devices when [iCloud sync](icloud-sync.md) is on. With it off, Turm holds it in memory until it quits. Turm only types it at the prompt that names this host's own `user@host`, and only once per connection, so a jump host never receives it. A key is still the better choice.
 
 **Import from SSH config** turns `Host` entries into saved hosts.
 

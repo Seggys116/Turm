@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct ComposeService: Equatable, Sendable {
     let name: String

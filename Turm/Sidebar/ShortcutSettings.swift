@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct ShortcutSettings: View {
     var store = ShortcutStore.shared

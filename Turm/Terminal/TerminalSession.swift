@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Observation
 import SwiftTerm
+import TurmCore
 
 @Observable
 final class TerminalSession: NSObject, LocalProcessDelegate {
@@ -21,6 +22,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         var label: String { alias ?? host }
     }
 
+    let id = UUID()
+    @ObservationIgnored var companionTap: ((CompanionSessionEvent) -> Void)?
     private(set) var blocks: [Block] = []
     private(set) var hasSubmittedCommand = false
     private(set) var directory = NSHomeDirectory()
@@ -156,6 +159,11 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     func rename(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         userTitle = trimmed.isEmpty ? nil : trimmed
+        reportTitle()
+    }
+
+    private func reportTitle() {
+        companionTap?(.title(text: title))
     }
 
     var keyModes: KeyModes {
@@ -240,6 +248,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         runner.dismiss()
         guard !didExit else { return }
         didExit = true
+        companionTap?(.terminated)
         let pid = process.shellPid
         process.terminate()
         // interactive shells ignore SIGTERM, and the pty stays open until the shell hangs up
@@ -295,6 +304,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         blocks.append(block)
         hasSubmittedCommand = true
         phase = .submitted
+        companionTap?(.blockStarted(blockID: block.id, command: expanded, location: block.location))
+        companionTap?(.phase(.running, directory: directory))
         if !isAuxiliary, recordsHistory { CommandHistory.shared.record(command) }
         write(payload)
     }
@@ -306,14 +317,14 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     func enableRemoteIntegration() {
         guard let connection, connection.state == .installed, !isRemote, phase == .running, altScreen == nil else { return }
-        write(Array((RemoteIntegration.enableCommand + "\r").utf8))
+        write(Array((RemoteShellInstall.enableCommand + "\r").utf8))
     }
 
     func reloadRemoteShell() {
         guard let remote, phase == .ready else { return }
         reloadingToken = remote.token
         connection?.reloaded()
-        submit(RemoteIntegration.enableCommand, recordsHistory: false)
+        submit(RemoteShellInstall.enableCommand, recordsHistory: false)
     }
 
     func disconnectRemote() {
@@ -497,7 +508,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         emulator.onBufferSwitch = { [weak self] in self?.bufferSwitched() }
         emulator.onProgress = { [weak self] report in self?.progress = report }
-        emulator.onTitle = { [weak self] title in self?.programTitle = title }
+        emulator.onTitle = { [weak self] title in
+            self?.programTitle = title
+            self?.reportTitle()
+        }
         return emulator
     }
 
@@ -531,6 +545,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             strayOutput = []
             directory = path
             phase = .ready
+            companionTap?(.phase(.ready, directory: path))
             refreshGit(for: path)
             if !isAuxiliary { refreshProject(for: path) }
             runPending()
@@ -577,6 +592,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         strayOutput = []
         directory = path
         phase = .ready
+        companionTap?(.phase(.ready, directory: path))
         refreshRemote(for: path)
         runPending()
     }
@@ -623,6 +639,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         if !strayOutput.isEmpty { block.append(strayOutput) }
         block.finish(exitCode: exitCode == 0 ? nil : exitCode, duration: nil)
         blocks.append(block)
+        companionTap?(.notice(text: text))
     }
 
     private func resetProgramState() {
@@ -633,7 +650,9 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         progress = nil
         outputProgress = OutputProgress()
         textProgress = nil
+        let hadTitle = programTitle != nil
         programTitle = nil
+        if hadTitle { reportTitle() }
     }
 
     private func answer(_ requests: [TerminalRequest]) {
@@ -689,6 +708,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func deliver(_ bytes: [UInt8], to block: Block) {
+        companionTap?(.output(blockID: block.id, bytes: Data(bytes)))
         block.append(bytes)
         if let altScreen {
             altScreen.feed(bytes)
@@ -714,7 +734,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         let host = AltScreenHost(cols: cols, rows: rows)
         host.onInput = { [weak self] bytes in self?.write(bytes) }
         host.onFiles = { [weak self] urls in self?.pasteFiles(urls) }
-        host.onTitle = { [weak self] title in self?.programTitle = title }
+        host.onTitle = { [weak self] title in
+            self?.programTitle = title
+            self?.reportTitle()
+        }
         host.onDragTarget = { [weak self] targeted in self?.isDropTargeted = targeted }
         host.onResize = { [weak self] newCols, newRows in
             guard let self else { return }
@@ -736,6 +759,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         guard let block = current else { return }
         let elapsed = startedAt.map { ContinuousClock.now - $0 }
         block.finish(exitCode: exitCode, duration: elapsed)
+        companionTap?(.blockFinished(blockID: block.id, exitCode: exitCode))
         startedAt = nil
         if block.command == "clear" { clearBlocks() }
     }
@@ -833,6 +857,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         guard !didExit else { return }
         didExit = true
+        companionTap?(.terminated)
         onExit()
     }
 

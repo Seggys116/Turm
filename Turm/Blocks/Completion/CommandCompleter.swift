@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum CommandCompleter {
     static let commandNameCommands: Set<String> = ["man", "which", "type", "whereis", "where", "whence", "help", "hash"]

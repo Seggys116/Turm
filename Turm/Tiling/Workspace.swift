@@ -155,6 +155,17 @@ final class Workspace {
         panes.forEach(removePane)
     }
 
+    var sessionEntries: [(pane: PaneID, session: TerminalSession)] {
+        sessions.map { (pane: $0.key, session: $0.value) }
+    }
+
+    func closeRemotely(_ pane: PaneID, force: Bool) -> Bool {
+        guard let session = sessions[pane] else { return false }
+        if session.needsCloseConfirmation, !force { return false }
+        removePane(pane)
+        return true
+    }
+
     func close(_ pane: PaneID) {
         guard let session = sessions[pane] else { return }
         if session.needsCloseConfirmation, !closeCoordinator.confirm(.shell) { return }

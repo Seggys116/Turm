@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct KubeOptions: Equatable, Sendable {
     var context: String?

@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum ProcessEnvironmentReader {
     static func parse(_ buffer: [UInt8]) -> (arguments: [String], environment: [String: String])? {

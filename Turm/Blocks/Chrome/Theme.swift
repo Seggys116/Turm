@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 struct ThemeColor {
     let light: NSColor
@@ -12,6 +13,10 @@ struct ThemeColor {
 
     init(light: UInt32, dark: UInt32) {
         self.init(light: NSColor(hex: light), dark: NSColor(hex: dark))
+    }
+
+    init(_ palette: PaletteColor) {
+        self.init(light: palette.light, dark: palette.dark)
     }
 
     var dynamicNS: NSColor {
@@ -41,12 +46,12 @@ extension NSColor {
 }
 
 enum Theme {
-    static let terminalBackground = ThemeColor(light: 0xFFFFFF, dark: 0x0B0B0C)
+    static let terminalBackground = ThemeColor(TurmCore.TerminalPalette.background)
     static let inputBackground = ThemeColor(light: 0xF5F5F7, dark: 0x111113)
     static let topBar = ThemeColor(light: 0xE6E6EA, dark: 0x1B1B1F)
     static let sidebar = ThemeColor(light: 0xEBEBEE, dark: 0x0E0E10)
     static let statusBar = ThemeColor(light: 0xECECF0, dark: 0x151518)
-    static let text = ThemeColor(light: 0x1F2328, dark: 0xDCDCDC)
+    static let text = ThemeColor(TurmCore.TerminalPalette.foreground)
     static let divider = ThemeColor(
         light: NSColor(white: 0, alpha: 0.12), dark: NSColor(white: 1, alpha: 0.12)
     )
@@ -92,14 +97,5 @@ enum Theme {
         light: NSColor(white: 0, alpha: 0.32), dark: NSColor(white: 1, alpha: 0.3)
     )
 
-    static let ansi: [ThemeColor] = [
-        ThemeColor(light: 0x24292F, dark: 0x1D1F21), ThemeColor(light: 0xCF222E, dark: 0xF26D78),
-        ThemeColor(light: 0x1A7F37, dark: 0x8FD46D), ThemeColor(light: 0x9A6700, dark: 0xE6C547),
-        ThemeColor(light: 0x0969DA, dark: 0x61AFEF), ThemeColor(light: 0x8250DF, dark: 0xC678DD),
-        ThemeColor(light: 0x1B7C83, dark: 0x56B6C2), ThemeColor(light: 0x6E7781, dark: 0xC8CCD4),
-        ThemeColor(light: 0x57606A, dark: 0x5C6370), ThemeColor(light: 0xA40E26, dark: 0xFF8B94),
-        ThemeColor(light: 0x2DA44E, dark: 0xB5F08E), ThemeColor(light: 0xBF8700, dark: 0xF5DB7A),
-        ThemeColor(light: 0x218BFF, dark: 0x82C4FF), ThemeColor(light: 0xA475F9, dark: 0xDD9AF0),
-        ThemeColor(light: 0x3192AA, dark: 0x7AD5E0), ThemeColor(light: 0x8C959F, dark: 0xFFFFFF),
-    ]
+    static let ansi: [ThemeColor] = TurmCore.TerminalPalette.ansi.map { ThemeColor($0) }
 }

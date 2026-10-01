@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 enum ShellIntegration {
     enum Kind {
@@ -24,9 +25,9 @@ enum ShellIntegration {
         func payload(for command: String) throws -> [UInt8] {
             switch self {
             case .typed:
-                return Array(command.replacingOccurrences(of: "\n", with: "\r").utf8) + [0x0D]
+                return ShellSubmission.typed.payload(for: command)
             case .bracketedPaste:
-                return [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E] + Array(command.utf8) + [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E, 0x0D]
+                return ShellSubmission.bracketedPaste.payload(for: command)
             case .sourceFile(let url):
                 try Data((command + "\n").utf8).write(to: url, options: .atomic)
                 return Array(" . \(ShellIntegration.quoted(url.path))\r".utf8)
@@ -45,86 +46,6 @@ enum ShellIntegration {
 
     static var forcedShell: String?
 
-    nonisolated static let zshFiles: [(name: String, contents: String)] = [
-        (".zshenv", """
-        export TURM_INTEGRATION_DIR="$ZDOTDIR"
-        _turm_home="${TURM_USER_ZDOTDIR:-$HOME}"
-        [[ -r "$_turm_home/.zshenv" ]] && source "$_turm_home/.zshenv"
-        ZDOTDIR="$TURM_INTEGRATION_DIR"
-        unset _turm_home
-
-        """),
-        (".zprofile", """
-        _turm_home="${TURM_USER_ZDOTDIR:-$HOME}"
-        [[ -r "$_turm_home/.zprofile" ]] && source "$_turm_home/.zprofile"
-        ZDOTDIR="$TURM_INTEGRATION_DIR"
-        unset _turm_home
-
-        """),
-        (".zshrc", """
-        _turm_home="${TURM_USER_ZDOTDIR:-$HOME}"
-        HISTFILE="$_turm_home/.zsh_history"
-        [[ -r "$_turm_home/.zshrc" ]] && source "$_turm_home/.zshrc"
-        if [[ -n "$TURM_USER_ZDOTDIR" ]]; then
-          ZDOTDIR="$TURM_USER_ZDOTDIR"
-        else
-          unset ZDOTDIR
-        fi
-        unset _turm_home TURM_USER_ZDOTDIR TURM_INTEGRATION_DIR
-
-        _turm_preexec() {
-          _turm_ran=1
-          printf '\\e]7777;C\\a'
-        }
-        _turm_report_env() {
-          local name signature=
-          for name in ${(k)parameters[(R)*export*]}; do
-            case $name in
-              PWD|OLDPWD|_|SHLVL) continue ;;
-            esac
-            signature+="$name=${(P)name}"$'\\0'
-          done
-          if [[ -n $_turm_env_sent && $signature == "$_turm_env_sent" ]]; then
-            return
-          fi
-          _turm_env_sent=$signature
-          local encoded
-          encoded=$(command env -0 | command base64)
-          encoded=${encoded//[$'\\n\\r']/}
-          if (( ${#encoded} > 0 && ${#encoded} <= 262144 )); then
-            printf '\\e]7777;E;%s\\a' "$encoded"
-          fi
-        }
-        _turm_precmd() {
-          local code=$?
-          _turm_report_env
-          if [[ -n $TURM_REMOTE ]]; then
-            printf '\\e]7777;R;%s;%s;%s\\a' "$TURM_REMOTE" "${_turm_ran:+$code}" "$PWD"
-          elif [[ -n $_turm_ran ]]; then
-            printf '\\e]7777;P;%d;%s\\a' $code "$PWD"
-          else
-            printf '\\e]7777;P;;%s\\a' "$PWD"
-          fi
-          _turm_ran=
-        }
-        _turm_quiet() {
-          PROMPT=''
-          RPROMPT=''
-        }
-        PROMPT_EOL_MARK=''
-        precmd_functions=(_turm_precmd $precmd_functions _turm_quiet)
-        preexec_functions+=(_turm_preexec)
-        if [[ -n $TURM_SSH_WRAPPER ]] && (( ! $+functions[ssh] && ! $+aliases[ssh] )); then
-          ssh() { "$TURM_SSH_WRAPPER" "$@"; }
-        fi
-        if [[ -n $TURM_REMOTE ]]; then
-          printf '\\e]7777;H;%s;zsh;%s@%s\\a' "$TURM_REMOTE" "${USER:-$(id -un)}" "${HOST:-$(hostname)}"
-        fi
-        _turm_quiet
-
-        """),
-    ]
-
     static func launch() throws -> Launch {
         let shell = userShell()
         let kind = Kind(path: shell) ?? .zsh
@@ -142,7 +63,7 @@ enum ShellIntegration {
         let name = (shell as NSString).lastPathComponent
         switch kind {
         case .zsh:
-            let directory = try install(kind: .zsh, files: zshFiles)
+            let directory = try install(kind: .zsh, files: ShellScripts.zsh)
             if let original = inherited["ZDOTDIR"] {
                 environment.append("TURM_USER_ZDOTDIR=\(original)")
             }

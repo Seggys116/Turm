@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TurmCore
 @testable import Turm
 
 private func sshEvents(_ text: String) -> [StreamPiece] {
@@ -145,23 +146,23 @@ struct SSHRouteTests {
 
     @Test func savedHostCommandLocalIncludesIdentity() throws {
         let route = try #require(SSHRoute.parse(">prod uptime", hosts: [prod]))
-        #expect(route.command(remote: false, quote: quote) == "ssh -p 2222 -i '/keys/id one' -o IdentitiesOnly=yes 'bob@example.com' uptime")
+        #expect(route.command(remote: false, quote: quote) == "ssh -p 2222 -i '/keys/id one' -o IdentitiesOnly=yes -- 'bob@example.com' uptime")
     }
 
     @Test func savedHostCommandFromARemoteOmitsIdentity() throws {
         let route = try #require(SSHRoute.parse(">prod", hosts: [prod]))
-        #expect(route.command(remote: true, quote: quote) == "ssh -p 2222 'bob@example.com'")
+        #expect(route.command(remote: true, quote: quote) == "ssh -p 2222 -- 'bob@example.com'")
     }
 
     @Test func savedHostWithoutPortOrUserUsesBareHostname() throws {
         let plain = SSHHost(key: "box", hostname: "10.0.0.5")
         let route = try #require(SSHRoute.parse(">box", hosts: [plain]))
-        #expect(route.command(remote: false, quote: quote) == "ssh '10.0.0.5'")
+        #expect(route.command(remote: false, quote: quote) == "ssh -- '10.0.0.5'")
     }
 
     @Test func adHocCommandPassesThePort() throws {
         let route = try #require(SSHRoute.parse(">bob@example.com:2222 ls -l", hosts: []))
-        #expect(route.command(remote: false, quote: quote) == "ssh -p 2222 'bob@example.com' ls -l")
+        #expect(route.command(remote: false, quote: quote) == "ssh -p 2222 -- 'bob@example.com' ls -l")
     }
 
     @Test func partialCompletionRecognisesTheSigil() {
@@ -595,7 +596,7 @@ struct RemoteProbeTests {
 struct RemoteInstallScriptTests {
     private func install(into home: URL) throws -> Int32 {
         let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
-        return try execute("/bin/sh", ["-s"], environment: environment, input: Data(RemoteIntegration.installScript().utf8)).status
+        return try execute("/bin/sh", ["-s"], environment: environment, input: Data(RemoteShellInstall.installScript().utf8)).status
     }
 
     private func installed(_ home: URL, _ path: String) throws -> String {
@@ -608,8 +609,8 @@ struct RemoteInstallScriptTests {
         #expect(try install(into: home) == 0)
 
         let expectedPaths = ["bootstrap.sh", "rc.bash", "integration.fish", "zsh/.zshenv", "zsh/.zprofile", "zsh/.zshrc"]
-        #expect(RemoteIntegration.remoteFiles.map(\.path) == expectedPaths)
-        for file in RemoteIntegration.remoteFiles {
+        #expect(RemoteShellInstall.files.map(\.path) == expectedPaths)
+        for file in RemoteShellInstall.files {
             // A heredoc always ends with a newline, so a file lacking one gains exactly one.
             let expected = file.contents.hasSuffix("\n") ? file.contents : file.contents + "\n"
             #expect(try installed(home, file.path) == expected, "\(file.path)")
@@ -620,7 +621,7 @@ struct RemoteInstallScriptTests {
         let home = try scratchDirectory()
         defer { try? FileManager.default.removeItem(at: home) }
         #expect(try install(into: home) == 0)
-        #expect(try installed(home, "version") == RemoteIntegration.version + "\n")
+        #expect(try installed(home, "version") == RemoteShellInstall.version + "\n")
     }
 
     @Test func leavesNoTemporaryFilesBehind() throws {
@@ -643,8 +644,8 @@ struct RemoteInstallScriptTests {
     }
 
     @Test func versionIsStableAndShaped() {
-        let version = RemoteIntegration.version
-        #expect(version == RemoteIntegration.version)
+        let version = RemoteShellInstall.version
+        #expect(version == RemoteShellInstall.version)
         #expect(version.count == 16)
         #expect(version.allSatisfy { "0123456789abcdef".contains($0) })
     }

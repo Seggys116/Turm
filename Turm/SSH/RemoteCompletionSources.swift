@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct RemoteEntry: Equatable, Sendable {
     let name: String

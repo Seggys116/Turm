@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated final class SystemCompletionEnvironment: CompletionEnvironment, @unchecked Sendable {
     static let shared = SystemCompletionEnvironment()

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 struct PathMenu: View {
     let path: String

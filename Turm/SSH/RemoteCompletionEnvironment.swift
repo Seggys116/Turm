@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct RemoteCompletionEnvironment: CompletionEnvironment {
     let base: CompletionEnvironment

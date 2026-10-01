@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 struct SSHHostEditor: View {
     let close: () -> Void
@@ -13,6 +14,9 @@ struct SSHHostEditor: View {
     @State private var keys: [SSHKey] = SSHKeys.discover()
     @State private var detecting = false
     @State private var detectMessage: String?
+    @State private var storingKey = false
+    @State private var keyPassphrase = ""
+    @State private var storeMessage: String?
     @FocusState private var focus: Field?
 
     private enum Field { case key, hostname, user, port, password, sudoPassword }
@@ -38,24 +42,48 @@ struct SSHHostEditor: View {
     }
 
     private var portValid: Bool { portText.trimmingCharacters(in: .whitespaces).isEmpty || port != nil }
-    private var canSave: Bool { !cleanKey.isEmpty && conflict == nil && hostnameSet && portValid }
+    private var fieldProblem: String? { SSHHostValidation.problem(candidate()) }
+    private var canSave: Bool { !cleanKey.isEmpty && conflict == nil && hostnameSet && portValid && fieldProblem == nil }
 
     private var keyOptions: [SSHKey] {
         guard let current = draft.identityFile, !current.isEmpty, !keys.contains(where: { $0.path == current }) else { return keys }
         return keys + [SSHKey(path: current, type: "", comment: "", fingerprint: nil)]
     }
 
+    private static let storedTag = "\u{0}stored:"
+
+    private var storedOnlyKeys: [SSHIdentity] {
+        let covered = Set(keyOptions.compactMap { StoredKeys.identity(for: $0)?.id })
+        return SSHIdentityStore.shared.identities.filter { !covered.contains($0.id) }
+    }
+
     private var keySelection: Binding<String> {
         Binding(
-            get: { draft.identityFile ?? "" },
+            get: {
+                if let file = draft.identityFile, !file.isEmpty { return file }
+                if let id = draft.identityKeyID, SSHIdentityStore.shared.identity(id) != nil { return Self.storedTag + id.uuidString }
+                return ""
+            },
             set: { value in
                 if value == Self.chooseTag {
-                    if let path = Self.chooseKeyFile() { draft.identityFile = path }
+                    if let path = Self.chooseKeyFile() { useFile(path) }
+                } else if value.hasPrefix(Self.storedTag) {
+                    draft.identityFile = nil
+                    draft.identityKeyID = UUID(uuidString: String(value.dropFirst(Self.storedTag.count)))
+                } else if value.isEmpty {
+                    draft.identityFile = nil
+                    draft.identityKeyID = nil
                 } else {
-                    draft.identityFile = value.isEmpty ? nil : value
+                    useFile(value)
                 }
             }
         )
+    }
+
+    private func useFile(_ path: String) {
+        let known = keys.first { $0.path == path } ?? SSHKey(path: path, type: "", comment: "", fingerprint: nil)
+        draft.identityFile = path
+        draft.identityKeyID = StoredKeys.identity(for: known)?.id
     }
 
     var body: some View {
@@ -94,7 +122,14 @@ struct SSHHostEditor: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.failure.color)
             }
+            if let fieldProblem {
+                Text(fieldProblem)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.failure.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             keyField
+            storedKeyField
             passwordField
             sudoField
             if let conflict {
@@ -128,9 +163,12 @@ struct SSHHostEditor: View {
                 .foregroundStyle(Theme.secondaryText.color)
             HStack(spacing: 8) {
                 Picker("Key", selection: keySelection) {
-                    Text("Automatic").tag("")
+                    Text("Default keys").tag("")
                     ForEach(keyOptions) { key in
                         Text(label(for: key)).tag(key.path)
+                    }
+                    ForEach(storedOnlyKeys) { identity in
+                        Text("\(identity.name)  \(identity.algorithm)  (stored in Turm)").tag(Self.storedTag + identity.id.uuidString)
                     }
                     Divider()
                     Text("Choose File...").tag(Self.chooseTag)
@@ -155,8 +193,82 @@ struct SSHHostEditor: View {
         }
     }
 
+    private var storedIdentity: SSHIdentity? {
+        draft.identityKeyID.flatMap { SSHIdentityStore.shared.identity($0) }
+    }
+
+    @ViewBuilder
+    private var storedKeyField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let identity = storedIdentity {
+                HStack(spacing: 8) {
+                    Text("Stored in Turm: \(identity.name) (\(identity.algorithm))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondaryText.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Remove", action: removeStoredKey)
+                        .buttonStyle(SettingsButtonStyle())
+                }
+            } else if let path = draft.identityFile, !path.isEmpty {
+                if storingKey {
+                    field("Key passphrase", hint: "Leave empty if the key has none. The key and passphrase are kept in the keychain, never in a file.") {
+                        SecureField("Optional", text: $keyPassphrase)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Store Key") { storeKey(path) }
+                            .buttonStyle(SettingsButtonStyle(prominent: true))
+                        Button("Cancel") {
+                            storingKey = false
+                            keyPassphrase = ""
+                        }
+                        .buttonStyle(SettingsButtonStyle())
+                    }
+                } else {
+                    Button("Store Key in Turm...") {
+                        storeMessage = nil
+                        storingKey = true
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                    Text("Keeps a copy of this key in the keychain so your iPhone can use it when iCloud sync is on.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.secondaryText.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let storeMessage {
+                Text(storeMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondaryText.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func storeKey(_ path: String) {
+        defer {
+            keyPassphrase = ""
+            storingKey = false
+        }
+        do {
+            let text = try StoredKeys.read(path: path)
+            let identity = try StoredKeys.store(path: path, text: text, passphrase: keyPassphrase.isEmpty ? nil : keyPassphrase)
+            draft.identityKeyID = identity.id
+            storeMessage = "Stored. Save the host to finish."
+        } catch {
+            storeMessage = error.localizedDescription
+        }
+    }
+
+    private func removeStoredKey() {
+        guard let id = draft.identityKeyID else { return }
+        StoredKeys.remove(id)
+        draft.identityKeyID = nil
+        storeMessage = "Removed from Turm. Save the host to finish."
+    }
+
     private var passwordField: some View {
-        field("Password", hint: draft.remembersPassword ? "Stored in the macOS Keychain." : "Without Remember in Keychain, the password is used only until Turm quits.") {
+        field("Password", hint: draft.remembersPassword ? (CloudSync.shared.isEnabled ? "Stored in iCloud Keychain and shared with your devices." : "Stored in the Keychain on this Mac.") : "Without Remember in Keychain, the password is used only until Turm quits.") {
             HStack(spacing: 6) {
                 SecureField(hasSavedPassword ? "Saved" : "Optional", text: $password)
                     .focused($focus, equals: .password)
@@ -273,7 +385,7 @@ struct SSHHostEditor: View {
             detecting = false
             switch result {
             case .accepted(let path, let authenticated):
-                draft.identityFile = path
+                useFile(path)
                 let name = (path as NSString).lastPathComponent
                 detectMessage = "Server accepts \(name)" + (authenticated ? "" : " (needs its passphrase or ssh-agent)")
             case .none:

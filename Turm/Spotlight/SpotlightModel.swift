@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated struct SpotlightRow: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable {

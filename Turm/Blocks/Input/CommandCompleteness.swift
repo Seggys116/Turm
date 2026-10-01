@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 nonisolated enum CommandCompleteness {
     static func isComplete(_ text: String, fish: Bool = false) -> Bool {
