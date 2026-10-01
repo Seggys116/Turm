@@ -67,7 +67,8 @@ struct InputBar: View {
                     },
                     isRemote: session.isRemote,
                     remoteChannel: session.remoteChannel,
-                    onTags: { showsTags = $0 }
+                    onTags: { showsTags = $0 },
+                    history: session.history
                 )
                 .padding(.top, showsTags ? 18 : 0)
             }

@@ -32,6 +32,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var variantChoices: [String: Int] = [:]
     private(set) var toolChoice: String?
     let runner = ActionRunner()
+    // like a shell without shared history: what existed at launch plus this pane's own commands
+    let history = CommandHistory(entries: CommandHistory.shared.entries)
     private(set) var isAuxiliary: Bool
     private(set) var phase = Phase.starting
     private(set) var altScreen: AltScreenHost?
@@ -338,7 +340,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         phase = .submitted
         companionTap?(.blockStarted(blockID: block.id, command: expanded, location: block.location))
         companionTap?(.phase(.running, directory: directory))
-        if !isAuxiliary, recordsHistory { CommandHistory.shared.record(command) }
+        if !isAuxiliary, recordsHistory {
+            CommandHistory.shared.record(command)
+            history.record(command)
+        }
         write(payload)
     }
 

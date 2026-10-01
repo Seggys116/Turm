@@ -228,6 +228,26 @@ struct TerminalSessionTests {
         #expect(session.directory.hasSuffix("/tmp"))
     }
 
+    @Test func eachPaneRecallsOnlyItsOwnCommands() async throws {
+        let first = TerminalSession()
+        let second = TerminalSession()
+        defer {
+            first.terminate()
+            second.terminate()
+        }
+        #expect(await wait { first.phase == .ready && second.phase == .ready })
+        let marker = "echo pane-history-\(UUID().uuidString)"
+        first.submit(marker)
+        #expect(await wait { first.phase == .ready && first.blocks.count == 1 })
+
+        #expect(first.history.entries.last == marker)
+        #expect(!second.history.entries.contains(marker))
+        #expect(CommandHistory.shared.entries.contains(marker))
+        let later = TerminalSession()
+        defer { later.terminate() }
+        #expect(later.history.entries.contains(marker))
+    }
+
     @Test func multiLineCommandRunsAsOneBlock() async throws {
         let session = TerminalSession()
         defer { session.terminate() }

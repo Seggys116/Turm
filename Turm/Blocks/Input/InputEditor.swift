@@ -17,6 +17,7 @@ struct InputEditor: NSViewRepresentable {
     var isRemote = false
     var remoteChannel: RemoteChannel?
     var onTags: (Bool) -> Void = { _ in }
+    var history = CommandHistory.shared
 
     private static let maxLines: CGFloat = 8
 
@@ -502,7 +503,7 @@ struct InputEditor: NSViewRepresentable {
 
         private func browseHistory() {
             guard parent.isEnabled else { return }
-            let entries = Array(CommandHistory.shared.entries.suffix(Self.historyRows))
+            let entries = Array(parent.history.entries.suffix(Self.historyRows))
             guard !entries.isEmpty else { return }
             autoTask?.cancel()
             browsing = true
@@ -756,7 +757,7 @@ struct InputEditor: NSViewRepresentable {
         }
 
         private func recall(older: Bool) {
-            let entries = CommandHistory.shared.entries
+            let entries = parent.history.entries
             if older {
                 guard !entries.isEmpty else { return }
                 if historyIndex == nil {
