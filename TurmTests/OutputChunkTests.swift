@@ -113,7 +113,8 @@ struct OutputChunkTests {
                 warm.feed(Array(bytes[split...]))
                 cold.feed(Array(bytes[split...]))
                 _ = warm.renderSegments()
-                await Task.yield()
+                // a real suspension; under the app host a yield never lets the shell tests' main-actor work in
+                try? await Task.sleep(for: .milliseconds(1))
             }
             let fresh = signature(cold.renderSegments())
             let seen = signature(warm.renderSegments())
