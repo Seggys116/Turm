@@ -6,6 +6,8 @@ struct BlockTextView: NSViewRepresentable {
     var highlights = SegmentHighlights(ranges: [], active: nil)
     var piece: PieceRef?
     var selection: NSRange?
+    var cursor: OutputCursor?
+    var cursorFocused = false
 
     func makeNSView(context: Context) -> BlockTextNSView {
         BlockTextNSView()
@@ -15,6 +17,7 @@ struct BlockTextView: NSViewRepresentable {
         view.setChunk(chunk)
         view.setHighlights(highlights)
         view.setSelection(selection)
+        view.setCursor(cursor, focused: cursorFocused)
         view.bind(piece)
     }
 
@@ -35,6 +38,11 @@ final class BlockTextNSView: NSTextView {
     private var blinkStart = Date()
     private var cachedFit: (width: CGFloat, size: CGSize)?
     private var boundPiece: PieceRef?
+    private var cursor: OutputCursor?
+    private var cursorFocused = false
+    private var cursorLit = true
+    private var cursorTimer: Timer?
+    private var invertedRange: NSRange?
 
     init() {
         let storage = NSTextStorage()
@@ -82,6 +90,7 @@ final class BlockTextNSView: NSTextView {
     private func materialize() {
         guard !isMaterialized, let storage = textStorage else { return }
         isMaterialized = true
+        clearCursorGlyph()
         storage.setAttributedString(chunk.map { Self.display($0.text) } ?? NSAttributedString())
         var blinks = false
         storage.enumerateAttribute(.blink, in: NSRange(location: 0, length: storage.length)) { value, _, stop in
@@ -93,6 +102,7 @@ final class BlockTextNSView: NSTextView {
         layout.hasBlink = blinks
         layout.blinkAlpha = 1
         updateBlinkTimer()
+        refreshCursorGlyph()
         needsDisplay = true
     }
 
@@ -122,7 +132,128 @@ final class BlockTextNSView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         materialize()
         if let container = textContainer { layout.ensureLayout(for: container) }
+        let frame = cursor.flatMap(cursorRect)
+        if let frame, let cursor, cursor.shape == .block, cursorLit, isCursorSolid, invertedRange == nil {
+            Theme.text.dynamicNS.setFill()
+            frame.fill()
+        }
         super.draw(dirtyRect)
+        if let frame, let cursor { drawCursorMark(cursor, in: frame) }
+    }
+
+    func setCursor(_ next: OutputCursor?, focused: Bool) {
+        guard next != cursor || focused != cursorFocused else { return }
+        cursor = next
+        cursorFocused = focused
+        cursorLit = true
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        updateCursorTimer()
+        refreshCursorGlyph()
+        needsDisplay = true
+    }
+
+    private var isCursorSolid: Bool {
+        cursorFocused && window?.isKeyWindow == true
+    }
+
+    private func lineStart(_ line: Int, in chunk: TextChunk) -> Int {
+        chunk.lineLengths.prefix(line).reduce(0, +) + line
+    }
+
+    private func cursorCharacterRange(_ cursor: OutputCursor) -> NSRange? {
+        guard let chunk, let storage = textStorage, let offset = cursor.offset, cursor.line < chunk.lineLengths.count,
+              offset < chunk.lineLengths[cursor.line]
+        else { return nil }
+        let index = lineStart(cursor.line, in: chunk) + offset
+        guard index < storage.length else { return nil }
+        return (storage.string as NSString).rangeOfComposedCharacterSequence(at: index)
+    }
+
+    private func cursorRect(_ cursor: OutputCursor) -> NSRect? {
+        guard let chunk, let container = textContainer, let storage = textStorage, cursor.line < chunk.lineLengths.count
+        else { return nil }
+        let cellWidth = TerminalMetrics.cellWidth
+        if let range = cursorCharacterRange(cursor) {
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return nil }
+            let fragment = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let glyph = layout.boundingRect(forGlyphRange: glyphs, in: container)
+            return NSRect(x: glyph.minX, y: fragment.minY, width: max(glyph.width, cellWidth), height: fragment.height)
+        }
+        let start = lineStart(cursor.line, in: chunk)
+        var anchor = start < storage.length
+            ? layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: start), effectiveRange: nil)
+            : layout.extraLineFragmentRect
+        if anchor.height <= 0 {
+            anchor = NSRect(x: 0, y: start == 0 ? 0 : layout.usedRect(for: container).maxY, width: 0, height: TerminalMetrics.lineHeight)
+        }
+        let columns = max(Int((bounds.width + 0.001) / cellWidth), 1)
+        return NSRect(
+            x: CGFloat(cursor.cell % columns) * cellWidth, y: anchor.minY + CGFloat(cursor.cell / columns) * anchor.height,
+            width: cellWidth, height: anchor.height
+        )
+    }
+
+    private func drawCursorMark(_ cursor: OutputCursor, in frame: NSRect) {
+        Theme.text.dynamicNS.set()
+        guard isCursorSolid else {
+            let outline = NSBezierPath(rect: frame.insetBy(dx: 0.5, dy: 0.5))
+            outline.lineWidth = 1
+            outline.stroke()
+            return
+        }
+        guard cursorLit else { return }
+        switch cursor.shape {
+        case .block: break
+        case .bar: NSRect(x: frame.minX, y: frame.minY, width: 2, height: frame.height).fill()
+        case .underline: NSRect(x: frame.minX, y: frame.maxY - 2, width: frame.width, height: 2).fill()
+        }
+    }
+
+    // a solid block shows the character beneath it in the background colour, like a terminal
+    private func refreshCursorGlyph() {
+        guard isMaterialized else { return }
+        clearCursorGlyph()
+        guard let cursor, cursor.shape == .block, cursorLit, isCursorSolid, let range = cursorCharacterRange(cursor) else { return }
+        layout.addTemporaryAttributes(
+            [.foregroundColor: Theme.terminalBackground.dynamicNS, .backgroundColor: Theme.text.dynamicNS], forCharacterRange: range
+        )
+        invertedRange = range
+    }
+
+    private func clearCursorGlyph() {
+        guard let range = invertedRange else { return }
+        invertedRange = nil
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: textStorage?.length ?? 0))
+        guard clamped.length > 0 else { return }
+        layout.removeTemporaryAttribute(.foregroundColor, forCharacterRange: clamped)
+        layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: clamped)
+    }
+
+    private func updateCursorTimer() {
+        let active = cursor?.blinks == true && isCursorSolid && (window?.occlusionState.contains(.visible) ?? false)
+        guard active else {
+            cursorTimer?.invalidate()
+            cursorTimer = nil
+            if !cursorLit {
+                cursorLit = true
+                refreshCursorGlyph()
+                needsDisplay = true
+            }
+            return
+        }
+        guard cursorTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                self.cursorLit.toggle()
+                self.refreshCursorGlyph()
+                self.needsDisplay = true
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorTimer = timer
     }
 
     override func accessibilityValue() -> String? {
@@ -202,7 +333,8 @@ final class BlockTextNSView: NSTextView {
         container.containerSize = NSSize(width: proposed, height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
-        let height = used.height - (chunk?.hangs == true ? layout.extraLineFragmentRect.height : 0)
+        var height = used.height - (chunk?.hangs == true ? layout.extraLineFragmentRect.height : 0)
+        if chunk?.length == 0 { height = max(height, TerminalMetrics.lineHeight) }
         return CGSize(width: width == nil ? ceil(used.width) : proposed, height: ceil(height))
     }
 
@@ -220,10 +352,15 @@ final class BlockTextNSView: NSTextView {
             }
         }
         updateBlinkTimer()
+        updateCursorTimer()
     }
 
     @objc private func windowStateChanged() {
         updateBlinkTimer()
+        guard cursor != nil else { return }
+        updateCursorTimer()
+        refreshCursorGlyph()
+        needsDisplay = true
     }
 
     private func updateBlinkTimer() {

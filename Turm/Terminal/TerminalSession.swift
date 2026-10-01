@@ -72,6 +72,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var reportsColorScheme = false
     @ObservationIgnored private var reportsFocus = false
     @ObservationIgnored private var paneFocused = false
+    private(set) var showsFocusedCursor = false
     @ObservationIgnored private(set) var liveEnvironment: [String: String]?
     @ObservationIgnored var completionEnvironment = SystemCompletionEnvironment.shared
     @ObservationIgnored private static var liveEnvironmentApplied = false
@@ -298,6 +299,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         let expanded = replaced ?? command
         guard let payload = try? activeSubmission(for: expanded).payload(for: expanded) else { return }
         let emulator = makeEmulator()
+        emulator.tracksCursor = true
         let block = Block(
             command: expanded, usedShortcut: replaced != nil, directory: directory, git: git, host: remote?.label, emulator: emulator
         )
@@ -444,6 +446,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     func setPaneFocused(_ focused: Bool) {
         paneFocused = focused
+        if showsFocusedCursor != focused { showsFocusedCursor = focused }
         if focused, process.shellPid > 0 { SystemCompletionEnvironment.shared.setShellProcess(pid: process.shellPid) }
         if focused, let liveEnvironment { completionEnvironment.applyLiveEnvironment(liveEnvironment) }
         reportFocusIfChanged()
@@ -536,6 +539,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             phase = .running
             startedAt = .now
             resetProgramState()
+            scheduleRender()
         case .event(.promptReady(let exitCode, let path)):
             let host = remote?.label
             let hadRunning = current != nil

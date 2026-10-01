@@ -110,3 +110,16 @@ struct OutputText {
         length == 0
     }
 }
+
+struct OutputCursor: Equatable {
+    enum Shape: Equatable {
+        case block, bar, underline
+    }
+
+    var chunk: Int
+    var line: Int
+    var cell: Int
+    var offset: Int?
+    var shape: Shape
+    var blinks: Bool
+}

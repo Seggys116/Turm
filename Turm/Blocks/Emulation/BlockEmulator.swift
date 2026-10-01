@@ -27,6 +27,10 @@ final class BlockEmulator: TerminalDelegate {
     private var renderSerial = 0
     private var styles: [Attribute: AttributeContainer] = [:]
     private var carried: [ObjectIdentifier: RenderedLine] = [:]
+    private var cursorHidden = false
+    private var cursorStyle = CursorStyle.blinkBlock
+    var tracksCursor = false
+    private(set) var cursor: OutputCursor?
 
     static let chunkRows = 128
 
@@ -224,8 +228,15 @@ final class BlockEmulator: TerminalDelegate {
         normalStore.images.origin(of: image, virtual: placeholderLayout().origins)
     }
 
+    private var cursorCell: (row: Int, column: Int)? {
+        guard tracksCursor, !cursorHidden, !terminal.isCurrentBufferAlternate else { return nil }
+        let buffer = terminal.buffer
+        return (buffer.totalLinesTrimmed + buffer.yDisp + buffer.y, min(max(buffer.x, 0), terminal.cols - 1))
+    }
+
     func renderSegments() -> [OutputSegment] {
-        let lines = collectLines()
+        let cell = cursorCell
+        let lines = collectLines(keepingThrough: cell?.row)
         let trimmed = terminal.buffer.totalLinesTrimmed
         let holders = placeholderLayout()
         let placements = normalStore.images.compactMap { image -> InlineImage? in
@@ -261,6 +272,11 @@ final class BlockEmulator: TerminalDelegate {
         var pendingStart = 0
         var keptChunks: [Int: CachedChunk] = [:]
         var nextLegacy = 0
+        var logicalLine = 0
+        var cellsBefore = 0
+        var unitsBefore = 0
+        var previousUnits = 0
+        var placed: OutputCursor?
 
         func closeChunk(hangs: Bool) {
             guard !pending.isEmpty else { return }
@@ -306,14 +322,55 @@ final class BlockEmulator: TerminalDelegate {
             if !pending.isEmpty, !line.wrapped, row / Self.chunkRows != pendingStart / Self.chunkRows {
                 closeChunk(hangs: true)
             }
-            if pending.isEmpty { pendingStart = row }
+            let units = line.text.characters.reduce(0) { $0 + $1.utf16.count }
+            if pending.isEmpty {
+                pendingStart = row
+                logicalLine = 0
+                cellsBefore = 0
+                unitsBefore = 0
+            } else if line.wrapped {
+                cellsBefore += terminal.cols
+                unitsBefore += previousUnits
+            } else {
+                logicalLine += 1
+                cellsBefore = 0
+                unitsBefore = 0
+            }
+            if let cell, cell.row == row {
+                placed = OutputCursor(
+                    chunk: pendingStart, line: logicalLine, cell: cellsBefore + cell.column,
+                    offset: unitOffset(of: cell.column, in: line).map { unitsBefore + $0 },
+                    shape: OutputCursor.Shape(cursorStyle), blinks: Self.blinks(cursorStyle)
+                )
+            }
+            previousUnits = units
             pending.append(line)
             row += 1
         }
         placeLegacy(upTo: nil)
         flushText()
         chunkCache = keptChunks
+        cursor = placed
         return segments
+    }
+
+    private func unitOffset(of column: Int, in rendered: RenderedLine) -> Int? {
+        guard let line = rendered.line, column < rendered.extent else { return nil }
+        var units = 0
+        var start = column
+        while start > 0, line[start].width == 0 { start -= 1 }
+        for index in 0..<start where line[index].width != 0 {
+            let character = terminal.getCharacter(for: line[index])
+            units += character == "\u{0}" ? 1 : character.utf16.count
+        }
+        return units
+    }
+
+    private static func blinks(_ style: CursorStyle) -> Bool {
+        switch style {
+        case .blinkBlock, .blinkUnderline, .blinkBar: true
+        default: false
+        }
     }
 
     private func chunk(_ rows: [RenderedLine], start: Int, hangs: Bool, keeping kept: inout [Int: CachedChunk]) -> TextChunk {
@@ -347,7 +404,7 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     // history rows only change through a resize, a buffer switch, a reset or a cleared scrollback; the last three replace every history line
-    private func collectLines() -> [RenderedLine] {
+    private func collectLines(keepingThrough cursorRow: Int? = nil) -> [RenderedLine] {
         let buffer = terminal.buffer
         let trimmed = buffer.totalLinesTrimmed
         let settled = trimmed + buffer.yDisp
@@ -393,7 +450,7 @@ final class BlockEmulator: TerminalDelegate {
         }
         cacheSettled = settled
         carried = [:]
-        while let last = lines.last, last.text.characters.isEmpty, !last.wrapped {
+        while let last = lines.last, last.text.characters.isEmpty, !last.wrapped, last.row > cursorRow ?? Int.min {
             lines.removeLast()
         }
         return lines
@@ -549,8 +606,8 @@ final class BlockEmulator: TerminalDelegate {
         images.append(InlineImage(image: image, width: width, height: height, anchor: row))
     }
 
-    func showCursor(source: Terminal) {}
-    func hideCursor(source: Terminal) {}
+    func showCursor(source: Terminal) { cursorHidden = false }
+    func hideCursor(source: Terminal) { cursorHidden = true }
     func setTerminalTitle(source: Terminal, title: String) { onTitle(title) }
     func setTerminalIconTitle(source: Terminal, title: String) {}
     func sizeChanged(source: Terminal) {}
@@ -565,7 +622,7 @@ final class BlockEmulator: TerminalDelegate {
     func selectionChanged(source: Terminal) {}
     func isProcessTrusted(source: Terminal) -> Bool { true }
     func mouseModeChanged(source: Terminal) {}
-    func cursorStyleChanged(source: Terminal, newStyle: CursorStyle) {}
+    func cursorStyleChanged(source: Terminal, newStyle: CursorStyle) { cursorStyle = newStyle }
 }
 
 enum TerminalPalette {
@@ -653,5 +710,15 @@ enum TerminalPalette {
 
     private static func rgb(_ red: UInt8, _ green: UInt8, _ blue: UInt8) -> NSColor {
         NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
+    }
+}
+
+extension OutputCursor.Shape {
+    init(_ style: CursorStyle) {
+        switch style {
+        case .blinkBar, .steadyBar: self = .bar
+        case .blinkUnderline, .steadyUnderline: self = .underline
+        default: self = .block
+        }
     }
 }

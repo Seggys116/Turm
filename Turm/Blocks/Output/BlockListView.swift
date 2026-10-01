@@ -181,7 +181,9 @@ struct BlockView: View {
                             OutputTextView(
                                 text: text,
                                 highlights: session.search.highlights(for: block, segment: index),
-                                piece: pieceRef(index)
+                                piece: pieceRef(index),
+                                cursor: block.cursor,
+                                cursorFocused: session.showsFocusedCursor
                             )
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         case .image(let image):

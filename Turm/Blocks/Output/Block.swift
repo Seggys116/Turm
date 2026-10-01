@@ -16,6 +16,7 @@ final class Block: Identifiable {
     private(set) var notice: String?
     private(set) var output = ""
     private(set) var segments: [OutputSegment] = []
+    private(set) var cursor: OutputCursor?
     private(set) var exitCode: Int32?
     private(set) var duration: Duration?
     private(set) var isRunning = true
@@ -67,6 +68,7 @@ final class Block: Identifiable {
 
     func refreshOutput() {
         segments = emulator.renderSegments()
+        cursor = emulator.cursor
         output = segments.plainText
         revision += 1
     }
@@ -75,6 +77,7 @@ final class Block: Identifiable {
         self.exitCode = exitCode
         self.duration = duration
         isRunning = false
+        emulator.tracksCursor = false
         refreshOutput()
         emulator.releaseRenderCache()
         rawLog = []
