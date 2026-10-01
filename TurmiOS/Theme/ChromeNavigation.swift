@@ -293,7 +293,7 @@ struct ToolbarVerticalEdgeReader<Content: View>: View {
     }
 
     var body: some View {
-        #if compiler(>=6.4)
+        #if canImport(SwiftUI, _version: 8.0.85)
         if #available(iOS 27.1, *) {
             SystemVerticalEdge(content: content)
         } else {
@@ -305,8 +305,8 @@ struct ToolbarVerticalEdgeReader<Content: View>: View {
     }
 }
 
-// the vertical bar API only exists in the iOS 27.1 SDK, which ships with the Swift 6.4 compiler
-#if compiler(>=6.4)
+// the vertical bar API only exists in the iOS 27.1 SDK (SwiftUI 8.0.85); Xcode 27.0 has the same compiler but not the API
+#if canImport(SwiftUI, _version: 8.0.85)
 @available(iOS 27.1, *)
 private struct SystemVerticalEdge<Content: View>: View {
     let content: (HorizontalEdge?) -> Content

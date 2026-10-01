@@ -45,7 +45,7 @@ nonisolated struct ReservedArea: Equatable, Sendable {
 
     static func measure(_ proxy: GeometryProxy) -> ReservedArea {
         let size = proxy.size
-        #if compiler(>=6.4)
+        #if canImport(SwiftUI, _version: 8.0.85)
         guard #available(iOS 27.1, *) else { return ReservedArea(size: size) }
         let bounds = CGRect(origin: .zero, size: size)
         let regions = proxy.reservedRegions(kind: .occlusion) + proxy.reservedRegions(kind: .division)
@@ -61,7 +61,7 @@ nonisolated struct ReservedArea: Equatable, Sendable {
 
     /// The x range of an active fold running top to bottom through the view, if there is one.
     static func verticalFold(in proxy: GeometryProxy) -> ClosedRange<CGFloat>? {
-        #if compiler(>=6.4)
+        #if canImport(SwiftUI, _version: 8.0.85)
         guard #available(iOS 27.1, *) else { return nil }
         let size = proxy.size
         let fold = proxy.reservedRegions(kind: .division)
