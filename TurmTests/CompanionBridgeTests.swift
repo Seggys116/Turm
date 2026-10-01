@@ -96,7 +96,7 @@ private nonisolated func runGit(_ arguments: [String], in repo: URL) async throw
 @Suite(.serialized)
 struct CompanionBridgeTests {
     private func wait(until condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(20)
+        let deadline = ContinuousClock.now + .seconds(60)
         while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(50))

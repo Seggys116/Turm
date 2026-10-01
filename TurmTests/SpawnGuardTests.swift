@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct SpawnGuardTests {
-    private func wait(timeout: Duration = .seconds(20), until condition: () -> Bool) async -> Bool {
+    private func wait(timeout: Duration = .seconds(60), until condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if condition() { return true }

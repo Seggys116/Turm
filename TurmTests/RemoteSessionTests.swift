@@ -11,7 +11,7 @@ private let remoteFishPath = (
 }
 
 @MainActor
-private func waitUntil(timeout: Duration = .seconds(20), _ condition: () -> Bool) async -> Bool {
+private func waitUntil(timeout: Duration = .seconds(60), _ condition: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
         if condition() { return true }

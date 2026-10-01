@@ -47,6 +47,25 @@ jobs:
             -derivedDataPath DerivedData \
             -resultBundlePath "$RUNNER_TEMP/test.xcresult" \
             -only-testing:TurmTests \
+            -skip-testing:TurmTests/OutputChunkTests \
+            -skipPackagePluginValidation \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      # the randomized render test saturates the runner's cores, so it runs alone rather than beside the shell tests
+      - name: Test output rendering
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project Turm.xcodeproj \
+            -scheme Turm \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -resultBundlePath "$RUNNER_TEMP/render.xcresult" \
+            -only-testing:TurmTests/OutputChunkTests \
             -skipPackagePluginValidation \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
@@ -56,7 +75,11 @@ jobs:
 
       - name: Show test failures
         if: failure()
-        run: xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/test.xcresult" | python3 -c 'import json,sys; [print(f["testName"], "|", f["failureText"]) for f in json.load(sys.stdin).get("testFailures", [])]'
+        run: |
+          for bundle in "$RUNNER_TEMP/test.xcresult" "$RUNNER_TEMP/render.xcresult"; do
+            [ -d "$bundle" ] || continue
+            xcrun xcresulttool get test-results summary --path "$bundle" | python3 -c 'import json,sys; [print(f["testName"], "|", f["failureText"]) for f in json.load(sys.stdin).get("testFailures", [])]'
+          done
 
       - name: Save the Swift package checkouts
         if: always() && steps.swiftpm.outputs.cache-hit != 'true' && hashFiles('DerivedData/SourcePackages/**') != ''

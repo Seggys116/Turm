@@ -6,7 +6,7 @@ import Testing
 @Suite(.serialized)
 struct CloseSafetyTests {
     private func wait(until condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(20)
+        let deadline = ContinuousClock.now + .seconds(60)
         while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(50))
