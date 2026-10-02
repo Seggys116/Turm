@@ -14,6 +14,10 @@ struct TurmApp: App {
         .commands {
             PaneCommands()
             UpdateCommands(updater: updater)
+            RemoteMacCommands()
+        }
+        Window("Remote Macs", id: RemoteMacsWindow.id) {
+            RemoteMacsWindow()
         }
     }
 }
@@ -52,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppIconPreference.stored.apply()
         ContextMenuService.shared.install()
         CompanionServer.shared.startIfEnabled()
+        RemoteMacManager.shared.start()
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
             MainActor.assumeIsolated { AppIconPreference.stored.apply() }
         }

@@ -535,6 +535,10 @@ final class CompanionServer {
             peer.send(reply)
         case .rejected(let text):
             failPairing(peer, text: text)
+        case .approval(_, let deviceID, _) where deviceID == macID:
+            failPairing(peer, text: "A Mac cannot pair with itself.")
+        case .finished(let deviceID, _, _, _) where deviceID == macID:
+            failPairing(peer, text: "A Mac cannot pair with itself.")
         case .approval(let code, _, let name):
             peer.timeout?.cancel()
             pairing?.pending = PendingApproval(deviceName: PairedDevices.clean(name), code: code)

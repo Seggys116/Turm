@@ -7,11 +7,15 @@ struct CompanionSettings: View {
     let updater: Updater
     var server = CompanionServer.shared
     var devices = PairedDevices.shared
+    var macs = RemoteMacManager.shared
     @AppStorage(CompanionServer.enabledKey) private var enabled = false
     @AppStorage(CompanionServer.portKey) private var storedPort = Int(Companion.defaultPort)
+    @Environment(\.openWindow) private var openWindow
     @State private var portText = ""
     @State private var addresses: [CompanionAddresses.Entry] = []
     @State private var pairing = false
+    @State private var pairingMac = false
+    @State private var preselected: DiscoveredRemoteMac?
 
     private var portValue: Int? {
         Int(portText).flatMap { (1024...65535).contains($0) ? $0 : nil }
@@ -22,7 +26,8 @@ struct CompanionSettings: View {
             accessSection
             if enabled { addressSection }
             devicesSection
-            Text("Phones talk to this Mac over an encrypted connection that only paired devices can open. A paired phone can run commands in your shells, so only pair devices you control, and revoke any you stop using.")
+            remoteMacsSection
+            Text("Phones and other Macs talk to this Mac over an encrypted connection that only paired devices can open. A paired device can run commands in your shells, so only pair devices you control, and revoke any you stop using.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -33,6 +38,7 @@ struct CompanionSettings: View {
             addresses = CompanionAddresses.local()
         }
         .sheet(isPresented: $pairing) { CompanionPairingSheet() }
+        .sheet(isPresented: $pairingMac) { RemotePairingSheet(preselected: preselected) }
     }
 
     private var accessSection: some View {
@@ -68,27 +74,94 @@ struct CompanionSettings: View {
 
     private var devicesSection: some View {
         SettingsSection("Paired devices") {
-            if devices.devices.isEmpty {
-                SettingsFormRow("None yet", detail: "Pair a phone to control this Mac's shells.") { EmptyView() }
+            let rows = RemotePeers.merge(devices: devices.devices, macs: macs.connections)
+            if rows.isEmpty {
+                SettingsFormRow("None yet", detail: "Pair a phone to control this Mac's shells, or pair with another Mac to control it.") { EmptyView() }
             }
-            ForEach(devices.devices) { device in
-                SettingsFormRow(device.name, detail: detail(of: device)) {
-                    HStack(spacing: 8) {
-                        if server.updateNotices[device.id]?.macIsOutdated == true {
-                            Button("Check for Updates...") { updater.check() }
-                                .buttonStyle(SettingsButtonStyle(prominent: true))
-                                .disabled(!updater.canCheck)
-                        }
-                        Button("Revoke") { devices.revoke(device.id) }
-                            .buttonStyle(SettingsButtonStyle())
-                    }
-                }
-            }
+            ForEach(rows) { row in peerRow(row) }
             SettingsFormRow("Pair a device", detail: enabled ? "Shows a QR code and a code that work for two minutes." : "Turn on remote control first.") {
                 Button("Pair a Device...") { pairing = true }
                     .buttonStyle(SettingsButtonStyle())
                     .disabled(!enabled || server.status == .off)
             }
+        }
+    }
+
+    private var remoteMacsSection: some View {
+        SettingsSection("Control other Macs") {
+            SettingsFormRow("Pair with a Mac", detail: "Control another Mac's shells from this one. This works even when remote control is off here.") {
+                Button("Pair with a Mac...") { pairMac(nil) }
+                    .buttonStyle(SettingsButtonStyle())
+            }
+            SettingsFormRow("Remote Macs", detail: "Open the shells of the Macs you have paired with.") {
+                Button("Open Remote Macs") { openWindow(id: RemoteMacsWindow.id) }
+                    .buttonStyle(SettingsButtonStyle())
+            }
+        }
+    }
+
+    private func pairMac(_ found: DiscoveredRemoteMac?) {
+        preselected = found
+        pairingMac = true
+    }
+
+    @ViewBuilder
+    private func peerRow(_ row: RemotePeers.Row) -> some View {
+        let nearby = macs.discovered.first { $0.macID == row.id }
+        if let device = row.canControlThisMac, row.controlledByThisMac == nil, nearby == nil {
+            SettingsFormRow(row.name, detail: detail(of: device)) { deviceControls(device) }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(row.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.text.color)
+                if let device = row.canControlThisMac {
+                    directionRow("Can control this Mac", detail: detail(of: device)) { deviceControls(device) }
+                } else {
+                    directionRow("Can control this Mac", detail: "Not paired. Choose Pair a Device here, then pair from that Mac.") { EmptyView() }
+                }
+                if let connection = row.controlledByThisMac {
+                    directionRow("This Mac can control it", detail: connection.updateAdvice.map { connection.statusText + "\n" + $0 } ?? connection.statusText) {
+                        Button("Forget") { macs.forget(connection.id) }
+                            .buttonStyle(SettingsButtonStyle())
+                    }
+                } else {
+                    directionRow("This Mac can control it", detail: "Not paired.") {
+                        Button("Pair with It...") { pairMac(nearby) }
+                            .buttonStyle(SettingsButtonStyle())
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func directionRow(_ title: String, detail: String, @ViewBuilder controls: () -> some View) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.text.color)
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondaryText.color)
+            }
+            Spacer(minLength: 16)
+            controls()
+        }
+    }
+
+    private func deviceControls(_ device: CompanionPeerRecord) -> some View {
+        HStack(spacing: 8) {
+            if server.updateNotices[device.id]?.macIsOutdated == true {
+                Button("Check for Updates...") { updater.check() }
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(!updater.canCheck)
+            }
+            Button("Revoke") { devices.revoke(device.id) }
+                .buttonStyle(SettingsButtonStyle())
         }
     }
 
@@ -124,6 +197,7 @@ struct CompanionSettings: View {
 
 private struct CompanionPairingSheet: View {
     var server = CompanionServer.shared
+    @State private var copiedLink: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -146,7 +220,28 @@ private struct CompanionPairingSheet: View {
         .frame(width: 340)
         .background(Theme.inputBackground.color)
         .onAppear { server.beginPairing() }
-        .onDisappear { server.endPairing() }
+        .onDisappear {
+            server.endPairing()
+            clearCopiedLink()
+        }
+        .onChange(of: server.pairing == nil) { _, ended in
+            if ended { clearCopiedLink() }
+        }
+    }
+
+    private func copyLink(_ url: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(url, forType: .string)
+        board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        copiedLink = url
+    }
+
+    private func clearCopiedLink() {
+        guard let url = copiedLink else { return }
+        copiedLink = nil
+        if NSPasteboard.general.string(forType: .string) == url { NSPasteboard.general.clearContents() }
     }
 
     @ViewBuilder
@@ -196,6 +291,16 @@ private struct CompanionPairingSheet: View {
             Text(window.payload.hosts.prefix(2).map { "\($0):\(window.payload.port)" }.joined(separator: "   "))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.secondaryText.color)
+            if let url = window.payload.url?.absoluteString {
+                VStack(spacing: 6) {
+                    Button("Copy Pairing Link") { copyLink(url) }
+                        .buttonStyle(SettingsButtonStyle())
+                    Text("To pair another Mac, paste this link in Pair with a Mac there. The link pairs without approval, so share it only with your own Mac.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondaryText.color)
+                        .multilineTextAlignment(.center)
+                }
+            }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let remaining = max(0, Int(window.payload.expires.timeIntervalSince(context.date).rounded(.up)))
                 Text(window.inUse ? "Pairing..." : String(format: "Expires in %d:%02d", remaining / 60, remaining % 60))

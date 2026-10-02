@@ -25,7 +25,7 @@ Other things it does:
 - A Spotlight-style palette for running commands and jumping between shells.
 - "Open in Turm" in Finder.
 
-The iOS app connects to Turm on your Mac to list its shells and type into them, over the local network or Tailscale. It can also open SSH sessions on its own. Hosts, shortcuts and keys can sync between devices through iCloud.
+The iOS app connects to Turm on your Mac to list its shells and type into them, over the local network or Tailscale. One Mac can also pair with another and control its shells from the Remote Macs window. The iOS app can also open SSH sessions on its own. Hosts, shortcuts and keys can sync between devices through iCloud.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Seggys116/Turm/main/.github/assets/screenshots/ios.png" alt="The iPhone app: the sidebar with sessions, a paired Mac and SSH hosts; a build running in a Mac shell; and an SSH session" width="900" />
