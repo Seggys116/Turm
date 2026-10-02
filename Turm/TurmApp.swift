@@ -7,7 +7,7 @@ struct TurmApp: App {
     @State private var updater = Updater()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: WindowTransfer.windowID) {
             ContentView(updater: updater)
         }
         .windowStyle(.hiddenTitleBar)
@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, andSelector: #selector(handleURLEvent(_:reply:)),
             forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL)
         )
+        #if DEBUG
+        DemoMode.start()
+        #endif
     }
 
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
@@ -35,6 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if DemoMode.isActive {
+            AppearancePreference.stored.apply()
+            AppIconPreference.stored.apply()
+            return
+        }
+        #endif
         // keychain calls can block for a long time, so the one-off migration never runs on the main thread
         Task.detached(priority: .utility) { SecretsMigration.runIfNeeded() }
         CloudSync.shared.start()

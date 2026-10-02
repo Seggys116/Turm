@@ -29,12 +29,58 @@ nonisolated struct PaneLayout: Equatable, Sendable {
     }
 
     static let dividerThickness: CGFloat = 1
+    static let rootBand: CGFloat = 20
+    static let swapZone: ClosedRange<CGFloat> = 0.3...0.7
 
     private(set) var panes: [Pane] = []
     private(set) var dividers: [Divider] = []
+    let bounds: CGRect
 
     init(node: PaneNode, size: CGSize) {
-        place(node, in: CGRect(origin: .zero, size: size))
+        bounds = CGRect(origin: .zero, size: size)
+        place(node, in: bounds)
+    }
+
+    func dropTarget(at point: CGPoint, allowsSwap: Bool) -> PaneDrop? {
+        guard bounds.contains(point) else { return nil }
+        if panes.count > 1 {
+            let distances: [(PaneEdge, CGFloat)] = [
+                (.left, point.x - bounds.minX), (.right, bounds.maxX - point.x),
+                (.top, point.y - bounds.minY), (.bottom, bounds.maxY - point.y),
+            ]
+            if let (edge, distance) = distances.min(by: { $0.1 < $1.1 }), distance < Self.rootBand {
+                return PaneDrop(anchor: .root, edge: edge)
+            }
+        }
+        guard let pane = panes.first(where: { $0.frame.insetBy(dx: -Self.dividerThickness, dy: -Self.dividerThickness).contains(point) })
+        else { return nil }
+        let frame = pane.frame
+        let x = (point.x - frame.minX) / max(frame.width, 1)
+        let y = (point.y - frame.minY) / max(frame.height, 1)
+        if allowsSwap, Self.swapZone.contains(x), Self.swapZone.contains(y) {
+            return PaneDrop(anchor: .pane(pane.id), edge: nil)
+        }
+        let edges: [(PaneEdge, CGFloat)] = [(.left, x), (.right, 1 - x), (.top, y), (.bottom, 1 - y)]
+        let nearest = edges.min { $0.1 < $1.1 }!.0
+        return PaneDrop(anchor: .pane(pane.id), edge: nearest)
+    }
+
+    func previewFrame(for drop: PaneDrop) -> CGRect? {
+        let target: CGRect
+        switch drop.anchor {
+        case .root:
+            target = bounds
+        case .pane(let id):
+            guard let pane = panes.first(where: { $0.id == id }) else { return nil }
+            target = pane.frame
+        }
+        guard let edge = drop.edge else { return target }
+        switch edge {
+        case .left: return CGRect(x: target.minX, y: target.minY, width: target.width / 2, height: target.height)
+        case .right: return CGRect(x: target.midX, y: target.minY, width: target.width / 2, height: target.height)
+        case .top: return CGRect(x: target.minX, y: target.minY, width: target.width, height: target.height / 2)
+        case .bottom: return CGRect(x: target.minX, y: target.midY, width: target.width, height: target.height / 2)
+        }
     }
 
     private mutating func place(_ node: PaneNode, in rect: CGRect) {
@@ -57,4 +103,9 @@ nonisolated struct PaneLayout: Equatable, Sendable {
             dividers.append(divider)
         }
     }
+}
+
+nonisolated struct PaneDrop: Equatable, Sendable {
+    let anchor: DropAnchor
+    let edge: PaneEdge?
 }

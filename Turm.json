@@ -3,9 +3,14 @@
     {
       "id": "run",
       "title": "Run",
-      "command": "xcodebuild -project Turm.xcodeproj -scheme Turm -configuration {xcode-configuration} -destination 'platform=macOS' -derivedDataPath DerivedData build && open DerivedData/Build/Products/{xcode-configuration}/Turm.app",
+      "command": "Scripts/run.sh -project Turm.xcodeproj -scheme {xcode-scheme} -configuration {xcode-configuration} {xcode-destination} -derivedDataPath DerivedData",
       "icon": "play.fill",
       "category": "run"
+    },
+    {
+      "id": "xcode.build",
+      "title": "Build",
+      "command": "xcodebuild -project Turm.xcodeproj -scheme {xcode-scheme} -configuration {xcode-configuration} {xcode-destination} -derivedDataPath DerivedData build"
     },
     {
       "id": "xcode.test",

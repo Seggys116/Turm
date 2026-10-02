@@ -49,6 +49,11 @@ struct PaneCommands: Commands {
                 .keyboardShortcut("d")
             Button("Split Down") { workspace?.split(.vertical) }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
+            Button("Even Out Panes") { workspace?.equalizePanes() }
+                .keyboardShortcut("=", modifiers: [.command, .control])
+                .disabled((workspace?.layout.leaves.count ?? 0) < 2)
+            Button("Move Pane to New Shell") { workspace.map { $0.breakOut($0.focusedPane) } }
+                .disabled(!(workspace.map { $0.canBreakOut($0.focusedPane) } ?? false))
             Divider()
             Button("Next Pane") { workspace?.focusNext() }
                 .keyboardShortcut("]")

@@ -3,7 +3,11 @@ import SwiftUI
 
 @Observable
 final class Updater {
+    #if DEBUG
+    private let controller = SPUStandardUpdaterController(startingUpdater: !DemoMode.isActive, updaterDelegate: nil, userDriverDelegate: nil)
+    #else
     private let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    #endif
     private(set) var canCheck = false
     var automaticallyChecks: Bool {
         didSet { controller.updater.automaticallyChecksForUpdates = automaticallyChecks }

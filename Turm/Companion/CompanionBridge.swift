@@ -264,7 +264,11 @@ final class CompanionBridge {
         for workspace in coordinator.registeredWorkspaces {
             for (pane, session) in workspace.sessionEntries where session.isOpen {
                 seen.insert(session.id)
-                guard entries[session.id] == nil else { continue }
+                if let existing = entries[session.id] {
+                    // a shell dragged into another window keeps its id but changes workspace
+                    if existing.workspace !== workspace { entries[session.id] = Entry(session: session, workspace: workspace, pane: pane) }
+                    continue
+                }
                 entries[session.id] = Entry(session: session, workspace: workspace, pane: pane)
                 order.append(session.id)
                 added.append(session.id)
@@ -274,6 +278,7 @@ final class CompanionBridge {
                 }
             }
         }
+        for session in WindowTransfer.shared.pendingSessions { seen.insert(session.id) }
         for id in order where !seen.contains(id) { remove(id) }
         if primed {
             for id in added { announce(id) }

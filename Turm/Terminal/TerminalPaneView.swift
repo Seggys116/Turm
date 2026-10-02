@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct TerminalPaneView: View {
     let session: TerminalSession
     let isFocused: Bool
-    @State private var input = InputModel()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(StatusBarPreferences.key) private var barPreferences = StatusBarPreferences()
 
@@ -35,7 +34,7 @@ struct TerminalPaneView: View {
                             if let progress = session.progress {
                                 ProgressStrip(report: progress)
                             }
-                            InputBar(session: session, isFocused: isFocused && !isWatchingAction, input: input)
+                            InputBar(session: session, isFocused: isFocused && !isWatchingAction, input: session.input)
                         }
                     }
                 }
@@ -102,9 +101,9 @@ struct TerminalPaneView: View {
                     session.pasteFiles(urls)
                 } else if let channel = session.remoteChannel {
                     let paths = await channel.upload(urls)
-                    input.attach(urls.filter { paths[$0] != nil }, paths: paths)
+                    session.input.attach(urls.filter { paths[$0] != nil }, paths: paths)
                 } else {
-                    input.attach(urls)
+                    session.input.attach(urls)
                 }
             }
             return true

@@ -132,6 +132,14 @@ final class ContextMenuService: NSObject {
         }
     }
 
+    func workspaceWindow(at point: NSPoint, excluding current: Workspace) -> (window: NSWindow, workspace: Workspace)? {
+        for window in NSApp.orderedWindows where window.isVisible && window.frame.contains(point) {
+            guard let workspace = workspaces.object(forKey: window) else { continue }
+            return workspace === current ? nil : (window, workspace)
+        }
+        return nil
+    }
+
     private var target: (window: NSWindow, workspace: Workspace)? {
         let ordered = [lastKeyWindow].compactMap(\.self) + NSApp.orderedWindows
         for window in ordered where window.isVisible {

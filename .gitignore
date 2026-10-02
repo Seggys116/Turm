@@ -6,3 +6,4 @@ Packages/*/.build/
 .swiftpm/
 Icons/node_modules/
 Icons/inputs.xcfilelist
+*.profraw

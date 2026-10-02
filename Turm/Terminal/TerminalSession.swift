@@ -54,6 +54,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     let search = BlockSearch()
     let selection = BlockSelection()
+    let input = InputModel()
 
     @ObservationIgnored var onFocus: () -> Void = {}
     @ObservationIgnored var onExit: () -> Void = {}
