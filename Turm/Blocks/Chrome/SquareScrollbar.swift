@@ -27,8 +27,8 @@ enum ScrollbarMetrics {
 }
 
 extension View {
-    func squareScrollbar(position: Binding<ScrollPosition>? = nil) -> some View {
-        modifier(SquareScrollbar(external: position))
+    func squareScrollbar(position: Binding<ScrollPosition>? = nil, onDrag: ((Bool) -> Void)? = nil) -> some View {
+        modifier(SquareScrollbar(external: position, onDrag: onDrag))
     }
 }
 
@@ -58,6 +58,7 @@ private final class ScrollbarState {
 
 private struct SquareScrollbar: ViewModifier {
     let external: Binding<ScrollPosition>?
+    let onDrag: ((Bool) -> Void)?
     @State private var own = ScrollPosition()
     @State private var state = ScrollbarState()
 
@@ -78,7 +79,7 @@ private struct SquareScrollbar: ViewModifier {
                 if old.offset != new.offset { state.reveal() }
             }
             .overlay(alignment: .trailing) {
-                ScrollbarKnob(state: state, position: position)
+                ScrollbarKnob(state: state, position: position, onDrag: onDrag)
             }
     }
 }
@@ -86,6 +87,7 @@ private struct SquareScrollbar: ViewModifier {
 private struct ScrollbarKnob: View {
     let state: ScrollbarState
     let position: Binding<ScrollPosition>
+    let onDrag: ((Bool) -> Void)?
 
     private var alwaysShown: Bool { NSScroller.preferredScrollerStyle == .legacy }
 
@@ -120,6 +122,7 @@ private struct ScrollbarKnob: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if state.dragOrigin == nil {
+                    onDrag?(true)
                     let pressed = value.startLocation.y - ScrollbarMetrics.inset
                     state.dragOrigin = (top...(top + knob)).contains(pressed) ? top : pressed - knob / 2
                 }
@@ -131,6 +134,7 @@ private struct ScrollbarKnob: View {
             }
             .onEnded { _ in
                 state.dragOrigin = nil
+                onDrag?(false)
                 state.reveal()
             }
     }

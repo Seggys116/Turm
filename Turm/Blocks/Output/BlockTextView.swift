@@ -314,6 +314,7 @@ final class BlockTextNSView: NSTextView {
     }
 
     func fittingSize(width: CGFloat?) -> CGSize {
+        let width = width.flatMap { $0.isFinite ? $0 : nil }
         let proposed = width.map { max($0, 1) } ?? 100_000
         if let cachedFit, cachedFit.width == proposed { return cachedFit.size }
         if width != nil, let height = chunk?.fixedHeight(width: proposed) {
@@ -340,6 +341,15 @@ final class BlockTextNSView: NSTextView {
 
     override func scrollWheel(with event: NSEvent) {
         nextResponder?.scrollWheel(with: event)
+    }
+
+    // AppKit scrolls a text view's enclosing scroll view while it lays out; here that is the block list, so it must never move
+    override func scrollRangeToVisible(_ range: NSRange) {}
+
+    override func scroll(_ point: NSPoint) {}
+
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        false
     }
 
     override func viewDidMoveToWindow() {

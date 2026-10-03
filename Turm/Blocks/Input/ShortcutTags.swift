@@ -107,6 +107,7 @@ final class ShortcutTagLayer {
     @discardableResult
     func update(
         in view: NSTextView,
+        avoiding obstacle: CGRect,
         shortcuts: [Shortcut],
         quote: (String) -> String,
         visible: Bool,
@@ -142,6 +143,13 @@ final class ShortcutTagLayer {
             return false
         }
         let visibleRect = content.convert(scroll.contentView.bounds, from: scroll.contentView)
+        let editor = content.convert(scroll.bounds, from: scroll)
+        // the obstacle is measured from the editor's top-left corner, y growing downward
+        let blocked = NSRect(
+            x: editor.minX + obstacle.minX,
+            y: content.isFlipped ? editor.minY + obstacle.minY : editor.maxY - obstacle.maxY,
+            width: obstacle.width, height: obstacle.height
+        )
         let origin = view.textContainerOrigin
         var placed: [NSRect] = []
         var used = 0
@@ -164,6 +172,7 @@ final class ShortcutTagLayer {
             let size = host.fittingSize
             var x = min(max(anchor.midX - size.width / 2, 4), content.bounds.width - size.width - 4)
             let y = content.isFlipped ? anchor.minY - size.height - 3 : anchor.maxY + 3
+            if !obstacle.isEmpty, NSRect(x: x, y: y, width: size.width, height: size.height).intersects(blocked) { x = blocked.maxX + 6 }
             if let last = placed.last, abs(last.minY - y) < 1, x < last.maxX + 4 { x = last.maxX + 4 }
             let frame = NSRect(x: x, y: y, width: size.width, height: size.height)
             placed.append(frame)

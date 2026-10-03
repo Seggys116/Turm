@@ -13,7 +13,8 @@ struct InputBar: View {
     @State private var remotePathMenuOpen = false
     @State private var hostEditorOpen = false
     @State private var hostShortcutOpen = false
-    @State private var showsTags = false
+    @State private var chipsFrame = CGRect.zero
+    @State private var editorFrame = CGRect.zero
     @AppStorage(ShortcutSuggestionTracker.enabledKey) private var suggestionsEnabled = false
     private let tracker = ShortcutSuggestionTracker.shared
 
@@ -67,14 +68,13 @@ struct InputBar: View {
                     },
                     isRemote: session.isRemote,
                     remoteChannel: session.remoteChannel,
-                    onTags: { showsTags = $0 },
+                    tagObstacle: chipsFrame.offsetBy(dx: -editorFrame.minX, dy: -editorFrame.minY),
                     history: session.history
                 )
-                .padding(.top, showsTags ? 18 : 0)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { editorFrame = $0 }
             }
         }
         .animation(.easeOut(duration: 0.14), value: completion.isOpen)
-        .animation(.easeOut(duration: 0.2), value: showsTags)
         .animation(.easeOut(duration: 0.14), value: session.connection?.showsBanner)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -101,11 +101,14 @@ struct InputBar: View {
 
     private var chips: some View {
         HStack(spacing: 6) {
-            if let remote = session.remote {
-                remoteChips(remote)
-            } else {
-                localChips
+            HStack(spacing: 6) {
+                if let remote = session.remote {
+                    remoteChips(remote)
+                } else {
+                    localChips
+                }
             }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { chipsFrame = $0 }
             Spacer(minLength: 0)
         }
     }

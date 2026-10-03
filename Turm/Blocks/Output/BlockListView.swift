@@ -18,6 +18,8 @@ final class SelectionDriver {
     var contentOrigin = CGPoint.zero
     var viewportY: CGFloat = 0
     var task: Task<Void, Never>?
+    var userScrolling = false
+    var knobDragging = false
 }
 
 struct BlockListView: View {
@@ -25,6 +27,8 @@ struct BlockListView: View {
     @State private var position = ScrollPosition()
     @State private var driver = SelectionDriver()
     @State private var hoveredLink: URL?
+    @State private var follow = BottomFollow()
+    @State private var selecting = false
 
     var body: some View {
         ScrollViewReader { reader in
@@ -34,7 +38,6 @@ struct BlockListView: View {
                         BlockView(block: block, session: session)
                             .id(block.id)
                     }
-                    Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .coordinateSpace(name: BlockSelection.space)
                 .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.listSpace)).origin } action: {
@@ -53,17 +56,13 @@ struct BlockListView: View {
             .help(hoveredLink?.absoluteString ?? "")
             .background(SelectionResponder(selection: session.selection))
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { session.selection.listFrame = $0 }
-            .squareScrollbar(position: $position)
+            .squareScrollbar(position: $position) { driver.knobDragging = $0 }
             .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
                 ScrollMetrics(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
-            } action: { old, metrics in
+            } action: { _, metrics in
                 driver.metrics = metrics
-                if metrics.viewport < old.viewport, Self.isPinned(old) { scrollToBottom(reader) }
             }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: session.blocks.count) { scrollToBottom(reader) }
-            .onChange(of: session.current?.revision) { followOutput(reader) }
-            .onChange(of: session.current?.segments.count) { followOutput(reader) }
+            .followsBottom($follow, position: $position, driver: driver, holding: selecting || searching)
             .onChange(of: session.search.scrollRequest) { _, request in
                 guard let request else { return }
                 reader.scrollTo(request.blockID, anchor: UnitPoint(x: 0, y: request.position))
@@ -78,7 +77,6 @@ struct BlockListView: View {
         }
     }
 
-    private static let bottom = "turm.bottom"
     private static let listSpace = "turm.list"
 
     private var selectionGesture: some Gesture {
@@ -97,7 +95,10 @@ struct BlockListView: View {
                 guard driver.active else { return }
                 driver.pointerX = value.location.x
                 driver.viewportY = value.location.y
-                if !driver.moved, hypot(value.translation.width, value.translation.height) > 3 { driver.moved = true }
+                if !driver.moved, hypot(value.translation.width, value.translation.height) > 3 {
+                    driver.moved = true
+                    selecting = true
+                }
                 if driver.moved {
                     session.selection.drag(to: contentPoint(value.location))
                     startAutoscroll()
@@ -111,6 +112,7 @@ struct BlockListView: View {
                 }
                 if driver.active { session.selection.hasSelection ? session.selection.claimFocus() : session.selection.releaseFocus() }
                 driver.active = false
+                selecting = false
             }
     }
 
@@ -139,18 +141,8 @@ struct BlockListView: View {
         }
     }
 
-    private static func isPinned(_ metrics: ScrollMetrics) -> Bool {
-        metrics.offset >= metrics.content - metrics.viewport - TerminalMetrics.lineHeight * 2
-    }
-
-    private func followOutput(_ reader: ScrollViewProxy) {
-        guard Self.isPinned(driver.metrics) else { return }
-        scrollToBottom(reader)
-    }
-
-    private func scrollToBottom(_ reader: ScrollViewProxy) {
-        guard !driver.active, !(session.search.isPresented && !session.search.query.isEmpty) else { return }
-        reader.scrollTo(Self.bottom, anchor: .bottom)
+    private var searching: Bool {
+        session.search.isPresented && !session.search.query.isEmpty
     }
 }
 

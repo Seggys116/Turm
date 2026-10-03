@@ -32,11 +32,12 @@ private struct RemoteSessionView: View {
     @State private var driver = SelectionDriver()
     @State private var position = ScrollPosition()
     @State private var hoveredLink: URL?
+    @State private var follow = BottomFollow()
+    @State private var selecting = false
     @State private var command = ""
     @FocusState private var commandFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    private static let bottom = "turm.remote.bottom"
     private static let listSpace = "turm.remote.list"
     private static let inset: CGFloat = 32
 
@@ -122,52 +123,37 @@ private struct RemoteSessionView: View {
     }
 
     private var blockList: some View {
-        ScrollViewReader { reader in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(session.blocks) { block in
-                        RemoteBlockView(block: block, session: session, selection: selection)
-                            .id(block.id)
-                    }
-                    Color.clear.frame(height: 1).id(Self.bottom)
-                }
-                .coordinateSpace(name: BlockSelection.space)
-                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.listSpace)).origin } action: {
-                    driver.contentOrigin = $0
-                }
-                .onContinuousHover(coordinateSpace: .named(BlockSelection.space)) { phase in
-                    var link: URL?
-                    if case .active(let point) = phase { link = selection.link(at: point) }
-                    if link != hoveredLink { hoveredLink = link }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(session.blocks) { block in
+                    RemoteBlockView(block: block, session: session, selection: selection)
+                        .id(block.id)
                 }
             }
-            .coordinateSpace(name: Self.listSpace)
-            .contentShape(Rectangle())
-            .gesture(selectionGesture)
-            .pointerStyle(hoveredLink != nil ? PointerStyle.link : nil)
-            .help(hoveredLink?.absoluteString ?? "")
-            .background(SelectionResponder(selection: selection))
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { selection.listFrame = $0 }
-            .squareScrollbar(position: $position)
-            .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
-                ScrollMetrics(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
-            } action: { old, metrics in
-                driver.metrics = metrics
-                if metrics.viewport < old.viewport, isPinned(old) { reader.scrollTo(Self.bottom, anchor: .bottom) }
+            .coordinateSpace(name: BlockSelection.space)
+            .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named(Self.listSpace)).origin } action: {
+                driver.contentOrigin = $0
             }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: session.blocks.count) { reader.scrollTo(Self.bottom, anchor: .bottom) }
-            .onChange(of: session.runningBlock?.revision) { followOutput(reader) }
+            .onContinuousHover(coordinateSpace: .named(BlockSelection.space)) { phase in
+                var link: URL?
+                if case .active(let point) = phase { link = selection.link(at: point) }
+                if link != hoveredLink { hoveredLink = link }
+            }
         }
-    }
-
-    private func isPinned(_ metrics: ScrollMetrics) -> Bool {
-        metrics.offset >= metrics.content - metrics.viewport - TerminalMetrics.lineHeight * 2
-    }
-
-    private func followOutput(_ reader: ScrollViewProxy) {
-        guard isPinned(driver.metrics), !driver.active else { return }
-        reader.scrollTo(Self.bottom, anchor: .bottom)
+        .coordinateSpace(name: Self.listSpace)
+        .contentShape(Rectangle())
+        .gesture(selectionGesture)
+        .pointerStyle(hoveredLink != nil ? PointerStyle.link : nil)
+        .help(hoveredLink?.absoluteString ?? "")
+        .background(SelectionResponder(selection: selection))
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { selection.listFrame = $0 }
+        .squareScrollbar(position: $position) { driver.knobDragging = $0 }
+        .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
+            ScrollMetrics(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
+        } action: { _, metrics in
+            driver.metrics = metrics
+        }
+        .followsBottom($follow, position: $position, driver: driver, holding: selecting)
     }
 
     private var selectionGesture: some Gesture {
@@ -186,7 +172,10 @@ private struct RemoteSessionView: View {
                 guard driver.active else { return }
                 driver.pointerX = value.location.x
                 driver.viewportY = value.location.y
-                if !driver.moved, hypot(value.translation.width, value.translation.height) > 3 { driver.moved = true }
+                if !driver.moved, hypot(value.translation.width, value.translation.height) > 3 {
+                    driver.moved = true
+                    selecting = true
+                }
                 if driver.moved {
                     selection.drag(to: contentPoint(value.location))
                     startAutoscroll()
@@ -200,6 +189,7 @@ private struct RemoteSessionView: View {
                 }
                 if driver.active { selection.hasSelection ? selection.claimFocus() : selection.releaseFocus() }
                 driver.active = false
+                selecting = false
             }
     }
 

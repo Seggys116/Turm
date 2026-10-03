@@ -2,14 +2,14 @@ import SwiftUI
 import TurmCore
 import UIKit
 
-private let edgeSlack: CGFloat = 48
 private let inset: CGFloat = 16
 
 struct MacBlockList<Session: BlockSession>: View {
     let session: Session
     let fontSize: Double
     @State private var position = ScrollPosition(edge: .bottom)
-    @State private var following = true
+    @State private var follow = BottomFollow()
+    @State private var userScrolling = false
     @State private var area = CGSize.zero
 
     var body: some View {
@@ -21,21 +21,24 @@ struct MacBlockList<Session: BlockSession>: View {
             }
         }
         .scrollPosition($position)
-        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(follow.following ? .bottom : .top, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
-        .onScrollPhaseChange { _, phase, context in
-            guard phase == .idle else { return }
-            following = context.geometry.visibleRect.maxY >= context.geometry.contentSize.height - edgeSlack
+        .onScrollPhaseChange { old, phase, context in
+            let user = Self.isUser(phase)
+            guard user || Self.isUser(old) else { return }
+            userScrolling = user
+            apply { $0.userScrolled(to: Self.extent(context.geometry)) }
         }
-        .onChange(of: session.blocks.count) {
-            following = true
-            position.scrollTo(edge: .bottom)
-        }
-        .onChange(of: session.runningBlock?.revision) {
-            if following { position.scrollTo(edge: .bottom) }
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in
-            if following { position.scrollTo(edge: .bottom) }
+        .onScrollGeometryChange(for: ScrollExtent.self, of: Self.extent) { old, new in
+            if userScrolling {
+                apply { $0.userScrolled(to: new) }
+            } else {
+                var pin = false
+                apply { pin = $0.layoutChanged(from: old, to: new) }
+                if pin { position.scrollTo(edge: .bottom) }
+            }
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             area = CGSize(width: size.width - inset * 2, height: size.height)
@@ -45,27 +48,50 @@ struct MacBlockList<Session: BlockSession>: View {
             session.setViewport(area, fontSize: fontSize)
         }
         .overlay(alignment: .bottomTrailing) {
-            if !following {
+            if !follow.following {
                 Button {
                     Haptics.tap()
-                    following = true
-                    withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
+                    jump()
                 } label: {
-                    Image(systemName: "arrow.down")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(Chrome.text)
-                        .frame(width: 40, height: 40)
-                        .background(Chrome.topBar, in: Circle())
-                        .overlay(Circle().stroke(Chrome.chipStroke, lineWidth: 1))
-                        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down")
+                        if follow.unseen { Text("New Content") }
+                    }
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Chrome.text)
+                    .padding(.horizontal, follow.unseen ? 14 : 0)
+                    .frame(minWidth: 40, minHeight: 40)
+                    .background(Chrome.topBar, in: Capsule())
+                    .overlay(Capsule().stroke(Chrome.chipStroke, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
                 }
                 .buttonStyle(ChromePressStyle())
-                .accessibilityLabel("Jump to Bottom")
+                .accessibilityLabel(follow.unseen ? "New Content, Jump to Bottom" : "Jump to Bottom")
                 .padding(12)
                 .transition(.scale.combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: following)
+        .animation(.easeOut(duration: 0.15), value: follow)
+    }
+
+    // the visible rect already accounts for the keyboard, the input bar inset and bottom alignment
+    private static func extent(_ geometry: ScrollGeometry) -> ScrollExtent {
+        ScrollExtent(top: geometry.visibleRect.minY, height: geometry.visibleRect.height, content: geometry.contentSize.height)
+    }
+
+    private static func isUser(_ phase: ScrollPhase) -> Bool {
+        phase == .tracking || phase == .interacting || phase == .decelerating
+    }
+
+    private func apply(_ change: (inout BottomFollow) -> Void) {
+        var next = follow
+        change(&next)
+        if next != follow { follow = next }
+    }
+
+    private func jump() {
+        follow.jump()
+        withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
     }
 }
 
