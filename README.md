@@ -33,9 +33,9 @@ The iOS app connects to Turm on your Mac to list its shells and type into them, 
 
 ## Install
 
-Download the disk image from the [latest release](https://github.com/Seggys116/Turm/releases/latest). It needs macOS 26 on Apple silicon, and updates itself after that. Remote Access for the iOS app, iCloud sync and per-pane history are on `main` and ship in 1.4.0.
+Download the disk image from the [latest release](https://github.com/Seggys116/Turm/releases/latest). It needs macOS 26 on Apple silicon, and updates itself after that.
 
-The iOS app is coming to the App Store with 1.4.0. Until then you can build it from source. It needs iOS 18.
+The iOS app is coming to the App Store, and that release is in progress. This README will be updated with the link once it is released. Until then both the Mac and iOS apps can be built and installed locally from source, see [Building](#building). The iOS app needs iOS 18.
 
 ## Building
 
