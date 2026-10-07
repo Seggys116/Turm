@@ -88,6 +88,7 @@ final class ChromeOverlays {
         let id = UUID()
         var items: [ChromeMenuItem]
         var anchor: CGRect
+        var column: CGRect?
     }
 
     struct DialogState {
@@ -102,10 +103,11 @@ final class ChromeOverlays {
 
     private static var spring: Animation { .spring(duration: 0.3, bounce: 0.12) }
 
-    func present(menu items: [ChromeMenuItem], from view: UIView?) {
+    func present(menu items: [ChromeMenuItem], from view: UIView?, within column: UIView? = nil) {
         guard let view, view.window != nil, let host = hostBox.view else { return }
         let anchor = view.convert(view.bounds, to: host)
-        withAnimation(Self.spring) { menu = MenuState(items: items, anchor: anchor) }
+        let bounds = column.flatMap { $0.window == nil ? nil : $0.convert($0.bounds, to: host) }
+        withAnimation(Self.spring) { menu = MenuState(items: items, anchor: anchor, column: bounds) }
     }
 
     func dismissMenu() {
@@ -133,6 +135,7 @@ final class ChromeOverlays {
 
 extension EnvironmentValues {
     @Entry var chromeOverlays: ChromeOverlays?
+    @Entry var chromeMenuColumn: ViewBox?
 }
 
 extension View {
@@ -188,13 +191,15 @@ private struct MenuLayer: View {
             Color.clear
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
-                .onTapGesture(perform: dismiss)
+                .gesture(DragGesture(minimumDistance: 0).onChanged { _ in dismiss() })
+                .accessibilityAction(.default, dismiss)
                 .accessibilityLabel("Dismiss menu")
                 .accessibilityAddTraits(.isButton)
             MenuPlacement(
                 anchor: state.anchor,
                 free: area.freeRect(containing: CGPoint(x: state.anchor.midX, y: state.anchor.midY))
                     ?? CGRect(origin: .zero, size: area.size),
+                column: state.column,
                 width: width
             ) {
                 ChromeMenuPanel(items: state.items, dismiss: dismiss)
@@ -207,6 +212,7 @@ private struct MenuLayer: View {
 private struct MenuPlacement: Layout {
     let anchor: CGRect
     let free: CGRect
+    let column: CGRect?
     let width: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -225,18 +231,24 @@ private struct MenuPlacement: Layout {
         let above = anchor.minY - gap - limit.minY
         let goUp = below < size.height && above > below
         let height = min(size.height, limit.height)
-        let wide = anchor.width > limit.width * 0.6
+        // open toward the middle of the button's own column, so a menu never spills over a neighbouring column
+        var span = limit
+        if let column {
+            let inside = column.insetBy(dx: margin, dy: 0).intersection(limit)
+            if !inside.isNull, inside.width >= size.width { span = inside }
+        }
+        let wide = anchor.width > span.width * 0.6
         let x: CGFloat
         if wide {
             x = anchor.midX - size.width / 2
-        } else if anchor.midX > free.midX {
+        } else if anchor.midX > span.midX {
             x = anchor.maxX - size.width
         } else {
             x = anchor.minX
         }
         let y = goUp ? anchor.minY - gap - height : anchor.maxY + gap
         let origin = CGPoint(
-            x: min(max(x, limit.minX), max(limit.minX, limit.maxX - size.width)),
+            x: min(max(x, span.minX), max(span.minX, span.maxX - size.width)),
             y: min(max(y, limit.minY), max(limit.minY, limit.maxY - height))
         )
         panel.place(
@@ -305,7 +317,7 @@ private struct ChromeMenuRow: View {
                     } else if item.isOn {
                         Image(systemName: "checkmark")
                     } else {
-                        Color.clear
+                        Color.clear.frame(height: 1)
                     }
                 }
                 .font(.system(size: 14, weight: .medium))
@@ -341,6 +353,7 @@ private struct MenuRowStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: Chrome.Radius.chip)
                     .fill(configuration.isPressed ? Chrome.accent.opacity(0.22) : Color.clear)
             )
+            .chromeHover()
     }
 }
 
@@ -464,6 +477,7 @@ struct ChromeMenuTrigger<Label: View>: View {
     let items: () -> [ChromeMenuItem]
     let label: Label
     @Environment(\.chromeOverlays) private var overlays
+    @Environment(\.chromeMenuColumn) private var column
     @State private var box = ViewBox()
 
     init(items: @escaping () -> [ChromeMenuItem], @ViewBuilder label: () -> Label) {
@@ -474,7 +488,7 @@ struct ChromeMenuTrigger<Label: View>: View {
     var body: some View {
         Button {
             Haptics.tap()
-            overlays?.present(menu: items(), from: box.view)
+            overlays?.present(menu: items(), from: box.view, within: column?.view)
         } label: {
             label
         }
@@ -505,6 +519,7 @@ private struct ChromeContextMenu: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(ViewProbe(box: box))
+            .background(SecondaryClickProbe { presentFromPointer() })
             .onLongPressGesture(minimumDuration: 0.4, maximumDistance: 12) { present() }
             .accessibilityAction(named: "More actions") { present() }
     }
@@ -512,5 +527,92 @@ private struct ChromeContextMenu: ViewModifier {
     private func present() {
         Haptics.press()
         overlays?.present(menu: items(), from: box.view)
+    }
+
+    private func presentFromPointer() {
+        guard let overlays else { return }
+        if overlays.menu != nil {
+            overlays.dismissMenu()
+        } else if overlays.dialog == nil {
+            present()
+        }
+    }
+}
+
+private struct SecondaryClickProbe: UIViewRepresentable {
+    let action: () -> Void
+
+    func makeUIView(context: Context) -> SecondaryClickView {
+        let view = SecondaryClickView()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.action = action
+        return view
+    }
+
+    func updateUIView(_ view: SecondaryClickView, context: Context) {
+        view.action = action
+    }
+}
+
+private final class SecondaryClickView: UIView {
+    var action: () -> Void = {}
+    private weak var router: SecondaryClickRouter?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        router?.remove(self)
+        router = window.map { SecondaryClickRouter.router(for: $0) }
+        router?.add(self)
+    }
+}
+
+// the smallest probe under the pointer wins, and never over a UIKit view such as the output text
+private final class SecondaryClickRouter: NSObject, UIGestureRecognizerDelegate {
+    private static let routers = NSMapTable<UIWindow, SecondaryClickRouter>.weakToStrongObjects()
+    private let probes = NSHashTable<SecondaryClickView>.weakObjects()
+    private weak var touchedView: UIView?
+
+    static func router(for window: UIWindow) -> SecondaryClickRouter {
+        if let existing = routers.object(forKey: window) { return existing }
+        let router = SecondaryClickRouter()
+        let recognizer = UITapGestureRecognizer(target: router, action: #selector(clicked(_:)))
+        recognizer.buttonMaskRequired = .secondary
+        recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = router
+        window.addGestureRecognizer(recognizer)
+        routers.setObject(router, forKey: window)
+        return router
+    }
+
+    func add(_ probe: SecondaryClickView) {
+        probes.add(probe)
+    }
+
+    func remove(_ probe: SecondaryClickView) {
+        probes.remove(probe)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touchedView = touch.view
+        return true
+    }
+
+    @objc private func clicked(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, let window = recognizer.view as? UIWindow else { return }
+        let point = recognizer.location(in: window)
+        guard let hit = touchedView ?? window.hitTest(point, with: nil) else { return }
+        touchedView = nil
+        let target = probes.allObjects
+            .filter { $0.window === window && !$0.isHidden && $0.isDescendant(of: hit) }
+            .map { (probe: $0, frame: $0.convert($0.bounds, to: window)) }
+            .filter { $0.frame.contains(point) }
+            .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        target?.probe.action()
     }
 }

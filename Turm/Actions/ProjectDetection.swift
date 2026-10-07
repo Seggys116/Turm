@@ -188,6 +188,9 @@ nonisolated enum ProjectDetection {
         var detections: [Detection] = []
         for place in places {
             let probe = makeProbe(place)
+            if probe.isUnreadable, place == places.first {
+                snapshot.notice = "Turm can't read \(PathDisplay.abbreviate(place)). Allow access in System Settings > Privacy & Security > Files & Folders (or Full Disk Access)."
+            }
             guard !probe.isEmpty else { continue }
             detections = detectors.compactMap { $0(probe) }
             if !detections.isEmpty { break }

@@ -8,6 +8,14 @@ final class ContextMenuService: NSObject {
     static let title = "Open in Turm"
     static let extensionIdentifier = "com.zak-noble-clarke.Turm.FinderSync"
 
+    static let copyPathTitle = "Copy Path"
+
+    static var isCopyPathEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: copyPathKey) }
+        set { UserDefaults.standard.set(newValue, forKey: copyPathKey) }
+    }
+
+    private static let copyPathKey = "turm.finderExtension.copyPath"
     private static let configuredKey = "turm.finderExtension.configured"
 
     private let workspaces = NSMapTable<NSWindow, Workspace>.weakToWeakObjects()

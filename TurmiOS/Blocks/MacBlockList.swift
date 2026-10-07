@@ -32,7 +32,7 @@ struct MacBlockList<Session: BlockSession>: View {
             apply { $0.userScrolled(to: Self.extent(context.geometry)) }
         }
         .onScrollGeometryChange(for: ScrollExtent.self, of: Self.extent) { old, new in
-            if userScrolling {
+            if userScrolling || Self.scrolledUp(from: old, to: new) {
                 apply { $0.userScrolled(to: new) }
             } else {
                 var pin = false
@@ -77,6 +77,11 @@ struct MacBlockList<Session: BlockSession>: View {
     // the visible rect already accounts for the keyboard, the input bar inset and bottom alignment
     private static func extent(_ geometry: ScrollGeometry) -> ScrollExtent {
         ScrollExtent(top: geometry.visibleRect.minY, height: geometry.visibleRect.height, content: geometry.contentSize.height)
+    }
+
+    // a wheel tick can move the offset after its scroll phase already ended, and layout changes never move it alone
+    private static func scrolledUp(from old: ScrollExtent, to new: ScrollExtent) -> Bool {
+        new.top < old.top && new.height == old.height && new.content == old.content
     }
 
     private static func isUser(_ phase: ScrollPhase) -> Bool {

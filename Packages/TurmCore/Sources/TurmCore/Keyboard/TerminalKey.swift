@@ -40,6 +40,7 @@ public nonisolated enum Navigation: Hashable, Sendable {
 public nonisolated enum KeyKind: Hashable, Sendable {
     case escape
     case tab
+    case newline
     case control
     case alt
     case arrow(Arrow)
@@ -77,6 +78,7 @@ public nonisolated struct TerminalKey: Identifiable, Hashable, Sendable {
     public static let catalog: [TerminalKey] = [
         TerminalKey(id: "esc", kind: .escape, name: "Escape", label: "esc"),
         TerminalKey(id: "tab", kind: .tab, name: "Tab", label: "tab"),
+        TerminalKey(id: "newline", kind: .newline, name: "Newline", symbol: "return"),
         TerminalKey(id: "ctrl", kind: .control, name: "Control", label: "ctrl"),
         TerminalKey(id: "alt", kind: .alt, name: "Alt", label: "alt"),
         TerminalKey(id: "left", kind: .arrow(.left), name: "Left arrow", symbol: "arrow.left"),
@@ -97,7 +99,7 @@ public nonisolated struct TerminalKey: Identifiable, Hashable, Sendable {
     }
 
     public static let defaultIDs: [String] = [
-        "esc", "tab", "ctrl", "alt", "left", "down", "up", "right", "pad", "home", "end", "pgup", "pgdn",
+        "esc", "tab", "newline", "ctrl", "alt", "left", "down", "up", "right", "pad", "home", "end", "pgup", "pgdn",
     ] + symbolNames.map { "sym:" + $0.character } + ["paste"]
 
     private static let lookup = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0) })

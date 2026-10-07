@@ -29,7 +29,8 @@ struct MacInputBar<Session: BlockSession>: View {
                     ZStack(alignment: .leading) {
                         CommandField(
                             text: $command, fontSize: fontSize, running: running, focus: focus,
-                            onSubmit: send, onRecall: recall, onBytes: session.input
+                            onSubmit: send, onRecall: recall, onBytes: session.input,
+                            kittyFlags: { session.runningBlock?.kittyFlags ?? 0 }
                         )
                         .frame(minHeight: 36)
                         .opacity(running ? 0 : 1)

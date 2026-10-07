@@ -24,13 +24,17 @@ struct AppSidebar: View {
                     if splitLayout { SidebarToggleButton(workspace: workspace) }
                 },
                 trailing: {
-                    NewMenuButton(workspace: workspace)
-                    SettingsButton(workspace: workspace)
+                    // side by side, the app actions live in the session bar so hiding the sidebar never moves them
+                    if !splitLayout {
+                        NewMenuButton(workspace: workspace)
+                        SettingsButton(workspace: workspace)
+                    }
                 }
             )
             .environment(\.chromeBarShowsMark, true)
         )
         .background(Chrome.sidebar.ignoresSafeArea())
+        .sessionDrop(into: workspace)
         .animation(.snappy(duration: 0.25), value: workspace.sessions.count)
     }
 
@@ -43,8 +47,11 @@ struct AppSidebar: View {
                         SessionRow(tab: tab)
                             .rowSurface(selected: tab.id == workspace.selectedID)
                             .chromeTap { workspace.select(tab) }
+                            .sessionDrag(tab)
                             .chromeContextMenu {
-                                [ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }]
+                                workspace.windowMenuItems(for: tab) + [
+                                    ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) },
+                                ]
                             }
                     }
                 }

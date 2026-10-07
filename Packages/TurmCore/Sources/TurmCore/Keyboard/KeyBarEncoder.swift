@@ -4,12 +4,14 @@ public nonisolated enum KeyBarEncoder {
     private static let escape: UInt8 = 0x1B
     private static let functionTildeCodes = [15, 17, 18, 19, 20, 21, 23, 24]
 
-    public static func bytes(for kind: KeyKind, modifiers: KeyModifiers, applicationCursor: Bool) -> [UInt8]? {
+    public static func bytes(for kind: KeyKind, modifiers: KeyModifiers, applicationCursor: Bool, kittyFlags: Int = 0) -> [UInt8]? {
         switch kind {
         case .escape:
             return withAlt([escape], modifiers)
         case .tab:
             return withAlt([0x09], modifiers)
+        case .newline:
+            return NewlineEncoder.insertNewline(kittyFlags: kittyFlags)
         case .text(let value):
             return text(value, modifiers: modifiers)
         case .arrow(let arrow):

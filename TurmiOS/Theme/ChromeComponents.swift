@@ -108,24 +108,33 @@ struct ChromeRow<Control: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(Chrome.Typeface.body)
-                    .foregroundStyle(Chrome.text)
-                if let detail {
-                    Text(detail)
-                        .font(Chrome.Typeface.caption)
-                        .foregroundStyle(Chrome.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                text.frame(minWidth: 0, idealWidth: 150, maxWidth: .infinity, alignment: .leading)
+                control
             }
-            Spacer(minLength: 12)
-            control
+            VStack(alignment: .leading, spacing: 10) {
+                text
+                control
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
         .frame(minHeight: 52)
+    }
+
+    private var text: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(Chrome.Typeface.body)
+                .foregroundStyle(Chrome.text)
+            if let detail {
+                Text(detail)
+                    .font(Chrome.Typeface.caption)
+                    .foregroundStyle(Chrome.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -180,6 +189,7 @@ struct ChromeSegmented<Value: Hashable>: View {
                             }
                         }
                         .contentShape(Rectangle())
+                        .chromeHover(cornerRadius: Chrome.Radius.chip - 2)
                 }
                 .buttonStyle(.plain)
             }
@@ -256,6 +266,7 @@ struct RowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? Chrome.chipFill : Color.clear)
+            .chromeHover()
     }
 }
 
@@ -307,6 +318,7 @@ struct ChromeButtonStyle: ButtonStyle {
                 )
                 .padding(.vertical, compact ? 5 : 0)
                 .contentShape(Rectangle())
+                .chromeHover()
                 .opacity(enabled ? 1 : 0.4)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
@@ -367,7 +379,39 @@ struct ChromeScroll<Content: View>: View {
     }
 }
 
+private struct ChromeHover: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.isEnabled) private var enabled
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: cornerRadius))
+            .hoverEffect(.highlight)
+            .hoverEffectDisabled(!enabled)
+    }
+}
+
+private extension View {
+    // sheets keep their bar on top, so the system keeps it clear of the camera and status bar
+    @ViewBuilder
+    func sheetVerticalBarDisabled() -> some View {
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.1, *) {
+            toolbarVerticalBehavior(.disabled)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
 extension View {
+    func chromeHover(cornerRadius: CGFloat = Chrome.Radius.chip) -> some View {
+        modifier(ChromeHover(cornerRadius: cornerRadius))
+    }
+
     func promptField(mono: Bool = true) -> some View {
         self
             .font(mono ? Chrome.Typeface.monoBody : Chrome.Typeface.body)
@@ -381,6 +425,7 @@ extension View {
     func chromeTap(action: @escaping () -> Void) -> some View {
         self
             .contentShape(Rectangle())
+            .chromeHover()
             .onTapGesture {
                 Haptics.select()
                 action()
@@ -392,6 +437,8 @@ extension View {
     func chromeSheet() -> some View {
         self
             .environment(\.chromeBarSuppressed, false)
+            .environment(\.chromeBarHorizontalOnly, true)
+            .sheetVerticalBarDisabled()
             .chromeOverlayHost()
             .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
@@ -404,15 +451,19 @@ extension View {
 
 struct ChromeToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.labelsVisibility) private var labels
 
     func makeBody(configuration: Configuration) -> some View {
         let isOn = configuration.isOn
         HStack {
-            configuration.label
-            Spacer(minLength: 12)
+            if labels != .hidden {
+                configuration.label
+                Spacer(minLength: 12)
+            }
             RoundedRectangle(cornerRadius: 9)
                 .fill(isOn ? Chrome.accent : Chrome.chipStroke)
                 .frame(width: 48, height: 30)
+                .chromeHover(cornerRadius: 9)
                 .overlay(alignment: isOn ? .trailing : .leading) {
                     RoundedRectangle(cornerRadius: 6.5)
                         .fill(isOn ? Chrome.onAccent : Color.white)

@@ -3,6 +3,8 @@ import FinderSync
 
 final class FinderSync: FIFinderSync {
     private static let title = "Open in Turm"
+    private static let copyTitle = "Copy Path"
+    private static let settings = UserDefaults(suiteName: "com.zak-noble-clarke.Turm")
 
     private var menuKind = FIMenuKind.contextualMenuForContainer
 
@@ -18,7 +20,16 @@ final class FinderSync: FIFinderSync {
 
     override init() {
         super.init()
-        FIFinderSyncController.default().directoryURLs = [URL(fileURLWithPath: "/")]
+        watchedVolumes()
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.watchedVolumes() }
+        }
+    }
+
+    private func watchedVolumes() {
+        let mounted = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? []
+        FIFinderSyncController.default().directoryURLs = Set([URL(fileURLWithPath: "/")] + mounted)
     }
 
     override var toolbarItemName: String { "Turm" }
@@ -32,13 +43,29 @@ final class FinderSync: FIFinderSync {
         let menu = NSMenu(title: "")
         let item = menu.addItem(withTitle: Self.title, action: #selector(openInTurm(_:)), keyEquivalent: "")
         item.image = Self.icon
+        if Self.settings?.bool(forKey: "turm.finderExtension.copyPath") == true {
+            menu.addItem(withTitle: Self.copyTitle, action: #selector(copyPath(_:)), keyEquivalent: "")
+        }
         return menu
     }
 
-    @objc private func openInTurm(_ sender: AnyObject?) {
+    private func targetURLs() -> [URL] {
         let controller = FIFinderSyncController.default()
         var urls = menuKind == .contextualMenuForItems ? controller.selectedItemURLs() ?? [] : []
         if urls.isEmpty, let target = controller.targetedURL() { urls = [target] }
+        return urls
+    }
+
+    @objc private func copyPath(_ sender: AnyObject?) {
+        let urls = targetURLs()
+        guard !urls.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+    }
+
+    @objc private func openInTurm(_ sender: AnyObject?) {
+        let urls = targetURLs()
         guard !urls.isEmpty else { return }
         var components = URLComponents()
         components.scheme = "turm"

@@ -68,6 +68,7 @@ enum Chrome {
         static let target: CGFloat = 44
         static let railWidth: CGFloat = 56
         static let minimumStrip: CGFloat = 44
+        static let cornerClearance: CGFloat = 24
         static let readableWidth: CGFloat = 640
 
         static func margin(for sizeClass: UserInterfaceSizeClass?) -> CGFloat {

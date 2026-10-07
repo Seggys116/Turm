@@ -5,8 +5,6 @@ struct TerminalDetail: View {
     let workspace: Workspace
     @Environment(\.splitLayout) private var splitLayout
 
-    private var sidebarVisible: Bool { splitLayout && !workspace.sidebarHidden }
-
     var body: some View {
         VStack(spacing: 0) {
             if let tab = workspace.selected {
@@ -22,7 +20,7 @@ struct TerminalDetail: View {
         }
         .chromeBar(
             ChromeTopBar(
-                workspace.selected?.title ?? (splitLayout ? "" : "Turm"),
+                workspace.selected == nil && !splitLayout ? "Turm" : "",
                 leading: {
                     if !splitLayout {
                         SessionsBackButton(workspace: workspace)
@@ -32,14 +30,14 @@ struct TerminalDetail: View {
                 },
                 trailing: {
                     if let tab = workspace.selected { SessionButtons(workspace: workspace, tab: tab) }
-                    if !sidebarVisible {
-                        NewMenuButton(workspace: workspace)
-                        SettingsButton(workspace: workspace)
-                    }
+                    NewMenuButton(workspace: workspace)
+                    SettingsButton(workspace: workspace)
                 }
-            )
+            ),
+            clearsCorners: workspace.selected == nil
         )
         .background(Chrome.terminalBackground.ignoresSafeArea())
+        .sessionDrop(into: workspace)
     }
 
     @ViewBuilder
@@ -153,9 +151,21 @@ private struct Wordmark: View {
 
 private struct TabStrip: View {
     let workspace: Workspace
+    @Environment(\.splitLayout) private var splitLayout
+    @State private var atTop = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        ToolbarVerticalEdgeReader { rail in
+            strip(rail: rail)
+        }
+        .onGeometryChange(for: Bool.self) { $0.safeAreaInsets.top < 1 } action: { atTop = $0 }
+    }
+
+    // beside a vertical bar the strip reaches the top edge, so its outer end clears the display's corner
+    private func strip(rail: HorizontalEdge?) -> some View {
+        let leadingCorner = atTop && rail == .trailing && (!splitLayout || workspace.sidebarHidden)
+        let trailingCorner = atTop && rail == .leading
+        return HStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
@@ -184,8 +194,11 @@ private struct TabStrip: View {
             .buttonStyle(ChromePressStyle())
             .accessibilityLabel("New Session")
         }
+        .padding(.leading, leadingCorner ? Chrome.Metrics.cornerClearance : 0)
+        .padding(.trailing, trailingCorner ? Chrome.Metrics.cornerClearance : 0)
+        .windowControlsOffset()
         .frame(height: Chrome.Metrics.target)
-        .background(Chrome.sidebar.ignoresSafeArea(edges: .horizontal))
+        .background(Chrome.sidebar.ignoresSafeArea(edges: [.top, .horizontal]))
         .overlay(alignment: .bottom) { Chrome.divider.frame(height: 1) }
     }
 }
@@ -225,8 +238,11 @@ private struct SessionTab: View {
             Haptics.select()
             workspace.select(tab)
         }
+        .sessionDrag(tab)
         .chromeContextMenu {
-            [ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }]
+            workspace.windowMenuItems(for: tab) + [
+                ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) },
+            ]
         }
     }
 }

@@ -68,6 +68,7 @@ struct SessionButtons: View {
             )
             if mac.macColumns > 0 { items.append(.note("Mac size \(mac.macColumns) by \(mac.macRows)")) }
         }
+        items += workspace.windowMenuItems(for: tab).map { $0.separatedFromPrevious() }
         items.append(
             ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
                 .separatedFromPrevious()

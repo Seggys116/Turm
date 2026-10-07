@@ -18,7 +18,7 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
 
     init(preferences: TerminalPreferences = .shared) {
         self.preferences = preferences
-        view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        view = TurmTerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         super.init()
         view.terminalDelegate = self
         view.autocorrectionType = .no
@@ -28,6 +28,7 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
         keyBar.onBytes = { [weak self] data in self?.onInput?(ArraySlice(data)) }
         keyBar.onPaste = { [weak self] in self?.view.paste(nil) }
         keyBar.cursorMode = { [weak self] in self?.view.getTerminal().applicationCursor ?? false }
+        keyBar.kittyFlags = { [weak self] in self?.view.getTerminal().keyboardEnhancementFlags.rawValue ?? 0 }
         view.inputAccessoryView = keyBar
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
         view.addGestureRecognizer(pinch)

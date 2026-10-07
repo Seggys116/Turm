@@ -187,6 +187,7 @@ struct SettingsView: View {
     @AppStorage(SidebarPlacement.key) private var sidebarPlacement = SidebarPlacement.left
     @State private var tab = SettingsTab.appearance
     @State private var isContextMenuEnabled = ContextMenuService.isEnabled
+    @State private var isCopyPathEnabled = ContextMenuService.isCopyPathEnabled
     @State private var showsNotices = false
     @Environment(\.openURL) private var openURL
 
@@ -269,7 +270,22 @@ struct SettingsView: View {
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
             }
+            row(ContextMenuService.copyPathTitle, detail: "Add Copy Path to the same Finder menu to copy the selected items' paths, one per line.") {
+                Toggle(ContextMenuService.copyPathTitle, isOn: copyPathBinding)
+                    .labelsHidden()
+                    .toggleStyle(SquareToggleStyle())
+            }
         }
+    }
+
+    private var copyPathBinding: Binding<Bool> {
+        Binding(
+            get: { isCopyPathEnabled },
+            set: { enabled in
+                isCopyPathEnabled = enabled
+                ContextMenuService.isCopyPathEnabled = enabled
+            }
+        )
     }
 
     private var contextMenuBinding: Binding<Bool> {

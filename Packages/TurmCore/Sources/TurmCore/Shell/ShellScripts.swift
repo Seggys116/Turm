@@ -24,7 +24,22 @@ public nonisolated enum ShellScripts {
             printf '\e]7777;E;%s\a' "$encoded"
           fi
         }
+        _turm_drain() {
+          [[ -t 0 ]] || return
+          if (( BASH_VERSINFO[0] >= 4 )); then
+            local junk
+            while IFS= read -r -s -n 1 -t 0.001 junk; do :; done
+          else
+            local saved
+            saved=$(command stty -g 2>/dev/null) || return
+            command stty -icanon -echo min 0 time 0 2>/dev/null
+            command dd bs=65536 count=1 >/dev/null 2>&1
+            command stty "$saved" 2>/dev/null
+          fi
+        }
         _turm_emit() {
+          # keys sent to a program that exited before reading them would land in the next command line
+          _turm_drain
           if [[ -n $TURM_REMOTE ]]; then
             printf '\e]7777;R;%s;%s;%s\a' "$TURM_REMOTE" "$1" "$PWD"
           else
@@ -207,6 +222,8 @@ public nonisolated enum ShellScripts {
         _turm_precmd() {
           local code=$?
           _turm_report_env
+          # keys sent to a program that exited before reading them would land in the next command line
+          while builtin read -t 0 -k 1 -s; do :; done
           if [[ -n $TURM_REMOTE ]]; then
             printf '\\e]7777;R;%s;%s;%s\\a' "$TURM_REMOTE" "${_turm_ran:+$code}" "$PWD"
           elif [[ -n $_turm_ran ]]; then

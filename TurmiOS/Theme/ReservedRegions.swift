@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The size of a view and the parts of it the system has reserved, in the view's own coordinates.
 nonisolated struct ReservedArea: Equatable, Sendable {
@@ -73,6 +74,109 @@ nonisolated struct ReservedArea: Equatable, Sendable {
         return nil
         #endif
     }
+}
+
+extension ReservedArea {
+    func adding(status: CGRect?, along axis: Axis) -> ReservedArea {
+        guard let status else { return self }
+        let hole = status.intersection(CGRect(origin: .zero, size: size))
+        let fills = axis == .vertical ? hole.height > size.height * 0.6 : hole.width > size.width * 0.6
+        guard !hole.isNull, hole.width > 0, hole.height > 0, !fills else { return self }
+        var area = self
+        area.rects.append(hole)
+        return area
+    }
+}
+
+nonisolated struct SystemBars: Equatable, Sendable {
+    var window = CGRect.zero
+    var status: CGRect?
+    var occlusion: [CGRect] = []
+    var leadingBar: CGRect?
+    var trailingBar: CGRect?
+    var foldable = false
+
+    func statusSpan(inTopInset height: CGFloat) -> ClosedRange<CGFloat>? {
+        guard foldable, window.width > 0 else { return nil }
+        let estimate = (window.maxX - Self.foldableStatusWidth)...window.maxX
+        var spans = [estimate]
+        if let status, status.width < window.width * 0.6, status.maxY <= height + 1 { spans.append(status.minX...status.maxX) }
+        for rect in occlusion where rect.minY < height && rect.maxY <= height + 1 && rect.midX > window.midX {
+            spans.append(rect.minX...rect.maxX)
+        }
+        return spans.map(\.lowerBound).min()!...spans.map(\.upperBound).max()!
+    }
+
+    // measured width of the iPhone Duo's status cluster, whose reported frame spans the whole display
+    private static let foldableStatusWidth: CGFloat = 104
+}
+
+struct SystemBarReader: UIViewRepresentable {
+    let onChange: (SystemBars) -> Void
+
+    func makeUIView(context: Context) -> SystemBarProbe {
+        let view = SystemBarProbe()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.onChange = onChange
+        return view
+    }
+
+    func updateUIView(_ view: SystemBarProbe, context: Context) {
+        view.onChange = onChange
+        view.report()
+    }
+}
+
+final class SystemBarProbe: UIView {
+    var onChange: ((SystemBars) -> Void)?
+    private var reported: SystemBars?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        report()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        report()
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        report()
+    }
+
+    func report() {
+        guard let window else { return }
+        var bars = SystemBars(window: convert(window.bounds, from: window))
+        if let manager = window.windowScene?.statusBarManager, !manager.isStatusBarHidden, !manager.statusBarFrame.isEmpty {
+            bars.status = convert(manager.statusBarFrame, from: window)
+        }
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.1, *) {
+            bars.foldable = !window.reservedRegions(kind: .division, options: .includeInactive).isEmpty
+            bars.occlusion = window.reservedRegions(kind: .occlusion).filter(\.isActive).map { convert($0.frame, from: window) }
+            if window.traitCollection.verticalBarEdge != .unspecified {
+                bars.leadingBar = barFrame(on: .leading, in: window)
+                bars.trailingBar = barFrame(on: .trailing, in: window)
+            }
+        }
+        #endif
+        guard bars != reported else { return }
+        reported = bars
+        // layout callbacks run inside SwiftUI's update, so hand the value over on the next turn
+        DispatchQueue.main.async { [weak self] in self?.onChange?(bars) }
+    }
+
+    #if canImport(SwiftUI, _version: 8.0.85)
+    @available(iOS 27.1, *)
+    private func barFrame(on edge: NSDirectionalRectEdge, in window: UIWindow) -> CGRect? {
+        let frame = window.layoutGuide(for: .bar(onEdge: edge, extent: Chrome.Metrics.railWidth)).layoutFrame
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        return convert(frame, from: window)
+    }
+    #endif
 }
 
 extension View {

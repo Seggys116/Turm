@@ -16,6 +16,7 @@ final class TerminalKeyBarView: UIInputView {
     var onHide: (() -> Void)?
     var applicationCursor = false
     var cursorMode: (() -> Bool)?
+    var kittyFlags: (() -> Int)?
 
     private enum Sticky {
         case off
@@ -269,7 +270,8 @@ final class TerminalKeyBarView: UIInputView {
     private func emit(_ kind: KeyKind) {
         let modifiers = takeModifiers()
         let cursor = cursorMode?() ?? applicationCursor
-        guard let bytes = KeyBarEncoder.bytes(for: kind, modifiers: modifiers, applicationCursor: cursor) else { return }
+        let flags = kittyFlags?() ?? 0
+        guard let bytes = KeyBarEncoder.bytes(for: kind, modifiers: modifiers, applicationCursor: cursor, kittyFlags: flags) else { return }
         onBytes?(Data(bytes))
     }
 

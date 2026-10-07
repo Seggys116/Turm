@@ -49,6 +49,26 @@ nonisolated enum GitInspector {
         return nil
     }
 
+    private static func trustedArguments(_ arguments: [String], in directory: String) -> [String] {
+        guard ignoresOwnership(directory), let root = repositoryRoot(from: directory) else { return [] }
+        return ["-c", "safe.directory=" + root]
+    }
+
+    private static func ignoresOwnership(_ path: String) -> Bool {
+        var info = statfs()
+        guard statfs(path, &info) == 0 else { return false }
+        return info.f_flags & UInt32(MNT_IGNORE_OWNERSHIP) != 0
+    }
+
+    private static func repositoryRoot(from directory: String) -> String? {
+        var url = URL(fileURLWithPath: directory)
+        while url.path != "/" {
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return url.path }
+            url.deleteLastPathComponent()
+        }
+        return nil
+    }
+
     private static func run(_ arguments: [String], in directory: String) -> String? {
         var ignored = ""
         return run(arguments, in: directory, errors: &ignored)
@@ -57,7 +77,7 @@ nonisolated enum GitInspector {
     private static func run(_ arguments: [String], in directory: String, errors: inout String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
+        process.arguments = trustedArguments(arguments, in: directory) + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_OPTIONAL_LOCKS"] = "0"

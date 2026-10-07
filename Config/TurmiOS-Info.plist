@@ -6,10 +6,27 @@
 	<array>
 		<string>_turm._tcp</string>
 	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.zak-noble-clarke.TurmiOS.session</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 	</dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Turm Session</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.zak-noble-clarke.TurmiOS.session</string>
+		</dict>
+	</array>
 </dict>
 </plist>

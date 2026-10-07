@@ -1,6 +1,7 @@
 import Observation
 import SwiftUI
 import TurmCore
+import UIKit
 
 enum TabIndicator {
     case live
@@ -48,18 +49,17 @@ final class Workspace {
 
     func open(_ host: SSHHost) {
         let session = SSHTerminalSession(host: host)
-        session.onExit = { [weak self, weak session] in
-            guard let self, let session else { return }
-            close(session)
-        }
-        sessions.append(session)
+        watchExit(of: session)
+        append(session)
         selectedID = session.id
         compactColumn = .detail
         session.connect()
     }
 
     func open(_ tab: any TerminalTab) {
-        if !sessions.contains(where: { $0.id == tab.id }) { sessions.append(tab) }
+        let tab = SessionHub.shared.transfer(tab, to: self)
+        if let ssh = tab as? SSHTerminalSession { watchExit(of: ssh) }
+        if !sessions.contains(where: { $0.id == tab.id }) { append(tab) }
         select(tab)
     }
 
@@ -71,13 +71,55 @@ final class Workspace {
     func close(_ tab: any TerminalTab) {
         guard let index = sessions.firstIndex(where: { $0.id == tab.id }) else { return }
         tab.close()
-        sessions.remove(at: index)
-        guard selectedID == tab.id else { return }
-        selectedID = sessions.indices.contains(index) ? sessions[index].id : sessions.last?.id
-        if selectedID == nil { compactColumn = .sidebar }
+        remove(at: index)
+    }
+
+    func release(_ id: UUID) -> (any TerminalTab)? {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return nil }
+        let tab = sessions[index]
+        detachViews(of: tab)
+        remove(at: index)
+        return tab
     }
 
     func closeSelected() {
         if let selected { close(selected) }
+    }
+
+    func closeAll() {
+        for tab in sessions { tab.close() }
+        for index in sessions.indices.reversed() { remove(at: index) }
+    }
+
+    private func append(_ tab: any TerminalTab) {
+        sessions.append(tab)
+        SessionHub.shared.assign(tab.id, to: self)
+    }
+
+    private func remove(at index: Int) {
+        let id = sessions[index].id
+        sessions.remove(at: index)
+        SessionHub.shared.unassign(id, from: self)
+        guard selectedID == id else { return }
+        selectedID = sessions.indices.contains(index) ? sessions[index].id : sessions.last?.id
+        if selectedID == nil { compactColumn = .sidebar }
+    }
+
+    private func watchExit(of session: SSHTerminalSession) {
+        session.onExit = { [weak self, weak session] in
+            guard let self, let session else { return }
+            close(session)
+        }
+    }
+
+    // a terminal view can live in one window only, so it must leave this one before another adopts it
+    private func detachViews(of tab: any TerminalTab) {
+        var views: [UIView] = []
+        if let ssh = tab as? SSHTerminalSession { views.append(ssh.surface.view) }
+        if let blocks = tab as? any BlockSession, let surface = blocks.fullScreen { views.append(surface.view) }
+        for view in views {
+            _ = view.resignFirstResponder()
+            view.removeFromSuperview()
+        }
     }
 }

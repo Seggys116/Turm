@@ -69,6 +69,7 @@ final class MacBlock: Identifiable {
     var plainOutput: String { output.string }
     var failed: Bool { (exitCode ?? 0) != 0 }
     var isAlternate: Bool { emulator?.isAlternate ?? false }
+    var kittyFlags: Int { emulator?.terminal.keyboardEnhancementFlags.rawValue ?? 0 }
 
     func append(_ bytes: [UInt8]) {
         guard let emulator else { return }

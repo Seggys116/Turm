@@ -9,19 +9,18 @@ extension EnvironmentValues {
     @Entry var splitLayout = false
 }
 
-struct ContentView: View {
-    #if targetEnvironment(simulator)
-    private static let initialWorkspace = DemoContent.workspace() ?? Workspace()
-    #else
-    private static let initialWorkspace = Workspace()
-    #endif
+// each window owns its workspace, created on first use so a discarded view value never builds one
+private final class WorkspaceBox {
+    lazy var workspace = SessionHub.shared.makeWorkspace()
+}
 
-    @State private var workspace = Self.initialWorkspace
+struct ContentView: View {
+    @State private var box = WorkspaceBox()
     @State private var swipes = SwipeCoordinator()
     var macs = MacManager.shared
 
     var body: some View {
-        @Bindable var workspace = workspace
+        @Bindable var workspace = box.workspace
         AdaptiveShell(workspace: workspace, macs: macs)
             .chromeOverlayHost()
             .tint(Chrome.accent)
@@ -40,6 +39,11 @@ struct ContentView: View {
                 SSHHostEditorView(host) { workspace.editingHost = nil }
             }
             .focusedSceneValue(\.workspace, workspace)
+            .sceneReader { SessionHub.shared.bind(workspace, to: $0) }
+            .onContinueUserActivity(SessionHub.activityType) { activity in
+                guard let id = SessionHub.shared.sessionID(in: activity) else { return }
+                SessionHub.shared.move(id, to: workspace)
+            }
             #if targetEnvironment(simulator)
             .task { await DemoContent.presentSheets(in: workspace) }
             #endif

@@ -5,18 +5,22 @@ nonisolated struct ProjectProbe {
     private let entries: Set<String>
     private let virtualFiles: [String: String]?
     private let remote: RemoteDirectory?
+    let isUnreadable: Bool
 
     init(directory: String) {
         self.directory = directory
         virtualFiles = nil
         remote = nil
-        entries = Set((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
+        let listing = try? FileManager.default.contentsOfDirectory(atPath: directory)
+        isUnreadable = listing == nil
+        entries = Set(listing ?? [])
     }
 
     init(files: [String: String]) {
         directory = "/sample"
         virtualFiles = files
         remote = nil
+        isUnreadable = false
         entries = Set(files.keys.map { String($0.split(separator: "/").first ?? "") })
     }
 
@@ -24,6 +28,7 @@ nonisolated struct ProjectProbe {
         self.directory = directory
         self.remote = remote
         virtualFiles = nil
+        isUnreadable = false
         entries = Set(remote.entries.map(\.name))
     }
 

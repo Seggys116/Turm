@@ -131,7 +131,9 @@ struct AdaptiveShell: View {
             .padding(.bottom, insets.bottom + lift)
             .frame(width: width, height: height + insets.top + insets.bottom)
             .ignoresSafeArea()
-            .offset(x: side == .trailing ? width : -width, y: -insets.top)
+            // negative padding rather than offset, so the bar's measured camera and fold regions match where it is drawn
+            .padding(side == .trailing ? .trailing : .leading, -width)
+            .padding(.top, -insets.top)
     }
 
     private func focus(for column: WorkspaceColumn) {

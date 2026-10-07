@@ -6,6 +6,9 @@ final class CommandUITextField: UITextField {
     var onSubmit: (() -> Void)?
     var onRecall: ((Int) -> Void)?
     var onBytes: ((Data) -> Void)?
+    var kittyFlags: () -> Int = { 0 } {
+        didSet { keyBar.kittyFlags = kittyFlags }
+    }
 
     // while a command runs, edits and keys go to the program instead of the field
     var running = false
@@ -50,7 +53,7 @@ final class CommandUITextField: UITextField {
         guard running else { return super.pressesBegan(presses, with: event) }
         var passed = Set<UIPress>()
         for press in presses {
-            if let key = press.key, let bytes = Self.bytes(for: key) {
+            if let key = press.key, let bytes = HardwareNewline.bytes(for: key, kittyFlags: kittyFlags()) ?? Self.bytes(for: key) {
                 onBytes?(Data(bytes))
             } else {
                 passed.insert(press)
@@ -138,6 +141,7 @@ struct CommandField: UIViewRepresentable {
     let onSubmit: () -> Void
     let onRecall: (Int) -> Void
     let onBytes: (Data) -> Void
+    let kittyFlags: () -> Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -188,6 +192,7 @@ struct CommandField: UIViewRepresentable {
         field.onSubmit = onSubmit
         field.onRecall = onRecall
         field.onBytes = onBytes
+        field.kittyFlags = kittyFlags
         field.running = running
         if field.text != text { field.text = text }
         let font = BlockStyle.font(style: 0, size: fontSize)
