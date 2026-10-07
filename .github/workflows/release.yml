@@ -28,6 +28,9 @@ jobs:
       - name: Install the brand icons
         run: npm ci --prefix Icons --no-audit --no-fund
 
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Require the tag to be on main
         run: |
           git fetch --no-tags origin main

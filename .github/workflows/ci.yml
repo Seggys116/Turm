@@ -27,6 +27,9 @@ jobs:
       - name: Install the brand icons
         run: npm ci --prefix Icons --no-audit --no-fund
 
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Restore the Swift package checkouts
         id: swiftpm
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -100,6 +103,9 @@ jobs:
       - name: Install the brand icons
         run: npm ci --prefix Icons --no-audit --no-fund
 
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Restore the Swift package checkouts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -129,6 +135,9 @@ jobs:
 
       - name: Install the brand icons
         run: npm ci --prefix Icons --no-audit --no-fund
+
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
 
       - name: Restore the Swift package checkouts
         id: swiftpm
