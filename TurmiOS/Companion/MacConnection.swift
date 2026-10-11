@@ -337,6 +337,10 @@ final class MacConnection: Identifiable {
             complete("branches:\(id)", with: message)
         case .branchSwitched(let id, _, _):
             complete("switch:\(id)", with: message)
+        case .directoryListing(let id, _, _):
+            complete("list:\(id)", with: message)
+        case .fileContents(let id, _, _, _):
+            complete("read:\(id)", with: message)
         case .ok(let request):
             complete(request, with: message)
         case .error(let code, let text):
@@ -351,7 +355,7 @@ final class MacConnection: Identifiable {
         request.resolve(message)
     }
 
-    private func perform(_ message: CompanionMessage, key: String) async throws -> CompanionMessage {
+    private func perform(_ message: CompanionMessage, key: String, timeout: Duration = .seconds(10)) async throws -> CompanionMessage {
         guard state == .connected else { throw MacRequestError(text: "Not connected to \(name).") }
         guard supports(message.kind) else { throw MacRequestError(text: "Update Turm on \(name) to use this.") }
         requestCounter += 1
@@ -361,7 +365,7 @@ final class MacConnection: Identifiable {
             pending[key] = PendingRequest(token: token) { continuation.resume(returning: $0) }
             send(message)
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: timeout)
                 guard let self, pending[key]?.token == token else { return }
                 complete(key, with: .error(code: CompanionErrorCode.failed, text: "The Mac did not answer."))
             }
@@ -392,6 +396,22 @@ final class MacConnection: Identifiable {
 
     func revealInFinder(path: String) async throws {
         _ = try await perform(.revealInFinder(path: path), key: "revealInFinder")
+    }
+
+    func listFiles(of id: UUID, path: String) async throws -> [RemoteFileEntry] {
+        let reply = try await perform(.listDirectory(id: id, path: path), key: "list:\(id)", timeout: .seconds(20))
+        guard case .directoryListing(_, _, let entries) = reply else { throw MacRequestError(text: "Unexpected reply.") }
+        return entries
+    }
+
+    func readFile(of id: UUID, path: String) async throws -> Data {
+        let reply = try await perform(.readFile(id: id, path: path), key: "read:\(id)", timeout: .seconds(30))
+        guard case .fileContents(_, _, let data, _) = reply else { throw MacRequestError(text: "Unexpected reply.") }
+        return data
+    }
+
+    func upload(of id: UUID, data: Data, to path: String) async throws {
+        _ = try await perform(.writeFile(id: id, path: path, data: data, overwrite: false), key: "writeFile", timeout: .seconds(60))
     }
 
     func branches(of id: UUID) async throws -> (names: [String], current: String?) {

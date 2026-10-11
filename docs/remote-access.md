@@ -88,6 +88,10 @@ Each time a phone or Mac connects, and whenever the controlled Mac's network or 
 - Create a shell, optionally in a folder, in a Turm window on the Mac. The folder must already exist.
 - Close a shell. If something is still running, the phone is asked to confirm first.
 - **Fit to This Device:** in a shell's options menu. It resizes the shell on the Mac to the phone's screen and puts the Mac's size back when you turn it off.
+- Ask for a git diff from a shell (unstaged, staged, or a specific commit).
+- List the files in a shell's current folder.
+- Read a file from that folder.
+- Upload a file into the folder the Mac has opened for uploads.
 
 ## Security
 
@@ -97,3 +101,5 @@ Each time a phone or Mac connects, and whenever the controlled Mac's network or 
 - Connections are limited. A connection that does not authenticate within 10 seconds is dropped. An address that fails 5 handshakes within 30 seconds is blocked for 30 seconds, and the Mac accepts at most 4 unfinished connections per address, 32 in total, and 16 authenticated phones and Macs.
 
 A paired phone or Mac can run commands in your shells as you. Pair only devices you control and revoke ones you no longer use.
+
+Uploads from a paired device are off by default. Turn them on under Settings > Remote Access > Allow file uploads, and choose one folder. A path outside that folder is refused, including one that uses `..` to climb out. An existing file is not replaced unless the upload explicitly requests it. The files stay on the Mac. Revoking the device removes its access.

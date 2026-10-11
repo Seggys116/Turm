@@ -84,6 +84,21 @@ struct ShellTabTests {
         #expect(workspace.tabs[1].layout.leaves.count == 2)
     }
 
+    @Test func splitOpensInTheActiveShellDirectory() {
+        let workspace = makeWorkspace()
+        defer { workspace.terminateAll() }
+        let directory = FileManager.default.temporaryDirectory.path
+        workspace.newShell(directory: directory)
+        let original = workspace.focusedPane
+
+        workspace.split(.horizontal)
+
+        let spawned = workspace.focusedPane
+        #expect(spawned != original)
+        #expect(workspace.session(for: original)?.directory == directory)
+        #expect(workspace.session(for: spawned)?.directory == directory)
+    }
+
     @Test func selectingAndCyclingShells() {
         let workspace = makeWorkspace()
         defer { workspace.terminateAll() }

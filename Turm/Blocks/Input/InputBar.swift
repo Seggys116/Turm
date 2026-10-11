@@ -5,9 +5,13 @@ struct InputBar: View {
     let session: TerminalSession
     let isFocused: Bool
     @Bindable var input: InputModel
+    @FocusedValue(\.workspace) private var workspace
     @State private var completion = CompletionModel()
     @State private var pathMenuOpen = false
     @State private var branchMenuOpen = false
+    @State private var newBranchOpen = false
+    @State private var diffMenuOpen = false
+    @State private var gitPanel: GitPanel?
     @State private var shortcutEditorOpen = false
     @State private var hostMenuOpen = false
     @State private var remotePathMenuOpen = false
@@ -170,7 +174,7 @@ struct InputBar: View {
             .help(Block.abbreviate(session.directory))
             .onTapGesture { toggle(path: true) }
             .anchoredMenu(isOpen: $pathMenuOpen) {
-                PathMenu(path: session.directory, close: { pathMenuOpen = false }) {
+                PathMenu(session: session, path: session.directory, close: { pathMenuOpen = false }) {
                     pathMenuOpen = false
                     shortcutEditorOpen = true
                 }
@@ -179,28 +183,66 @@ struct InputBar: View {
                 ShortcutEditor.directory(at: session.directory) { shortcutEditorOpen = false }
             }
         if let git = session.git {
-            Chip(text: git.branch, isActive: branchMenuOpen) { GitBranchIcon().frame(width: 12, height: 12) }
+            Chip(text: git.branch, isActive: branchMenuOpen || newBranchOpen) { GitBranchIcon().frame(width: 12, height: 12) }
                 .onTapGesture { toggle(path: false) }
                 .anchoredMenu(isOpen: $branchMenuOpen) {
-                    BranchMenu(session: session) { branchMenuOpen = false }
+                    BranchMenu(session: session, close: { branchMenuOpen = false }) {
+                        branchMenuOpen = false
+                        newBranchOpen = true
+                    }
                 }
-            HStack(spacing: 4) {
-                Image(systemName: "doc").chipIcon()
-                Text("\(git.files)")
-                Text("\u{2022}").foregroundStyle(Theme.secondaryText.color)
-                Text("+\(git.added)").foregroundStyle(Theme.added.color)
-                Text("-\(git.removed)").foregroundStyle(Theme.removed.color)
+                .popover(isPresented: $newBranchOpen, arrowEdge: .top) {
+                    NewBranchPanel { name in
+                        await session.createBranch(named: name)
+                    } close: {
+                        newBranchOpen = false
+                    }
+                }
+            ChangesChip(files: git.files, added: git.added, removed: git.removed, isActive: diffMenuOpen || gitPanel != nil)
+            .onTapGesture {
+                pathMenuOpen = false
+                branchMenuOpen = false
+                newBranchOpen = false
+                diffMenuOpen.toggle()
             }
-            .chipStyle()
+            .anchoredMenu(isOpen: $diffMenuOpen) {
+                GitChangesMenu(session: session, close: { diffMenuOpen = false }, open: { panel in
+                    diffMenuOpen = false
+                    gitPanel = panel
+                }, onOpenInPane: {
+                    diffMenuOpen = false
+                    workspace?.openDiff(from: session, staged: false)
+                })
+            }
+            .popover(item: $gitPanel, arrowEdge: .top) { panel in
+                switch panel {
+                case .diff(let staged):
+                    GitDiffPanel(session: session, staged: staged) {
+                        gitPanel = nil
+                        workspace?.openDiff(from: session, staged: staged)
+                    }
+                case .commit(let push):
+                    CommitPanel(pushes: push) { message in
+                        session.commitChanges(message: message, push: push)
+                        gitPanel = nil
+                    } cancel: {
+                        gitPanel = nil
+                    }
+                }
+            }
+            .help("Git changes")
         }
     }
 
     private func toggle(path: Bool) {
+        newBranchOpen = false
         if path {
             branchMenuOpen = false
+            diffMenuOpen = false
             pathMenuOpen.toggle()
         } else {
             pathMenuOpen = false
+            diffMenuOpen = false
             branchMenuOpen.toggle()
         }
     }
@@ -211,7 +253,7 @@ struct InputBar: View {
             return
         }
         Task {
-            let paths = await channel.upload(urls)
+            let paths = await TransferCenter.shared.upload(channel, urls)
             input.attach(urls.filter { paths[$0] != nil }, paths: paths)
         }
     }
@@ -279,6 +321,44 @@ private struct RunningInput: View {
             }
         }
         .frame(minHeight: 20)
+    }
+}
+
+private struct ChangesChip: View {
+    let files: Int
+    let added: Int
+    let removed: Int
+    var isActive = false
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "doc").chipIcon()
+            Text("\(files)")
+            Text("\u{2022}").foregroundStyle(Theme.secondaryText.color)
+            Text("+\(added)").foregroundStyle(Theme.added.color)
+            Text("-\(removed)").foregroundStyle(Theme.removed.color)
+        }
+        .chipStyle()
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.accentColor.opacity(isActive ? 0.22 : hovering ? 0.14 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color.accentColor.opacity(isActive || hovering ? 0.7 : 0), lineWidth: 1)
+        )
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .animation(.easeOut(duration: 0.12), value: isActive)
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { inside in
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear {
+            if hovering { NSCursor.pop() }
+            hovering = false
+        }
     }
 }
 

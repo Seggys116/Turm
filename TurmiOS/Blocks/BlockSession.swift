@@ -54,6 +54,11 @@ protocol BlockSession: AnyObject, Observable {
 
     var revealTitle: String? { get }
     func reveal(_ path: String)
+
+    var files: String? { get set }
+    func listFiles(in path: String) async throws -> [RemoteFileEntry]
+    func readFile(at path: String) async throws -> Data
+    func upload(data: Data, named name: String, to directory: String) async throws
 }
 
 extension BlockSession {
@@ -89,4 +94,21 @@ extension BlockSession {
 
     var revealTitle: String? { nil }
     func reveal(_ path: String) {}
+
+    var files: String? {
+        get { nil }
+        set { }
+    }
+
+    func listFiles(in path: String) async throws -> [RemoteFileEntry] {
+        throw BlockSessionError(text: "Files are not available in this session.")
+    }
+
+    func readFile(at path: String) async throws -> Data {
+        throw BlockSessionError(text: "Files are not available in this session.")
+    }
+
+    func upload(data: Data, named name: String, to directory: String) async throws {
+        throw BlockSessionError(text: "Files are not available in this session.")
+    }
 }

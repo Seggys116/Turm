@@ -51,6 +51,11 @@ struct RemotePathMenu: View {
 
     var body: some View {
         MenuSurface(width: 240) {
+            MenuRow(title: session.showsFiles ? "Hide Files" : "Show Files", symbol: "sidebar.left") {
+                session.showsFiles.toggle()
+                close()
+            }
+            MenuDivider()
             MenuRow(title: "Copy Path", symbol: "doc.on.doc") {
                 copyToPasteboard(session.directory)
                 close()

@@ -40,6 +40,9 @@ struct PaneCommands: Commands {
                 .keyboardShortcut("t")
             Button("New Shell") { workspace?.newShell() }
                 .keyboardShortcut("t", modifiers: [.command, .option])
+            Button(workspace?.focusedSession?.showsFiles == true ? "Hide Files" : "Show Files") {
+                workspace?.focusedSession?.showsFiles.toggle()
+            }
             Button("Next Shell") { workspace?.selectNextTab() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Shell") { workspace?.selectPreviousTab() }

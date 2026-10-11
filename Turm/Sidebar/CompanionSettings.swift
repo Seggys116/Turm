@@ -10,6 +10,8 @@ struct CompanionSettings: View {
     var macs = RemoteMacManager.shared
     @AppStorage(CompanionServer.enabledKey) private var enabled = false
     @AppStorage(CompanionServer.portKey) private var storedPort = Int(Companion.defaultPort)
+    @AppStorage("turm.companion.uploads") private var uploadsEnabled = false
+    @AppStorage("turm.companion.uploadRoot") private var uploadRoot = ""
     @Environment(\.openWindow) private var openWindow
     @State private var portText = ""
     @State private var addresses: [CompanionAddresses.Entry] = []
@@ -48,6 +50,17 @@ struct CompanionSettings: View {
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
                     .onChange(of: enabled) { _, _ in server.settingsChanged() }
+            }
+            SettingsFormRow("Allow file uploads", detail: "A paired device can upload into the folder you choose. Off until you turn it on.") {
+                Toggle("Allow file uploads", isOn: $uploadsEnabled)
+                    .labelsHidden()
+                    .toggleStyle(SquareToggleStyle())
+            }
+            if uploadsEnabled {
+                SettingsFormRow("Upload folder", detail: uploadRoot.isEmpty ? "Choose a folder. Uploads outside it are refused." : uploadRoot) {
+                    Button("Choose...") { chooseUploadFolder() }
+                        .buttonStyle(SettingsButtonStyle())
+                }
             }
             SettingsFormRow("Port", detail: portValue == nil ? "Use a number from 1024 to 65535." : "Press Return to apply.") {
                 TextField("\(Companion.defaultPort)", text: $portText)
@@ -97,6 +110,17 @@ struct CompanionSettings: View {
                 Button("Open Remote Macs") { openWindow(id: RemoteMacsWindow.id) }
                     .buttonStyle(SettingsButtonStyle())
             }
+        }
+    }
+
+    private func chooseUploadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url {
+            uploadRoot = url.path
         }
     }
 

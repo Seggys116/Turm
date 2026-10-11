@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -22,11 +23,23 @@ struct TerminalPaneView: View {
     }
 
     var body: some View {
+        HStack(spacing: 0) {
+            if session.showsFiles {
+                FileSidebar(session: session)
+                Rectangle()
+                    .fill(Theme.divider.color)
+                    .frame(width: 1)
+            }
+            terminal
+        }
+    }
+
+    private var terminal: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
                 Group {
                     if let altScreen = session.altScreen {
-                        AltScreenView(host: altScreen, isFocused: isFocused && !isWatchingAction)
+                        AltScreenView(host: altScreen, isFocused: isFocused && !isWatchingAction, onFocus: session.focus)
                             .id(ObjectIdentifier(altScreen))
                     } else {
                         VStack(spacing: 0) {
@@ -73,6 +86,9 @@ struct TerminalPaneView: View {
             }
             .animation(.easeOut(duration: 0.18), value: showsBar)
             .animation(.easeOut(duration: 0.2), value: isWatchingAction)
+            .overlay {
+                ActivatingClickCatcher { session.focus() }
+            }
             .onChange(of: session.current?.revision) { session.search.contentChanged() }
             .onChange(of: session.blocks.count) { session.search.contentChanged() }
             .onChange(of: session.current?.isRunning) { session.search.contentChanged() }
@@ -100,13 +116,19 @@ struct TerminalPaneView: View {
                 if session.phase == .running {
                     session.pasteFiles(urls)
                 } else if let channel = session.remoteChannel {
-                    let paths = await channel.upload(urls)
+                    let paths = await TransferCenter.shared.upload(channel, urls)
                     session.input.attach(urls.filter { paths[$0] != nil }, paths: paths)
                 } else {
                     session.input.attach(urls)
                 }
             }
             return true
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if isFocused {
+                TransferStack()
+                    .padding(12)
+            }
         }
     }
 
@@ -134,6 +156,7 @@ enum TerminalMetrics {
 private struct AltScreenView: NSViewRepresentable {
     let host: AltScreenHost
     let isFocused: Bool
+    let onFocus: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> AltContainer {
@@ -141,9 +164,55 @@ private struct AltScreenView: NSViewRepresentable {
     }
 
     func updateNSView(_ container: AltContainer, context: Context) {
+        host.view.onMouseDown = onFocus
         host.apply(dark: colorScheme == .dark)
         container.wantsFocus = isFocused
         container.focusIfWanted()
+    }
+}
+
+private struct ActivatingClickCatcher: NSViewRepresentable {
+    let onClick: () -> Void
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onClick = onClick
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onClick = onClick
+    }
+}
+
+private final class CatcherView: NSView {
+    var onClick: () -> Void = {}
+    private var passing = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !passing, needsActivation else { return nil }
+        return bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick()
+        forward(event)
+    }
+
+    private var needsActivation: Bool {
+        window?.isKeyWindow == false
+    }
+
+    private func forward(_ event: NSEvent) {
+        guard let content = window?.contentView, let superview = content.superview else { return }
+        passing = true
+        let target = content.hitTest(superview.convert(event.locationInWindow, from: nil))
+        if let target, target !== self {
+            target.mouseDown(with: event)
+        }
+        passing = false
     }
 }
 

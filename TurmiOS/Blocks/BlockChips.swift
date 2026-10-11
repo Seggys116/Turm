@@ -86,7 +86,15 @@ struct FolderChip<Session: BlockSession>: View {
         let changeDirectory = ChromeMenuItem(title: "cd Here", systemImage: "arrow.turn.down.right", isEnabled: session.phase == .ready) {
             session.changeDirectory(to: path)
         }
-        items.append(items.isEmpty ? changeDirectory : changeDirectory.separatedFromPrevious())
+        if FolderActions.offersChangeDirectory(folder: path, workingDirectory: session.directory) {
+            items.append(items.isEmpty ? changeDirectory : changeDirectory.separatedFromPrevious())
+        }
+        if FolderActions.offersFiles(folder: path) {
+            let files = ChromeMenuItem(title: "Files", systemImage: "folder") {
+                session.files = path
+            }
+            items.append(items.isEmpty ? files : files.separatedFromPrevious())
+        }
         if let revealTitle = session.revealTitle {
             items.append(ChromeMenuItem(title: revealTitle, systemImage: "folder") { session.reveal(path) })
         }

@@ -93,6 +93,7 @@ final class SSHTerminalSession: Identifiable, TerminalTab {
     var prompt: Prompt?
     var editor: ShortcutTarget?
     var showsBranches = false
+    var files: String?
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var client: SSHClient?
@@ -694,6 +695,54 @@ extension SSHTerminalSession: BlockSession {
 
     func changeDirectory(to path: String) {
         shell.changeDirectory(to: path)
+    }
+
+    func listFiles(in path: String) async throws -> [RemoteFileEntry] {
+        let listed = try await remoteListing(path)
+        return listed.entries.map {
+            RemoteFileEntry(name: $0.name, isDirectory: $0.isDirectory, size: $0.size, modified: $0.modified?.timeIntervalSince1970)
+        }
+    }
+
+    func readFile(at path: String) async throws -> Data {
+        guard let client, shell.isEstablished else { throw BlockSessionError(text: "Not connected to \(host.key).") }
+        guard let result = await SSHRemoteExec.script(client, RemoteFiles.readEncodedScript(path), timeout: .seconds(60)) else {
+            throw BlockSessionError(text: "The host did not answer.")
+        }
+        switch result.status {
+        case 0:
+            guard let data = Data(base64Encoded: result.output, options: .ignoreUnknownCharacters) else {
+                throw BlockSessionError(text: "Could not read \(path).")
+            }
+            return data
+        case 5:
+            throw BlockSessionError(text: "This file is too large to open here.")
+        default:
+            throw BlockSessionError(text: "Could not read \(path).")
+        }
+    }
+
+    func upload(data: Data, named name: String, to directory: String) async throws {
+        guard data.count <= RemoteFiles.maxMediaBytes else { throw BlockSessionError(text: "This file is too large to send.") }
+        let entries = try await listFiles(in: directory)
+        let unique = FileNames.suffixed(name, existing: Set(entries.map(\.name)))
+        let path = (directory as NSString).appendingPathComponent(unique)
+        guard let client, shell.isEstablished else { throw BlockSessionError(text: "Not connected to \(host.key).") }
+        let script = RemoteFiles.writeEncodedScript(path, encoded: data.base64EncodedString())
+        guard let result = await SSHRemoteExec.script(client, script, timeout: .seconds(60)) else {
+            throw BlockSessionError(text: "The host did not answer.")
+        }
+        guard result.status == 0 else { throw BlockSessionError(text: "Could not send \(name).") }
+    }
+
+    private func remoteListing(_ path: String) async throws -> ListedDirectory {
+        guard let client, shell.isEstablished else { throw BlockSessionError(text: "Not connected to \(host.key).") }
+        guard let result = await SSHRemoteExec.script(client, RemoteFiles.listScript(path), timeout: .seconds(20)) else {
+            throw BlockSessionError(text: "The host did not answer.")
+        }
+        if result.status == 3 { throw BlockSessionError(text: "Could not read \(path).") }
+        guard result.status == 0 else { throw BlockSessionError(text: "Could not read \(path).") }
+        return RemoteFiles.parseListing(result.output, directory: path)
     }
 
     func setViewport(_ size: CGSize, fontSize: Double) {

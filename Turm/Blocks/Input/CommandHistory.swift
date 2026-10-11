@@ -10,6 +10,10 @@ final class CommandHistory {
         self.entries = entries ?? Self.loadZshHistory()
     }
 
+    func restore(_ commands: [String]) {
+        entries = Array(commands.suffix(limit))
+    }
+
     func record(_ command: String) {
         entries.removeAll { $0 == command }
         entries.append(command)

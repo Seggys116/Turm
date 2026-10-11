@@ -127,6 +127,11 @@ struct RemoteGitTests {
         #expect(RemoteGit.switchScript(to: "feat/x y", in: "/r").hasSuffix("git switch 'feat/x y' 2>&1"))
     }
 
+    @Test func createScriptQuotesTheBranch() {
+        #expect(RemoteGit.createScript(named: "feat/x y", in: "/r").hasSuffix("git switch --create='feat/x y' 2>&1"))
+        #expect(RemoteGit.createScript(named: "it's", in: "/r").hasSuffix("git switch --create='it'\\''s' 2>&1"))
+    }
+
     @Test func parseStatusReadsBranchAndNumstat() {
         let git = RemoteGit.parseStatus("main\n3\t1\tsrc/a.swift\n-\t-\timage.png\n10\t0\tb.txt\n")
         #expect(git == CompanionGit(branch: "main", files: 3, added: 13, removed: 1))

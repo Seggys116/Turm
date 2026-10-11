@@ -43,6 +43,8 @@ final class MacShell {
         }
     }
 
+    var macID: UUID? { connection?.id }
+
     func link(to connection: MacConnection) {
         self.connection = connection
     }
@@ -155,6 +157,11 @@ final class MacShell {
         guard let block = blocks.last(where: { $0.id == id }), block.isRunning else { return }
         block.finish(exitCode: exitCode)
         leaveFullScreen(restoring: true)
+        let command = block.command
+        let duration: Duration = block.duration.map { .seconds($0) } ?? .seconds(0)
+        Task { @MainActor in
+            FinishNotifier.deliver(command: command, exitCode: exitCode, duration: duration, shellEnabled: true)
+        }
     }
 
     private func trimBlocks() {

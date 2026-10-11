@@ -296,6 +296,7 @@ final class CompanionServer {
             listener?.cancel()
             listener = nil
             status = .failed(describe(error))
+            if case .posix(.EADDRINUSE) = error { return }
             scheduleRetry()
         case .waiting(let error):
             status = .failed(describe(error))

@@ -259,6 +259,18 @@ struct SettingsView: View {
                 SlidingPicker(selection: $sidebarPlacement, options: SidebarPlacement.allCases, title: \.title)
                     .frame(width: 240)
             }
+            row("Restore windows", detail: "Reopen windows, folders and finished commands. The files are in Application Support and can contain command output.") {
+                Toggle("Restore windows", isOn: Binding(
+                    get: { WorkspacePersistence.restoreEnabled() },
+                    set: { WorkspacePersistence.setRestoreEnabled($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(SquareToggleStyle())
+            }
+            row("Saved workspace", detail: "Remove the stored windows and command output from this Mac.") {
+                Button("Clear Saved Workspace") { WorkspacePersistence.clear() }
+                    .buttonStyle(SettingsButtonStyle())
+            }
         }
     }
 

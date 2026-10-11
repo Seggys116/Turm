@@ -29,9 +29,16 @@ final class KeyView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func becomeFirstResponder() -> Bool {
         session?.focus()
         return true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        session?.focus()
+        super.mouseDown(with: event)
     }
 
     override func keyDown(with event: NSEvent) {

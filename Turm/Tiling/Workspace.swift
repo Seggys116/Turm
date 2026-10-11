@@ -1,17 +1,26 @@
 import Foundation
 import Observation
+import TurmCore
 
 nonisolated enum TileItem: Equatable, Sendable {
     case tab(UUID)
     case pane(PaneID)
 }
 
-nonisolated struct ShellTab: Identifiable, Equatable, Sendable {
-    let id = UUID()
+nonisolated struct ShellTab: Identifiable, Equatable, Sendable, Codable {
+    let id: UUID
     var layout: PaneNode
     var focusedPane: PaneID
-    var isSettings = false
+    var isSettings: Bool
     var title: String?
+
+    init(id: UUID = UUID(), layout: PaneNode, focusedPane: PaneID, isSettings: Bool = false, title: String? = nil) {
+        self.id = id
+        self.layout = layout
+        self.focusedPane = focusedPane
+        self.isSettings = isSettings
+        self.title = title
+    }
 }
 
 struct ShellTransfer {
@@ -19,11 +28,35 @@ struct ShellTransfer {
     let focusedPane: PaneID
     let title: String?
     let sessions: [PaneID: TerminalSession]
+    var viewers: [PaneID: ViewerPane] = [:]
+}
+
+enum ViewerPane: Equatable {
+    case diff(shell: PaneID, staged: Bool)
+    case file(path: String)
+    case remoteFile(shell: PaneID, path: String)
+
+    var title: String {
+        switch self {
+        case .diff(_, let staged): staged ? "Staged diff" : "Diff"
+        case .file(let path): (path as NSString).lastPathComponent
+        case .remoteFile(_, let path): (path as NSString).lastPathComponent
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .diff: "plus.forwardslash.minus"
+        case .file, .remoteFile: "doc.text"
+        }
+    }
 }
 
 @Observable
 final class Workspace {
-    private(set) var tabs: [ShellTab]
+    private(set) var tabs: [ShellTab] {
+        didSet { persistLayout() }
+    }
     private(set) var activeTabID: UUID {
         didSet {
             guard oldValue != activeTabID else { return }
@@ -34,16 +67,26 @@ final class Workspace {
     private var recentTabs: [UUID] = []
     private var sessions: [PaneID: TerminalSession] = [:]
     private let closeCoordinator: CloseCoordinator
+    let windowID: UUID
+    var restoredDiffs: [PaneID: SavedDiff] = [:]
+    var viewers: [PaneID: ViewerPane] = [:]
+    private(set) var savedFrame: SavedFrame?
+    private(set) var savedIsKey = false
+    private(set) var didTerminate = false
 
     var onEmpty: () -> Void = {}
 
+    var persistsToDisk: Bool { closeCoordinator === CloseCoordinator.shared }
+
     init(closeCoordinator: CloseCoordinator = .shared, transfer: ShellTransfer? = nil) {
         self.closeCoordinator = closeCoordinator
+        self.windowID = UUID()
         if let transfer {
             let tab = ShellTab(layout: transfer.layout, focusedPane: transfer.focusedPane, title: transfer.title)
             tabs = [tab]
             activeTabID = tab.id
             transfer.sessions.forEach { bind($1, to: $0) }
+            transfer.viewers.forEach { viewers[$0.key] = $0.value }
         } else {
             let first = PaneID()
             let tab = ShellTab(layout: .leaf(first), focusedPane: first)
@@ -54,7 +97,109 @@ final class Workspace {
         closeCoordinator.register(self)
     }
 
+    init(restoring window: SavedWindow, closeCoordinator: CloseCoordinator = .shared) {
+        self.closeCoordinator = closeCoordinator
+        self.windowID = window.id
+        var built: [ShellTab] = []
+        var diffs: [PaneID: SavedDiff] = [:]
+        var created: [PaneID: TerminalSession] = [:]
+        let known = Set(window.panes.map { PaneID(raw: $0.id) })
+        for tab in window.tabs {
+            let full = WorkspaceArchive.paneNode(tab.layout)
+            guard let layout = full.stripping(Set(full.leaves.filter { !known.contains($0) })) else { continue }
+            let focused = PaneID(raw: tab.focusedPane)
+            let resolved = layout.contains(focused) ? focused : (layout.leaves.first ?? focused)
+            built.append(ShellTab(id: tab.id, layout: layout, focusedPane: resolved, title: tab.title))
+            for pane in window.panes where layout.leaves.contains(PaneID(raw: pane.id)) {
+                let id = PaneID(raw: pane.id)
+                guard created[id] == nil else { continue }
+                created[id] = WorkspaceArchive.session(for: pane)
+                if case .diff(let diff) = pane.content { diffs[id] = diff }
+            }
+        }
+        if built.isEmpty {
+            let first = PaneID()
+            built = [ShellTab(layout: .leaf(first), focusedPane: first)]
+            created[first] = TerminalSession()
+        }
+        self.tabs = built
+        self.activeTabID = built.first { $0.id == window.activeTabID }?.id ?? built[0].id
+        self.restoredDiffs = diffs
+        self.savedFrame = window.frame
+        closeCoordinator.register(self)
+        created.forEach { bind($1, to: $0) }
+    }
+
+    func noteFrame(_ rect: NSRect, isKey: Bool) {
+        savedFrame = SavedFrame(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
+        savedIsKey = isKey
+    }
+
+    func captureWindow() -> SavedWindow {
+        let hidden = Set(viewers.keys)
+        let visible = tabs.compactMap { tab -> ShellTab? in
+            guard let layout = tab.layout.stripping(hidden) else { return nil }
+            var copy = tab
+            copy.layout = layout
+            if !layout.contains(copy.focusedPane), let first = layout.leaves.first {
+                copy.focusedPane = first
+            }
+            return copy
+        }
+        let saving = visible
+        let active = saving.contains { $0.id == activeTabID } ? activeTabID : (saving.first?.id ?? activeTabID)
+        return WorkspaceArchive.capture(
+            windowID: windowID, frame: savedFrame, tabs: saving, activeTabID: active, sessions: archivedSessions()
+        )
+    }
+
+    func archivedSessions() -> [ArchivedSession] {
+        sessionEntries.map { pane, session in
+            let hostID = session.restoredHostID ?? session.connection?.host?.id
+            let target = session.remoteTarget ?? session.restoredTarget
+            let remote = session.isRemote || hostID != nil || target != nil
+            let directory: String
+            let sshHostID: UUID?
+            let localDirectory: String?
+            let remoteTarget: String?
+            if remote {
+                directory = session.directory
+                sshHostID = hostID
+                localDirectory = session.localDirectory
+                remoteTarget = target?.identifier
+            } else {
+                directory = session.directory
+                sshHostID = nil
+                localDirectory = nil
+                remoteTarget = nil
+            }
+            let blocks = session.blocks.filter { !$0.isRunning }.map { block in
+                SavedBlock(
+                    id: block.id, command: block.command, directory: block.directory, gitBranch: block.git?.branch,
+                    host: block.host, exitCode: block.exitCode, duration: block.duration.map(WorkspaceArchive.seconds),
+                    output: block.plainOutput
+                )
+            }
+            return ArchivedSession(
+                pane: pane, directory: directory, shell: session.archiveShell, history: BlockArchive.cappedHistory(session.history.entries),
+                sshHostID: sshHostID, localDirectory: localDirectory, remoteTarget: remoteTarget,
+                showsFiles: session.showsFiles, blocks: blocks
+            )
+        }
+    }
+
+    private func persistLayout() {
+        guard !didTerminate else { return }
+        WorkspacePersistence.save(self)
+    }
+
+    private func persistBlocks() {
+        guard !didTerminate else { return }
+        WorkspacePersistence.saveBlocks(of: self)
+    }
+
     deinit {
+        didTerminate = true
         sessions.values.forEach { $0.terminate() }
     }
 
@@ -97,15 +242,24 @@ final class Workspace {
     }
 
     func terminateAll() {
+        guard !didTerminate else { return }
+        didTerminate = true
         let closing = Array(sessions.values)
         sessions.removeAll()
-        closing.forEach { $0.terminate() }
+        for session in closing {
+            session.onLayoutChange = {}
+            session.onBlockFinished = {}
+            session.onExit = {}
+            session.onFocus = {}
+            session.onPopOut = { _ in }
+            session.terminate()
+        }
     }
 
     func split(_ axis: SplitAxis) {
         guard !tabs[activeIndex].isSettings else { return }
         let newPane = PaneID()
-        sessions[newPane] = makeSession(for: newPane)
+        sessions[newPane] = makeSession(for: newPane, directory: focusedSession?.launchDirectory)
         let index = activeIndex
         tabs[index].layout = tabs[index].layout.splitting(tabs[index].focusedPane, axis: axis, inserting: newPane)
         tabs[index].focusedPane = newPane
@@ -194,9 +348,38 @@ final class Workspace {
     }
 
     func close(_ pane: PaneID) {
+        if viewers[pane] != nil {
+            viewers[pane] = nil
+            lift(pane)
+            return
+        }
         guard let session = sessions[pane] else { return }
         if session.needsCloseConfirmation, !closeCoordinator.confirm(.shell) { return }
         removePane(pane)
+    }
+
+    func openDiff(from session: TerminalSession, staged: Bool) {
+        guard let pane = sessions.first(where: { $0.value === session })?.key else { return }
+        openViewer(.diff(shell: pane, staged: staged), beside: pane)
+    }
+
+    func openFile(_ path: String) {
+        guard tabs.contains(where: { $0.layout.contains(focusedPane) }), !tabs[activeIndex].isSettings else { return }
+        openViewer(.file(path: path), beside: focusedPane)
+    }
+
+    func openRemoteFile(_ path: String, from session: TerminalSession) {
+        guard let pane = sessions.first(where: { $0.value === session })?.key else { return }
+        openViewer(.remoteFile(shell: pane, path: path), beside: pane)
+    }
+
+    private func openViewer(_ viewer: ViewerPane, beside pane: PaneID) {
+        guard let index = tabs.firstIndex(where: { $0.layout.contains(pane) }), !tabs[index].isSettings else { return }
+        let id = PaneID()
+        viewers[id] = viewer
+        tabs[index].layout = tabs[index].layout.splitting(pane, axis: .horizontal, inserting: id)
+        tabs[index].focusedPane = id
+        if tabs[index].id != activeTabID { activeTabID = tabs[index].id }
     }
 
     private func removePane(_ pane: PaneID) {
@@ -234,7 +417,7 @@ final class Workspace {
             guard let tab = tabs.first(where: { $0.id == id }), !tab.isSettings else { return false }
             return tabs.count > 1
         case .pane(let pane):
-            guard sessions[pane] != nil else { return false }
+            guard owns(pane) else { return false }
             return tabs.count > 1 || canBreakOut(pane)
         }
     }
@@ -246,20 +429,22 @@ final class Workspace {
             guard let found = tabs.first(where: { $0.id == id }), !found.isSettings else { return nil }
             tab = found
         case .pane(let pane):
-            guard sessions[pane] != nil else { return nil }
+            guard owns(pane) else { return nil }
             tab = ShellTab(layout: .leaf(pane), focusedPane: pane)
         }
         var moved: [PaneID: TerminalSession] = [:]
+        var movedViewers: [PaneID: ViewerPane] = [:]
         for pane in tab.layout.leaves {
-            guard let session = sessions.removeValue(forKey: pane) else { continue }
-            moved[pane] = session
+            if let session = sessions.removeValue(forKey: pane) { moved[pane] = session }
+            if let viewer = viewers.removeValue(forKey: pane) { movedViewers[pane] = viewer }
         }
         tab.layout.leaves.forEach(lift)
-        return ShellTransfer(layout: tab.layout, focusedPane: tab.focusedPane, title: tab.title, sessions: moved)
+        return ShellTransfer(layout: tab.layout, focusedPane: tab.focusedPane, title: tab.title, sessions: moved, viewers: movedViewers)
     }
 
     func receive(_ transfer: ShellTransfer) {
         transfer.sessions.forEach { bind($1, to: $0) }
+        transfer.viewers.forEach { viewers[$0.key] = $0.value }
         let tab = ShellTab(layout: transfer.layout, focusedPane: transfer.focusedPane, title: transfer.title)
         tabs.insert(tab, at: activeIndex + 1)
         activeTabID = tab.id
@@ -278,7 +463,7 @@ final class Workspace {
             guard id != active.id, let tab = tabs.first(where: { $0.id == id }) else { return false }
             return !tab.isSettings && drop.edge != nil
         case .pane(let pane):
-            guard sessions[pane] != nil, drop.anchor != .pane(pane) else { return false }
+            guard owns(pane), drop.anchor != .pane(pane) else { return false }
             if active.layout.contains(pane) { return active.layout.leaves.count > 1 }
             return drop.edge != nil
         }
@@ -314,7 +499,7 @@ final class Workspace {
     }
 
     func canBreakOut(_ pane: PaneID) -> Bool {
-        sessions[pane] != nil && (tab(containing: pane)?.layout.leaves.count ?? 0) > 1
+        owns(pane) && (tab(containing: pane)?.layout.leaves.count ?? 0) > 1
     }
 
     func breakOut(_ pane: PaneID) {
@@ -333,6 +518,10 @@ final class Workspace {
     func equalizePanes(only split: UUID? = nil) {
         let index = activeIndex
         tabs[index].layout = tabs[index].layout.equalized(only: split)
+    }
+
+    private func owns(_ pane: PaneID) -> Bool {
+        sessions[pane] != nil || viewers[pane] != nil
     }
 
     private func removeTab(at index: Int) {
@@ -402,8 +591,13 @@ final class Workspace {
 
     private func bind(_ session: TerminalSession, to pane: PaneID) {
         session.onFocus = { [weak self] in self?.focusInActiveTab(pane) }
-        session.onExit = { [weak self] in self?.removePane(pane) }
+        session.onExit = { [weak self] in
+            guard !WorkspacePersistence.isQuitting else { return }
+            self?.removePane(pane)
+        }
         session.onPopOut = { [weak self] sub in self?.adopt(sub, from: pane) }
+        session.onLayoutChange = { [weak self] in self?.persistLayout() }
+        session.onBlockFinished = { [weak self] in self?.persistBlocks() }
         sessions[pane] = session
     }
 

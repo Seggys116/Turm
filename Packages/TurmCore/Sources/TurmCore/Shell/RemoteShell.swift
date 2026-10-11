@@ -185,6 +185,10 @@ public nonisolated enum RemoteGit {
         script(in: directory, "git switch " + quote(name) + " 2>&1")
     }
 
+    public static func createScript(named name: String, in directory: String) -> String {
+        script(in: directory, "git switch --create=" + quote(name) + " 2>&1")
+    }
+
     public static func parseStatus(_ output: String) -> CompanionGit? {
         guard let newline = output.firstIndex(of: "\n") else {
             let name = output.trimmingCharacters(in: .whitespacesAndNewlines)

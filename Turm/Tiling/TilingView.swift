@@ -12,22 +12,26 @@ struct TilingView: View {
             let layout = PaneLayout(node: node, size: geometry.size)
             ZStack(alignment: .topLeading) {
                 ForEach(layout.panes, id: \.id) { pane in
-                    if let session = workspace.session(for: pane.id) {
-                        TerminalPaneView(session: session, isFocused: isActive && focusedPane == pane.id)
-                            .opacity(isActive && tileDrag.item == .pane(pane.id) ? 0.45 : 1)
-                            .overlay {
-                                if isActive, tileDrag.hovered.contains(pane.id) {
-                                    // square inside the grid, matching the window's rounding where the pane meets its corner
-                                    ConcentricRectangle(corners: .concentric(minimum: .fixed(0)), isUniform: false)
-                                        .stroke(Color.accentColor.opacity(0.9), lineWidth: 2)
-                                        .padding(1)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .animation(.easeOut(duration: 0.12), value: tileDrag.hovered.contains(pane.id))
-                            .frame(width: pane.frame.width, height: pane.frame.height)
-                            .position(x: pane.frame.midX, y: pane.frame.midY)
+                    Group {
+                        if let viewer = workspace.viewers[pane.id] {
+                            ViewerPaneView(workspace: workspace, pane: pane.id, viewer: viewer)
+                        } else if let session = workspace.session(for: pane.id) {
+                            TerminalPaneView(session: session, isFocused: isActive && focusedPane == pane.id)
+                        }
                     }
+                    .opacity(isActive && tileDrag.item == .pane(pane.id) ? 0.45 : 1)
+                    .overlay {
+                        if isActive, tileDrag.hovered.contains(pane.id) {
+                            ConcentricRectangle(corners: .concentric(minimum: .fixed(0)), isUniform: false)
+                                .stroke(Color.accentColor.opacity(0.9), lineWidth: 2)
+                                .padding(1)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.12), value: tileDrag.hovered.contains(pane.id))
+                    .frame(width: pane.frame.width, height: pane.frame.height)
+                    .clipped()
+                    .position(x: pane.frame.midX, y: pane.frame.midY)
                 }
                 ForEach(layout.dividers, id: \.split) { divider in
                     SplitDivider(divider: divider) { workspace.resize(split: divider.split, to: $0) } onReset: {
@@ -57,11 +61,11 @@ struct TilingView: View {
     }
 
     private func beginDrag(at point: CGPoint, in layout: PaneLayout) -> Bool {
-        guard !tileDrag.isActive, let pane = layout.panes.first(where: { $0.frame.contains(point) }),
-              let session = workspace.session(for: pane.id)
-        else { return false }
+        guard !tileDrag.isActive, let pane = layout.panes.first(where: { $0.frame.contains(point) }) else { return false }
+        let title = workspace.session(for: pane.id).map { $0.customTitle ?? $0.location } ?? workspace.viewers[pane.id]?.title
+        guard let title else { return false }
         workspace.focus(pane.id)
-        tileDrag.begin(.pane(pane.id), title: session.customTitle ?? session.location, in: workspace)
+        tileDrag.begin(.pane(pane.id), title: title, in: workspace)
         return true
     }
 }

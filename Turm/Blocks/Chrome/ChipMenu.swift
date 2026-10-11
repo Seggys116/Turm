@@ -3,6 +3,7 @@ import SwiftUI
 import TurmCore
 
 struct PathMenu: View {
+    let session: TerminalSession
     let path: String
     let close: () -> Void
     let editShortcut: () -> Void
@@ -20,6 +21,10 @@ struct PathMenu: View {
                 MenuRow(title: "Add Shortcut...", symbol: "at", action: editShortcut)
             }
             MenuDivider()
+            MenuRow(title: session.showsFiles ? "Hide Files" : "Show Files", symbol: "sidebar.left") {
+                session.showsFiles.toggle()
+                close()
+            }
             MenuRow(title: "Open in Finder", symbol: "folder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 close()
@@ -39,6 +44,7 @@ struct PathMenu: View {
 struct BranchMenu: View {
     let session: TerminalSession
     let close: () -> Void
+    let create: () -> Void
     @State private var branches: [String]?
     @State private var error: String?
     @State private var switching: String?
@@ -59,6 +65,7 @@ struct BranchMenu: View {
             }
             list
             MenuDivider()
+            MenuRow(title: "New Branch...", symbol: "plus", action: create)
             MenuRow(title: "Copy Branch Name", symbol: "doc.on.doc") {
                 if let name = session.git?.branch { copyToPasteboard(name) }
                 close()
@@ -97,6 +104,75 @@ struct BranchMenu: View {
         Task {
             let failure = await session.switchBranch(to: name)
             switching = nil
+            if let failure {
+                error = failure
+            } else {
+                close()
+            }
+        }
+    }
+}
+
+struct NewBranchPanel: View {
+    let create: (String) async -> String?
+    let close: () -> Void
+    @State private var name = ""
+    @State private var error: String?
+    @State private var creating = false
+    @FocusState private var focused: Bool
+
+    private var trimmed: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("New Branch")
+                .font(.system(size: 13, weight: .medium))
+            Text("Creates a branch from the current commit and switches to it.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.secondaryText.color)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Branch name", text: $name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(8)
+                .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: 6))
+                .focused($focused)
+                .disabled(creating)
+                .onSubmit { confirm() }
+                .onChange(of: name) { _, _ in error = nil }
+            if let error {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.failure.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: close)
+                    .buttonStyle(SettingsButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Create", action: confirm)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmed.isEmpty || creating)
+            }
+        }
+        .padding(14)
+        .frame(width: 280)
+        .background(Theme.inputBackground.color)
+        .onAppear { focused = true }
+    }
+
+    private func confirm() {
+        guard !trimmed.isEmpty, !creating else { return }
+        creating = true
+        error = nil
+        let requested = trimmed
+        Task {
+            let failure = await create(requested)
+            creating = false
             if let failure {
                 error = failure
             } else {

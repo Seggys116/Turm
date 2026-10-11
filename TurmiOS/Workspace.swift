@@ -47,6 +47,10 @@ final class Workspace {
         sessions.first { $0.id == selectedID }
     }
 
+    init() {
+        loadPhoneWorkspace()
+    }
+
     func open(_ host: SSHHost) {
         let session = SSHTerminalSession(host: host)
         watchExit(of: session)
@@ -94,12 +98,14 @@ final class Workspace {
     private func append(_ tab: any TerminalTab) {
         sessions.append(tab)
         SessionHub.shared.assign(tab.id, to: self)
+        persistSessions()
     }
 
     private func remove(at index: Int) {
         let id = sessions[index].id
         sessions.remove(at: index)
         SessionHub.shared.unassign(id, from: self)
+        persistSessions()
         guard selectedID == id else { return }
         selectedID = sessions.indices.contains(index) ? sessions[index].id : sessions.last?.id
         if selectedID == nil { compactColumn = .sidebar }
@@ -121,5 +127,42 @@ final class Workspace {
             _ = view.resignFirstResponder()
             view.removeFromSuperview()
         }
+    }
+
+
+    private var phoneStore: WorkspaceStore {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return WorkspaceStore(root: appSupport.appendingPathComponent("Turm/PhoneWorkspace"))
+    }
+
+    private func persistSessions() {
+        let phoneSessions: [PhoneSession] = sessions.compactMap { tab in
+            if let ssh = tab as? SSHTerminalSession {
+                return PhoneSession(id: ssh.id, kind: .ssh(hostID: ssh.host.id))
+            }
+            if let mac = tab as? MacSession, let macID = mac.shell.macID {
+                return PhoneSession(id: mac.id, kind: .mac(sessionID: mac.id, macID: macID))
+            }
+            return nil
+        }
+        try? phoneStore.save(PhoneWorkspace(sessions: phoneSessions))
+    }
+
+    private func loadPhoneWorkspace() {
+        guard let saved = try? phoneStore.loadPhone() else { return }
+        let hostStore = SSHHostStore.shared
+        for session in saved.sessions {
+            switch session.kind {
+            case .ssh(let hostID):
+                guard let host = hostStore.hosts.first(where: { $0.id == hostID }) else { continue }
+                let sshSession = SSHTerminalSession(host: host)
+                watchExit(of: sshSession)
+                sessions.append(sshSession)
+                SessionHub.shared.assign(sshSession.id, to: self)
+            case .mac:
+                break
+            }
+        }
+        persistSessions()
     }
 }

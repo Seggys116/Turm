@@ -132,6 +132,16 @@ final class CompanionBridge {
             switchBranch(of: session, to: name, for: peer)
         case .revealInFinder(let path):
             reveal(path, for: peer)
+        case .listDirectory(let id, let path):
+            listDirectory(id: id, path: path, for: peer)
+        case .readFile(let id, let path):
+            readFile(id: id, path: path, for: peer)
+        case .writeFile(let id, let path, let data, let overwrite):
+            writeFile(id: id, path: path, data: data, overwrite: overwrite, for: peer)
+        case .diff(let id, let scope):
+            diff(id: id, scope: scope, for: peer)
+        case .cancelTransfer(_):
+            peer.send(.ok(request: "cancelTransfer"))
         default:
             malformed(peer)
         }
@@ -426,6 +436,191 @@ final class CompanionBridge {
             dirty = false
             refreshSummaries()
         }
+    }
+
+    private func listDirectory(id: UUID, path: String, for peer: CompanionPeer) {
+        guard let session = entries[id]?.session else { return notFound(peer) }
+        let sessionDir = session.directory
+        guard !sessionDir.isEmpty else { return fail(peer, "Session has no directory.") }
+
+        let listPath: String
+        switch CompanionWrites.decide(uploadsEnabled: true, path: path, allowedRoot: sessionDir, overwrite: true, exists: false) {
+        case .allow(let normalized):
+            listPath = normalized
+        case .refuse(_):
+            let normPath = URL(fileURLWithPath: path).standardizedFileURL.path
+            let normRoot = URL(fileURLWithPath: sessionDir).standardized.path
+            guard normPath == normRoot else { return fail(peer, "Path is outside the session directory.") }
+            listPath = normRoot
+        }
+
+        let fm = FileManager.default
+        let names: [String]
+        do {
+            names = try fm.contentsOfDirectory(atPath: listPath)
+        } catch {
+            return fail(peer, error.localizedDescription)
+        }
+
+        let dirEntries: [RemoteFileEntry] = names.prefix(CompanionFileLimits.maxListing).compactMap { name in
+            let childPath = (listPath as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: childPath, isDirectory: &isDir) else { return nil }
+            let attrs = try? fm.attributesOfItem(atPath: childPath)
+            return RemoteFileEntry(
+                name: name,
+                isDirectory: isDir.boolValue,
+                size: (attrs?[.size] as? NSNumber)?.int64Value,
+                modified: (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970
+            )
+        }
+        peer.send(.directoryListing(id: id, path: listPath, entries: dirEntries))
+    }
+
+    private func readFile(id: UUID, path: String, for peer: CompanionPeer) {
+        guard let session = entries[id]?.session else { return notFound(peer) }
+        let sessionDir = session.directory
+        guard !sessionDir.isEmpty else { return fail(peer, "Session has no directory.") }
+
+        let normalizedPath: String
+        switch CompanionWrites.decide(uploadsEnabled: true, path: path, allowedRoot: sessionDir, overwrite: true, exists: false) {
+        case .allow(let p):
+            normalizedPath = p
+        case .refuse:
+            return fail(peer, "Path is outside the session directory.")
+        }
+
+        guard FileManager.default.fileExists(atPath: normalizedPath) else { return notFound(peer) }
+
+        do {
+            let raw = try Data(contentsOf: URL(fileURLWithPath: normalizedPath))
+            let (data, truncated) = CompanionFileLimits.cappedData(raw, limit: CompanionFileLimits.maxRead)
+            peer.send(.fileContents(id: id, path: normalizedPath, data: data, truncated: truncated))
+        } catch {
+            fail(peer, error.localizedDescription)
+        }
+    }
+
+    private func writeFile(id: UUID, path: String, data: Data, overwrite: Bool, for peer: CompanionPeer) {
+        guard entries[id]?.session != nil else { return notFound(peer) }
+
+        let exists = FileManager.default.fileExists(atPath: path)
+        if let sessionDir = entries[id]?.session?.directory,
+           let allowed = Self.allowed(path, root: sessionDir, overwrite: overwrite, exists: exists) {
+            return write(allowed, data: data, peer: peer, request: "writeFile")
+        }
+
+        let uploadsOn = UserDefaults.standard.bool(forKey: "turm.companion.uploads")
+        let uploadRoot = UserDefaults.standard.string(forKey: "turm.companion.uploadRoot") ?? ""
+        guard uploadsOn, !uploadRoot.isEmpty else {
+            return fail(peer, "File uploads are not enabled.")
+        }
+        guard data.count <= CompanionFileLimits.maxWrite else {
+            return fail(peer, "File exceeds the maximum upload size.")
+        }
+        switch CompanionWrites.decide(uploadsEnabled: true, path: path, allowedRoot: uploadRoot, overwrite: overwrite, exists: exists) {
+        case .refuse(let reason):
+            return fail(peer, reason)
+        case .allow(let normalizedPath):
+            let resolvedPath = URL(fileURLWithPath: normalizedPath).resolvingSymlinksInPath().path
+            let resolvedRoot = URL(fileURLWithPath: uploadRoot).resolvingSymlinksInPath().path
+            guard Self.isDescendant(resolvedPath, of: resolvedRoot) else {
+                return fail(peer, "Path is outside the allowed root after symlink resolution.")
+            }
+            write(resolvedPath, data: data, peer: peer, request: "writeFile")
+        }
+    }
+
+    private static func allowed(_ path: String, root: String, overwrite: Bool, exists: Bool) -> String? {
+        guard !root.isEmpty else { return nil }
+        switch CompanionWrites.decide(uploadsEnabled: true, path: path, allowedRoot: root, overwrite: overwrite, exists: exists) {
+        case .allow(let normalized):
+            let resolvedPath = URL(fileURLWithPath: normalized).resolvingSymlinksInPath().path
+            let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+            guard isDescendant(resolvedPath, of: resolvedRoot) else { return nil }
+            return resolvedPath
+        case .refuse:
+            return nil
+        }
+    }
+
+    private func write(_ path: String, data: Data, peer: CompanionPeer, request: String) {
+        guard data.count <= CompanionFileLimits.maxWrite else {
+            return fail(peer, "File exceeds the maximum upload size.")
+        }
+        do {
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            peer.send(.ok(request: request))
+        } catch {
+            fail(peer, error.localizedDescription)
+        }
+    }
+
+    private func diff(id: UUID, scope: CompanionDiffScope, for peer: CompanionPeer) {
+        guard let session = entries[id]?.session else { return notFound(peer) }
+        let sessionDir = session.directory
+        guard !sessionDir.isEmpty else { return fail(peer, "Session has no directory.") }
+
+        let args: [String]
+        switch scope {
+        case .unstaged:
+            args = ["diff"]
+        case .staged:
+            args = ["diff", "--cached"]
+        case .commit(let sha):
+            guard (4...64).contains(sha.count), sha.allSatisfy({ $0.isHexDigit }) else {
+                return malformed(peer)
+            }
+            args = ["show", sha]
+        }
+
+        let capturedID = id
+        let dir = sessionDir
+        Task {
+            do {
+                let outputData = try await Self.gitOutput(args, in: dir)
+                let rawText = String(decoding: outputData, as: UTF8.self)
+                let (text, truncated) = CompanionFileLimits.cappedText(rawText, limit: CompanionFileLimits.maxDiff)
+                peer.send(.diffResult(id: capturedID, text: text, truncated: truncated))
+            } catch {
+                peer.send(.error(code: CompanionErrorCode.failed, text: "git: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    private static func gitOutput(_ args: [String], in directory: String) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = args
+            process.currentDirectoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            process.terminationHandler = { p in
+                let output = pipe.fileHandleForReading.readDataToEndOfFile()
+                if p.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    let err = NSError(
+                        domain: "git", code: Int(p.terminationStatus),
+                        userInfo: [NSLocalizedDescriptionKey: "git exited with status \(p.terminationStatus)"]
+                    )
+                    continuation.resume(throwing: err)
+                }
+            }
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+    private static func isDescendant(_ path: String, of root: String) -> Bool {
+        if root == "/" { return path != "/" }
+        return path.hasPrefix(root + "/")
     }
 
     private func sendSnapshot(of session: TerminalSession, to peer: CompanionPeer) {

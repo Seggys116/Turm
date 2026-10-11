@@ -60,9 +60,27 @@ final class WindowCloseView: NSView, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let window = notification.object as? NSWindow { ContextMenuService.shared.unregister(window) }
+        if let window = notification.object as? NSWindow {
+            ContextMenuService.shared.unregister(window)
+            workspace.noteFrame(window.frame, isKey: window.isKeyWindow)
+        }
+        if WorkspacePersistence.savesOnClose(otherVisibleMainWindows: Self.otherMainWindows(besides: window)) {
+            if let window = notification.object as? NSWindow {
+                workspace.noteFrame(window.frame, isKey: true)
+            }
+            WorkspacePersistence.prepareToQuit()
+            WorkspacePersistence.save(workspace)
+        } else {
+            WorkspacePersistence.remove(workspace)
+        }
         workspace.terminateAll()
         originalDelegate?.windowWillClose?(notification)
+    }
+
+    private static func otherMainWindows(besides window: NSWindow?) -> Int {
+        NSApp.windows.filter { candidate in
+            candidate !== window && candidate.isVisible && candidate.canBecomeKey && candidate.level == .normal
+        }.count
     }
 
     override func responds(to selector: Selector!) -> Bool {

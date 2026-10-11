@@ -15,6 +15,11 @@ struct BlockSessionScreen<Session: BlockSession>: View {
             .sheet(isPresented: $session.showsBranches) {
                 BranchSheet(session: session)
             }
+            .sheet(isPresented: filesPresented) {
+                if let path = session.files {
+                    SessionFilesSheet(session: session, root: path)
+                }
+            }
     }
 
     @ViewBuilder
@@ -64,5 +69,9 @@ struct BlockSessionScreen<Session: BlockSession>: View {
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         .background(Chrome.statusBar.ignoresSafeArea(edges: .horizontal))
         .overlay(alignment: .bottom) { Chrome.divider.frame(height: 1) }
+    }
+
+    private var filesPresented: Binding<Bool> {
+        Binding(get: { session.files != nil }, set: { if !$0 { session.files = nil } })
     }
 }

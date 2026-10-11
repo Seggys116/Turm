@@ -1,4 +1,5 @@
 import SwiftUI
+import TurmCore
 
 struct ContentView: View {
     let updater: Updater
@@ -96,6 +97,7 @@ struct ContentView: View {
             .onAppear {
                 workspace.onEmpty = { dismiss() }
                 tileDrag.tearOff = tearOff
+                NewWindowAction.open = { openWindow(id: WindowTransfer.windowID) }
             }
     }
 }
@@ -133,7 +135,14 @@ final class WorkspaceHolder {
     private(set) lazy var workspace: Workspace = {
         let pending = WindowTransfer.shared.take()
         pendingFrame = pending?.frame
-        return Workspace(transfer: pending?.shell)
+        if let shell = pending?.shell {
+            return Workspace(transfer: shell)
+        }
+        if let restored = WorkspacePersistence.takeLaunchWindow() {
+            pendingFrame = restored.frame.map { NSRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
+            return Workspace(restoring: restored)
+        }
+        return Workspace()
     }()
 }
 

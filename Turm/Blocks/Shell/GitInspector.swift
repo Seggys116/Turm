@@ -49,6 +49,23 @@ nonisolated enum GitInspector {
         return nil
     }
 
+    @concurrent
+    static func createBranch(named name: String, in directory: String) async -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Enter a branch name." }
+        var failure = ""
+        guard run(["switch", "--create=" + trimmed], in: directory, errors: &failure) != nil else {
+            let message = failure.trimmingCharacters(in: .whitespacesAndNewlines)
+            return message.isEmpty ? "Could not create \(trimmed)" : message
+        }
+        return nil
+    }
+
+    static func unifiedDiff(staged: Bool, in directory: String) -> String {
+        let arguments = staged ? ["diff", "--cached"] : ["diff", "HEAD"]
+        return run(arguments, in: directory) ?? ""
+    }
+
     private static func trustedArguments(_ arguments: [String], in directory: String) -> [String] {
         guard ignoresOwnership(directory), let root = repositoryRoot(from: directory) else { return [] }
         return ["-c", "safe.directory=" + root]

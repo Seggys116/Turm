@@ -618,4 +618,72 @@ struct CompanionBridgeTests {
 
         #expect(rig.session.companionTap == nil)
     }
+
+    @Test func writeFileRefusedWhenUploadsAreOff() throws {
+        let rig = try Rig()
+        let root = try rig.folder()
+        defer { cleanupUploads(rig, root: root) }
+        let target = root.appendingPathComponent("note.txt")
+        UserDefaults.standard.set(false, forKey: "turm.companion.uploads")
+        UserDefaults.standard.set(root.path, forKey: "turm.companion.uploadRoot")
+        rig.bridge.handle(.writeFile(id: rig.session.id, path: target.path, data: Data("hi".utf8), overwrite: false), from: rig.peer)
+        #expect(rig.outbox.errorCodes.contains(CompanionErrorCode.failed))
+        #expect(!FileManager.default.fileExists(atPath: target.path))
+    }
+
+    @Test func writeFileRefusesAPathThatClimbsOut() throws {
+        let rig = try Rig()
+        let root = try rig.folder()
+        defer { cleanupUploads(rig, root: root) }
+        UserDefaults.standard.set(true, forKey: "turm.companion.uploads")
+        UserDefaults.standard.set(root.path, forKey: "turm.companion.uploadRoot")
+        let escaped = root.appendingPathComponent("../outside.txt").path
+        rig.bridge.handle(.writeFile(id: rig.session.id, path: escaped, data: Data("x".utf8), overwrite: true), from: rig.peer)
+        #expect(rig.outbox.errorCodes.contains(CompanionErrorCode.failed))
+        #expect(!FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent("outside.txt").path))
+    }
+
+    @Test func writeFileLandsInsideTheChosenFolder() throws {
+        let rig = try Rig()
+        let root = try rig.folder()
+        defer { cleanupUploads(rig, root: root) }
+        UserDefaults.standard.set(true, forKey: "turm.companion.uploads")
+        UserDefaults.standard.set(root.path, forKey: "turm.companion.uploadRoot")
+        let target = root.appendingPathComponent("note.txt")
+        rig.bridge.handle(.writeFile(id: rig.session.id, path: target.path, data: Data("hi".utf8), overwrite: false), from: rig.peer)
+        #expect(rig.outbox.messages.contains { if case .ok(let request) = $0 { request == "writeFile" } else { false } })
+        #expect(try Data(contentsOf: target) == Data("hi".utf8))
+        rig.outbox.messages.removeAll()
+        rig.bridge.handle(.writeFile(id: rig.session.id, path: target.path, data: Data("no".utf8), overwrite: false), from: rig.peer)
+        #expect(rig.outbox.errorCodes.contains(CompanionErrorCode.failed))
+        #expect(try Data(contentsOf: target) == Data("hi".utf8))
+    }
+
+    @Test func listDirectoryAndDiffReplyForTheOpenShell() async throws {
+        let rig = try Rig()
+        defer { rig.finish() }
+        rig.bridge.handle(.listDirectory(id: rig.session.id, path: rig.session.directory), from: rig.peer)
+        let listing = rig.outbox.messages.compactMap { message -> (UUID, String)? in
+            if case .directoryListing(let id, let path, _) = message { (id, path) } else { nil }
+        }
+        #expect(listing.last?.0 == rig.session.id)
+        #expect(listing.last?.1 == rig.session.directory)
+        rig.bridge.handle(.diff(id: rig.session.id, scope: .commit("abcd")), from: rig.peer)
+        try #require(await wait {
+            rig.outbox.messages.contains { message in
+                switch message {
+                case .diffResult(let id, _, _): id == rig.session.id
+                case .error(let code, let text): code == CompanionErrorCode.failed && text != "That request was not understood."
+                default: false
+                }
+            }
+        })
+    }
+
+    private func cleanupUploads(_ rig: Rig, root: URL) {
+        rig.finish()
+        UserDefaults.standard.removeObject(forKey: "turm.companion.uploads")
+        UserDefaults.standard.removeObject(forKey: "turm.companion.uploadRoot")
+        try? FileManager.default.removeItem(at: root)
+    }
 }

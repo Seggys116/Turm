@@ -78,6 +78,7 @@ private struct SquareScrollbar: ViewModifier {
                 state.metrics = new
                 if old.offset != new.offset { state.reveal() }
             }
+            .padding(.trailing, state.overflows ? ScrollbarMetrics.hitWidth : 0)
             .overlay(alignment: .trailing) {
                 ScrollbarKnob(state: state, position: position, onDrag: onDrag)
             }

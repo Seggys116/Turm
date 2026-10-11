@@ -129,6 +129,26 @@ public nonisolated struct RunningBlock: Codable, Sendable, Equatable, Identifiab
     }
 }
 
+public nonisolated enum CompanionDiffScope: Codable, Sendable, Equatable {
+    case unstaged
+    case staged
+    case commit(String)
+}
+
+public nonisolated struct RemoteFileEntry: Codable, Sendable, Equatable {
+    public var name: String
+    public var isDirectory: Bool
+    public var size: Int64?
+    public var modified: TimeInterval?
+
+    public init(name: String, isDirectory: Bool, size: Int64? = nil, modified: TimeInterval? = nil) {
+        self.name = name
+        self.isDirectory = isDirectory
+        self.size = size
+        self.modified = modified
+    }
+}
+
 public nonisolated enum CompanionSessionEvent: Sendable, Equatable {
     case blockStarted(blockID: UUID, command: String, location: String)
     case output(blockID: UUID, bytes: Data)
@@ -164,6 +184,14 @@ public nonisolated enum CompanionMessage: Codable, Sendable, Equatable {
     case listBranches(id: UUID)
     case switchBranch(id: UUID, name: String)
     case revealInFinder(path: String)
+    case diff(id: UUID, scope: CompanionDiffScope)
+    case diffResult(id: UUID, text: String, truncated: Bool)
+    case listDirectory(id: UUID, path: String)
+    case directoryListing(id: UUID, path: String, entries: [RemoteFileEntry])
+    case readFile(id: UUID, path: String)
+    case fileContents(id: UUID, path: String, data: Data, truncated: Bool)
+    case writeFile(id: UUID, path: String, data: Data, overwrite: Bool)
+    case cancelTransfer(id: UUID)
 
     case welcome(version: CompanionVersion, macName: String)
     case incompatible(version: CompanionVersion)
@@ -214,6 +242,14 @@ extension CompanionMessage {
         case listBranches
         case switchBranch
         case revealInFinder
+        case diff
+        case diffResult
+        case listDirectory
+        case directoryListing
+        case readFile
+        case fileContents
+        case writeFile
+        case cancelTransfer
         case welcome
         case incompatible
         case addresses
@@ -240,7 +276,7 @@ extension CompanionMessage {
         public var isEssential: Bool {
             switch self {
             case .hello, .ping, .listSessions, .attach, .detach, .submit, .input, .interrupt, .welcome, .incompatible, .pong, .sessions, .sessionChanged, .sessionClosed, .snapshot, .blockStarted, .output, .blockFinished, .phase, .ok, .error: true
-            case .pairBegin, .pairKey, .pairReveal, .pairDone, .resize, .create, .close, .directoryShortcut, .commandShortcut, .listShortcuts, .saveShortcut, .removeShortcut, .listBranches, .switchBranch, .revealInFinder, .title, .confirmClose, .directoryShortcutInfo, .commandShortcutInfo, .shortcuts, .branches, .branchSwitched, .addresses: false
+            case .pairBegin, .pairKey, .pairReveal, .pairDone, .resize, .create, .close, .directoryShortcut, .commandShortcut, .listShortcuts, .saveShortcut, .removeShortcut, .listBranches, .switchBranch, .revealInFinder, .diff, .diffResult, .listDirectory, .directoryListing, .readFile, .fileContents, .writeFile, .cancelTransfer, .title, .confirmClose, .directoryShortcutInfo, .commandShortcutInfo, .shortcuts, .branches, .branchSwitched, .addresses: false
             }
         }
     }
@@ -270,6 +306,14 @@ extension CompanionMessage {
         case .listBranches: .listBranches
         case .switchBranch: .switchBranch
         case .revealInFinder: .revealInFinder
+        case .diff: .diff
+        case .diffResult: .diffResult
+        case .listDirectory: .listDirectory
+        case .directoryListing: .directoryListing
+        case .readFile: .readFile
+        case .fileContents: .fileContents
+        case .writeFile: .writeFile
+        case .cancelTransfer: .cancelTransfer
         case .welcome: .welcome
         case .incompatible: .incompatible
         case .addresses: .addresses

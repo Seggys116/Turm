@@ -265,8 +265,19 @@ struct ShellSidebar: View {
 
     private func disclosure(for tab: ShellTab) -> PaneDisclosure? {
         guard !tab.isSettings, tab.layout.leaves.count > 1 else { return nil }
-        let panes = tab.layout.leaves.compactMap { pane in
-            workspace.session(for: pane).map { PaneEntry(id: pane, title: $0.customTitle ?? $0.location, isFocused: tab.focusedPane == pane) }
+        let panes = tab.layout.leaves.compactMap { pane -> PaneEntry? in
+            if let session = workspace.session(for: pane) {
+                return PaneEntry(
+                    id: pane,
+                    title: session.customTitle ?? session.location,
+                    isFocused: tab.focusedPane == pane,
+                    program: session.activity == .inactive ? nil : session.displayedProgram
+                )
+            }
+            if let viewer = workspace.viewers[pane] {
+                return PaneEntry(id: pane, title: viewer.title, isFocused: tab.focusedPane == pane, program: nil, symbol: viewer.symbol)
+            }
+            return nil
         }
         return PaneDisclosure(
             isExpanded: isHorizontal ? nil : !collapsed.contains(tab.id),
@@ -284,13 +295,14 @@ struct ShellSidebar: View {
     @ViewBuilder
     private func group(for tab: ShellTab, interactive: Bool) -> some View {
         let header = row(for: tab)
-        if !isHorizontal, !tab.isSettings, tab.layout.leaves.count > 1, !collapsed.contains(tab.id) {
-            VStack(spacing: 2) {
-                if interactive {
-                    header.simultaneousGesture(dragGesture(for: tab))
-                } else {
-                    header
-                }
+        let showsPanes = !isHorizontal && !tab.isSettings && tab.layout.leaves.count > 1 && !collapsed.contains(tab.id)
+        VStack(spacing: 2) {
+            if interactive {
+                header.simultaneousGesture(dragGesture(for: tab))
+            } else {
+                header
+            }
+            if showsPanes {
                 ForEach(tab.layout.leaves, id: \.self) { pane in
                     if let session = workspace.session(for: pane) {
                         PaneRow(
@@ -303,14 +315,23 @@ struct ShellSidebar: View {
                         )
                         .padding(.leading, Self.paneIndent)
                         .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
-                        .simultaneousGesture(interactive ? paneDragGesture(for: pane, in: tab, session: session) : nil)
+                        .simultaneousGesture(interactive ? paneDragGesture(for: pane, in: tab, title: session.customTitle ?? session.location) : nil)
+                    } else if let viewer = workspace.viewers[pane] {
+                        ViewerPaneRow(
+                            title: viewer.title,
+                            symbol: viewer.symbol,
+                            isSelected: workspace.activeTabID == tab.id && tab.focusedPane == pane,
+                            select: { workspace.focus(pane) },
+                            close: { workspace.close(pane) },
+                            breakOut: { workspace.breakOut(pane) },
+                            hover: { tileDrag.hover([pane], $0) }
+                        )
+                        .padding(.leading, Self.paneIndent)
+                        .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
+                        .simultaneousGesture(interactive ? paneDragGesture(for: pane, in: tab, title: viewer.title) : nil)
                     }
                 }
             }
-        } else if interactive {
-            header.simultaneousGesture(dragGesture(for: tab))
-        } else {
-            header
         }
     }
 
@@ -318,13 +339,13 @@ struct ShellSidebar: View {
         CGPoint(x: point.x + listOrigin.x, y: point.y + listOrigin.y)
     }
 
-    private func paneDragGesture(for pane: PaneID, in tab: ShellTab, session: TerminalSession) -> some Gesture {
+    private func paneDragGesture(for pane: PaneID, in tab: ShellTab, title: String) -> some Gesture {
         DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.space))
             .onChanged { value in
                 if !tileDrag.isActive {
                     guard drag == nil else { return }
                     let home = rowFrames[tab.id].map { $0.offsetBy(dx: listOrigin.x, dy: listOrigin.y) }
-                    tileDrag.begin(.pane(pane), title: session.customTitle ?? session.location, home: home, in: workspace)
+                    tileDrag.begin(.pane(pane), title: title, home: home, in: workspace)
                 }
                 guard tileDrag.item == .pane(pane) else { return }
                 tileDrag.move(to: windowPoint(value.location), in: workspace)
@@ -467,6 +488,8 @@ private struct PaneEntry: Identifiable {
     let id: PaneID
     let title: String
     let isFocused: Bool
+    let program: RunningProgram?
+    var symbol: String? = nil
 }
 
 private struct PaneDisclosure {
@@ -506,45 +529,49 @@ private struct ShellRow: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             if let disclosure {
                 disclosureButton(disclosure)
-                    .padding(.trailing, -4)
             }
-            ActivityIndicator(activity: activity, pulse: pulse, program: program, action: actionActivity, actionPulse: actionPulse)
-            if isRenaming {
-                TextField("Shell name", text: $draft)
-                    .textFieldStyle(.plain)
+            HStack(spacing: 8) {
+                ActivityIndicator(activity: activity, pulse: pulse, program: program, action: actionActivity, actionPulse: actionPulse)
+                if isRenaming {
+                    TextField("Shell name", text: $draft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.text.color)
+                        .focused($fieldFocused)
+                        .onSubmit(commitRename)
+                        .onExitCommand { isRenaming = false }
+                        .onChange(of: fieldFocused) { _, focused in
+                            if !focused { commitRename() }
+                        }
+                } else {
+                    MarqueeText(
+                        text: title,
+                        isActive: isHovered,
+                        trailingInset: HoverClose.coveredWidth
+                    )
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.text.color)
-                    .focused($fieldFocused)
-                    .onSubmit(commitRename)
-                    .onExitCommand { isRenaming = false }
-                    .onChange(of: fieldFocused) { _, focused in
-                        if !focused { commitRename() }
-                    }
-            } else {
-                MarqueeText(
-                    text: title,
-                    isActive: isHovered,
-                    trailingInset: HoverClose.coveredWidth
-                )
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.text.color)
+                }
+                if case .progress(let value) = activity, !isHovered {
+                    Text(ActivityIndicator.percentText(value))
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Theme.secondaryText.color)
+                }
+                if paneCount > 1, !isHovered {
+                    Text("\(paneCount)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText.color)
+                        .help("\(paneCount) panes")
+                }
             }
-            if case .progress(let value) = activity, !isHovered {
-                Text(ActivityIndicator.percentText(value))
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Theme.secondaryText.color)
-            }
-            if paneCount > 1, !isHovered {
-                Text("\(paneCount)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.secondaryText.color)
-                    .help("\(paneCount) panes")
-            }
+            .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: select)
+            .simultaneousGesture(TapGesture(count: 2).onEnded(beginRename))
         }
-        .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
         .padding(.horizontal, 8)
         .frame(height: height)
         .help((program.map { $0.name + " - " } ?? "") + (session.remote.map { $0.host + ":" + session.directory } ?? Block.abbreviate(session.directory)))
@@ -554,8 +581,6 @@ private struct ShellRow: View {
         )
         .contentShape(Rectangle())
         .onOutsideFieldClick(isActive: isRenaming, perform: commitRename)
-        .onTapGesture(perform: select)
-        .simultaneousGesture(TapGesture(count: 2).onEnded(beginRename))
         .onHover { inside in
             isHovered = inside
             hover(inside)
@@ -572,6 +597,11 @@ private struct ShellRow: View {
                         menuOpen = false
                         rename("")
                     }
+                }
+                MenuDivider()
+                MenuRow(title: session.showsFiles ? "Hide Files" : "Show Files", symbol: "sidebar.left") {
+                    menuOpen = false
+                    session.showsFiles.toggle()
                 }
                 MenuDivider()
                 MenuRow(title: "Split Right", symbol: "rectangle.split.2x1") {
@@ -610,35 +640,42 @@ private struct ShellRow: View {
     }
 
     private func disclosureButton(_ disclosure: PaneDisclosure) -> some View {
-        Button {
-            if disclosure.isExpanded == nil { paneMenuOpen = true } else { disclosure.toggle() }
-        } label: {
-            Image(systemName: disclosure.isExpanded == nil ? "chevron.down" : "chevron.right")
-                .font(.system(size: 8, weight: .semibold))
-                .rotationEffect(.degrees(disclosure.isExpanded == true ? 90 : 0))
-                .foregroundStyle(Theme.secondaryText.color)
-                .frame(width: 10, height: height)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(disclosure.isExpanded == nil ? "Show Panes" : (disclosure.isExpanded == true ? "Collapse Panes" : "Expand Panes"))
-        .accessibilityLabel(disclosure.isExpanded == true ? "Collapse panes" : "Show panes")
-        .anchoredMenu(isOpen: $paneMenuOpen) {
-            MenuSurface(width: 220) {
-                ForEach(disclosure.panes) { pane in
-                    MenuRow(title: pane.title, isCurrent: pane.isFocused) {
-                        paneMenuOpen = false
-                        disclosure.focus(pane.id)
+        let expanded = disclosure.isExpanded
+        return Image(systemName: expanded == nil ? "chevron.down" : "chevron.right")
+            .font(.system(size: 8, weight: .semibold))
+            .rotationEffect(.degrees(expanded == true ? 90 : 0))
+            .foregroundStyle(Theme.secondaryText.color)
+            .frame(width: 14, height: height)
+            .contentShape(Rectangle())
+            .highPriorityGesture(TapGesture().onEnded { handleDisclosure(disclosure) })
+            .help(expanded == nil ? "Show Panes" : (expanded == true ? "Collapse Panes" : "Expand Panes"))
+            .accessibilityLabel(expanded == true ? "Collapse panes" : "Show panes")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default) { handleDisclosure(disclosure) }
+            .anchoredMenu(isOpen: $paneMenuOpen) {
+                MenuSurface(width: 220) {
+                    ForEach(disclosure.panes) { pane in
+                        MenuRow(title: pane.title, symbol: pane.symbol, program: pane.program, isCurrent: pane.isFocused) {
+                            paneMenuOpen = false
+                            disclosure.focus(pane.id)
+                        }
                     }
-                }
-                if let focused = disclosure.panes.first(where: \.isFocused) {
-                    MenuDivider()
-                    MenuRow(title: "Move Pane to New Shell", symbol: "rectangle.portrait.and.arrow.right") {
-                        paneMenuOpen = false
-                        disclosure.breakOut(focused.id)
+                    if let focused = disclosure.panes.first(where: \.isFocused) {
+                        MenuDivider()
+                        MenuRow(title: "Move Pane to New Shell", symbol: "rectangle.portrait.and.arrow.right") {
+                            paneMenuOpen = false
+                            disclosure.breakOut(focused.id)
+                        }
                     }
                 }
             }
+    }
+
+    private func handleDisclosure(_ disclosure: PaneDisclosure) {
+        if disclosure.isExpanded == nil {
+            paneMenuOpen.toggle()
+        } else {
+            disclosure.toggle()
         }
     }
 
@@ -684,7 +721,7 @@ private struct PaneRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            StatusGlyph(activity: session.activity, pulse: nil, diameter: 8, program: session.displayedProgram)
+            StatusGlyph(activity: session.activity, pulse: nil, diameter: 10, program: session.displayedProgram)
             MarqueeText(text: session.customTitle ?? session.location, isActive: isHovered, trailingInset: HoverClose.coveredWidth)
                 .font(.system(size: 11))
                 .foregroundStyle(isSelected ? Theme.text.color : Theme.secondaryText.color)
@@ -719,6 +756,58 @@ private struct PaneRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+private struct ViewerPaneRow: View {
+    let title: String
+    let symbol: String
+    let isSelected: Bool
+    let select: () -> Void
+    let close: () -> Void
+    let breakOut: () -> Void
+    let hover: (Bool) -> Void
+    @State private var isHovered = false
+    @State private var menuOpen = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.secondaryText.color)
+                .frame(width: 12)
+            MarqueeText(text: title, isActive: isHovered, trailingInset: HoverClose.coveredWidth)
+                .font(.system(size: 11))
+                .foregroundStyle(isSelected ? Theme.text.color : Theme.secondaryText.color)
+        }
+        .modifier(HoverClose(isVisible: isHovered, label: "Close Pane", close: close))
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(
+            RoundedRectangle(cornerRadius: ShellSidebar.corner)
+                .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .onHover { inside in
+            isHovered = inside
+            hover(inside)
+        }
+        .onDisappear { hover(false) }
+        .help("Drag onto the grid to tile, or onto the sidebar to move it to its own shell")
+        .pointerMenu(isOpen: $menuOpen) {
+            MenuSurface(width: 200) {
+                MenuRow(title: "Move to New Shell", symbol: "rectangle.portrait.and.arrow.right") {
+                    menuOpen = false
+                    breakOut()
+                }
+                MenuDivider()
+                MenuRow(title: "Close Pane", symbol: "xmark", isDestructive: true) {
+                    menuOpen = false
+                    close()
+                }
+            }
+        }
     }
 }
 

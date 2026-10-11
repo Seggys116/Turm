@@ -316,6 +316,20 @@ struct RemoteChannelFakeSSHTests {
         #expect(await rig.channel.branches(in: rig.root.path).isEmpty)
     }
 
+    @Test func createBranchCreatesAndRejectsDuplicates() async throws {
+        let rig = try RemoteRig()
+        defer { rig.teardown() }
+        let repo = try makeRepository(rig)
+        #expect(await rig.channel.createBranch(named: "  ", in: repo.path) == "Enter a branch name.")
+        #expect(await rig.channel.createBranch(named: "fresh", in: repo.path) == nil)
+        #expect(await rig.channel.gitStatus(in: repo.path)?.branch == "fresh")
+        #expect(await rig.channel.branches(in: repo.path).contains("fresh"))
+        let duplicate = await rig.channel.createBranch(named: "fresh", in: repo.path)
+        #expect(duplicate?.contains("already exists") == true)
+        #expect(await rig.channel.createBranch(named: "--orphan", in: repo.path)?.isEmpty == false)
+        #expect(await rig.channel.gitStatus(in: repo.path)?.branch == "fresh")
+    }
+
     @Test func switchBranchSwitchesAndReportsFailure() async throws {
         let rig = try RemoteRig()
         defer { rig.teardown() }

@@ -83,6 +83,7 @@ struct BlockListView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.listSpace))
             .onChanged { value in
                 if !driver.active {
+                    session.focus()
                     guard !NSEvent.modifierFlags.contains(.control) else { return }
                     driver.active = true
                     driver.moved = false
@@ -150,6 +151,7 @@ struct BlockView: View {
     let block: Block
     let session: TerminalSession
     @State private var shortcutEditorOpen = false
+    @State private var menuOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -201,17 +203,29 @@ struct BlockView: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.subtleDivider.color).frame(height: 1)
         }
-        .contextMenu {
-            Button("Copy Command") { copy(block.command) }
-            Button("Copy Output") { copy(block.plainOutput) }
+        .pointerMenu(isOpen: $menuOpen) {
+            MenuSurface(width: 240) {
+                MenuRow(title: "Copy Command", symbol: "doc.on.doc") {
+                    menuOpen = false
+                    copy(block.command)
+                }
+                MenuRow(title: "Copy Output", symbol: "doc.on.clipboard") {
+                    menuOpen = false
+                    copy(block.plainOutput)
+                }
                 .disabled(block.output.isEmpty)
-            Button("Run Again") { session.submit(block.command) }
+                MenuRow(title: "Run Again", symbol: "arrow.clockwise") {
+                    menuOpen = false
+                    session.submit(block.command)
+                }
                 .disabled(session.phase != .ready || block.command.isEmpty || block.host != session.remote?.label)
-            Divider()
-            Button(existingShortcut == nil ? "Save as Command Shortcut..." : "Edit Command Shortcut...") {
-                shortcutEditorOpen = true
+                MenuDivider()
+                MenuRow(title: existingShortcut == nil ? "Save as Command Shortcut..." : "Edit Command Shortcut...", symbol: "terminal") {
+                    menuOpen = false
+                    shortcutEditorOpen = true
+                }
+                .disabled(trimmedCommand.isEmpty)
             }
-            .disabled(trimmedCommand.isEmpty)
         }
     }
 

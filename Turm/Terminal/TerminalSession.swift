@@ -27,6 +27,17 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var blocks: [Block] = []
     private(set) var hasSubmittedCommand = false
     private(set) var directory = NSHomeDirectory()
+    var showsFiles = false {
+        didSet {
+            guard oldValue != showsFiles else { return }
+            onLayoutChange()
+        }
+    }
+    private(set) var restoredHostID: UUID?
+    private(set) var restoredTarget: SSHTarget?
+    private var pendingReconnect = false
+    private var reconnectDirectory: String?
+    var restoreNotice: String?
     private(set) var git: GitStatus?
     private(set) var project = ProjectSnapshot.empty
     private(set) var variantChoices: [String: Int] = [:]
@@ -59,6 +70,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored var onFocus: () -> Void = {}
     @ObservationIgnored var onExit: () -> Void = {}
     @ObservationIgnored var onPopOut: (TerminalSession) -> Void = { _ in }
+    @ObservationIgnored var onLayoutChange: () -> Void = {}
+    @ObservationIgnored var onBlockFinished: () -> Void = {}
 
     @ObservationIgnored private var process: LocalProcess!
     @ObservationIgnored private var foregroundProgram: (block: UUID, program: RunningProgram)?
@@ -95,12 +108,30 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var strayOutput: [UInt8] = []
     private static let strayLimit = 8192
 
-    init(directory: String = NSHomeDirectory(), auxiliary: Bool = false) {
+    init(
+        directory: String = NSHomeDirectory(),
+        auxiliary: Bool = false,
+        restoredHost: UUID? = nil,
+        restoredTarget: SSHTarget? = nil,
+        remoteDirectory: String? = nil
+    ) {
         self.isAuxiliary = auxiliary
+        self.restoredHostID = restoredHost
+        self.restoredTarget = restoredTarget
+        let remote = restoredHost != nil || restoredTarget != nil
+        if remote {
+            self.localDirectory = directory
+            self.directory = remoteDirectory ?? directory
+            self.pendingReconnect = true
+            self.reconnectDirectory = remoteDirectory
+            self.restoreNotice = "Reconnecting…"
+        }
         super.init()
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue {
-            self.directory = directory
+        if !remote {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue {
+                self.directory = directory
+            }
         }
         search.source = { [weak self] in
             guard let self else { return [] }
@@ -136,11 +167,21 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     var launchDirectory: String { localDirectory ?? directory }
 
-    var isRemote: Bool { !remotes.isEmpty }
+    var isRemote: Bool { !remotes.isEmpty || pendingReconnect || restoredHostID != nil || restoredTarget != nil }
+
+    private var insideRemote: Bool { !remotes.isEmpty }
+
+    var archiveShell: ShellKind {
+        switch shellKind {
+        case .zsh: .zsh
+        case .bash: .bash
+        case .fish: .fish
+        }
+    }
 
     var location: String {
-        guard let label = remoteLabel else { return ShortcutStore.shared.label(for: directory) }
-        return label + ":" + directory
+        if let label = remoteLabel ?? restoredRemoteLabel { return label + ":" + directory }
+        return ShortcutStore.shared.label(for: directory)
     }
 
     var remoteLabel: String? {
@@ -151,6 +192,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
 
     var remoteTarget: SSHTarget? {
         if remotes.count <= 1, let target = connection?.target { return target }
+        if let restoredTarget { return restoredTarget }
         guard let host = remote?.host, let at = host.lastIndex(of: "@") else { return nil }
         return SSHTarget(user: String(host[..<at]), hostname: String(host[host.index(after: at)...]), port: 22)
     }
@@ -354,7 +396,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     func enableRemoteIntegration() {
-        guard let connection, connection.state == .installed, !isRemote, phase == .running, altScreen == nil else { return }
+        guard let connection, connection.state == .installed, !insideRemote, phase == .running, altScreen == nil else { return }
         write(Array((RemoteShellInstall.enableCommand + "\r").utf8))
     }
 
@@ -366,8 +408,43 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     func disconnectRemote() {
-        guard isRemote, phase == .ready else { return }
+        guard insideRemote, phase == .ready else { return }
         submit("exit", recordsHistory: false)
+    }
+
+    private var restoredRemoteLabel: String? {
+        guard remotes.isEmpty, restoredHostID != nil || restoredTarget != nil else { return nil }
+        if let id = restoredHostID, let host = SSHHostStore.shared.hosts.first(where: { $0.id == id }) {
+            return host.key
+        }
+        if let target = restoredTarget {
+            return target.user.isEmpty ? target.hostname : target.user + "@" + target.hostname
+        }
+        return "remote"
+    }
+
+    private var reconnectCommand: String? {
+        let quote = { ShellIntegration.quoted($0, for: self.shellKind) }
+        if let id = restoredHostID, let host = SSHHostStore.shared.hosts.first(where: { $0.id == id }) {
+            return SSHRoute(token: host.key, remainder: "", host: host).command(remote: false, quote: quote)
+        }
+        guard let target = restoredTarget else { return nil }
+        var words = ["ssh"]
+        if target.port != 22 { words += ["-p", String(target.port)] }
+        let destination = target.user.isEmpty ? target.hostname : target.user + "@" + target.hostname
+        words += ["--", quote(destination)]
+        return words.joined(separator: " ")
+    }
+
+    private func resumeRemoteIfNeeded() -> Bool {
+        guard pendingReconnect, remotes.isEmpty else { return false }
+        pendingReconnect = false
+        restoreNotice = nil
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
+              let command = reconnectCommand
+        else { return false }
+        submit(command, recordsHistory: false)
+        return true
     }
 
     func sendInput(_ bytes: [UInt8]) {
@@ -442,7 +519,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             return
         }
         Task {
-            let paths = await channel.upload(urls)
+            let paths = await TransferCenter.shared.upload(channel, urls)
             let uploaded = urls.compactMap { paths[$0] }
             guard !uploaded.isEmpty else { return }
             pasteText(uploaded.map(PathCompleter.escape).joined(separator: " ") + " ")
@@ -526,7 +603,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
                     args: launch.arguments,
                     environment: launch.environment,
                     execName: launch.execName,
-                    currentDirectory: directory
+                    currentDirectory: launchDirectory
                 )
                 let flags = fcntl(process.childfd, F_GETFD)
                 if flags >= 0 { _ = fcntl(process.childfd, F_SETFD, flags | FD_CLOEXEC) }
@@ -562,7 +639,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             Notifier.post(title: title, body: body)
         case .event(.environment(let variables)):
             guard !variables.isEmpty else { return }
-            if isRemote || pendingHello != nil {
+            if insideRemote || pendingHello != nil {
                 if remotes.count <= 1 { connection?.channel.environment = variables }
                 return
             }
@@ -586,11 +663,13 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             directory = path
             phase = .ready
             companionTap?(.phase(.ready, directory: path))
+            onLayoutChange()
+            if resumeRemoteIfNeeded() { return }
             refreshGit(for: path)
             if !isAuxiliary { refreshProject(for: path) }
             runPending()
         case .event(.sshStarted(let socket, let target)):
-            guard phase == .running, !isRemote, connection == nil, SSHConnection.accepts(socket: socket) else { return }
+            guard phase == .running, !insideRemote, connection == nil, SSHConnection.accepts(socket: socket) else { return }
             let connection = SSHConnection(socket: socket, target: SSHTarget(identifier: target))
             self.connection = connection
             connection.start()
@@ -630,9 +709,19 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         pendingHello = nil
         strayOutput = []
+        if let wanted = reconnectDirectory, path != wanted {
+            reconnectDirectory = nil
+            directory = wanted
+            phase = .ready
+            onLayoutChange()
+            submit("cd \(quoted(wanted))", recordsHistory: false)
+            return
+        }
+        reconnectDirectory = nil
         directory = path
         phase = .ready
         companionTap?(.phase(.ready, directory: path))
+        onLayoutChange()
         refreshRemote(for: path)
         runPending()
     }
@@ -718,7 +807,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func route(_ bytes: [UInt8]) {
-        if let connection, !isRemote, let password = connection.observe(bytes) {
+        if let connection, !insideRemote, let password = connection.observe(bytes) {
             process.send(data: Array((password + "\r").utf8)[...])
         }
         if isRemote, phase == .ready {
@@ -800,6 +889,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         let elapsed = startedAt.map { ContinuousClock.now - $0 }
         block.finish(exitCode: exitCode, duration: elapsed)
         companionTap?(.blockFinished(blockID: block.id, exitCode: exitCode))
+        onBlockFinished()
         startedAt = nil
         if block.command == "clear" { clearBlocks() }
     }
@@ -826,9 +916,48 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         return failure
     }
 
+    func createBranch(named name: String) async -> String? {
+        let path = directory
+        if let channel = remoteChannel {
+            let failure = await channel.createBranch(named: name, in: path)
+            refreshRemote(for: path)
+            return failure
+        }
+        let failure = await GitInspector.createBranch(named: name, in: path)
+        refreshGit(for: path)
+        return failure
+    }
+
     func branches() async -> [String] {
         if let channel = remoteChannel { return await channel.branches(in: directory) }
         return await GitInspector.branches(in: directory)
+    }
+
+    func unifiedDiff(staged: Bool) async -> String {
+        let path = directory
+        if let channel = remoteChannel {
+            let body = staged ? "git diff --cached" : "git diff HEAD"
+            let script = RemoteGit.script(in: path, body)
+            let result = await Task.detached { channel.run(script, timeout: 20) }.value
+            return result?.output ?? ""
+        }
+        return await Task.detached { GitInspector.unifiedDiff(staged: staged, in: path) }.value
+    }
+
+    func commitChanges(message: String, push: Bool) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        var command = "git add -A && git commit -m \(quoted(text))"
+        if push { command += " && git push" }
+        submit(command)
+    }
+
+    func pushChanges() {
+        submit("git push")
+    }
+
+    func pullChanges() {
+        submit("git pull")
     }
 
     private func refreshProject(for path: String) {

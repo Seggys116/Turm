@@ -56,8 +56,12 @@ final class CloseCoordinator {
     }
 
     func shouldQuit() -> Bool {
+        WorkspacePersistence.prepareToQuit()
+        WorkspacePersistence.saveRegistered(registeredWorkspaces.filter { !$0.didTerminate })
         let count = workspaces.allObjects.reduce(0) { $0 + $1.shellsRequiringConfirmationCount }
-        return count == 0 || confirm(.application(shellCount: count))
+        let allowed = count == 0 || confirm(.application(shellCount: count))
+        if !allowed { WorkspacePersistence.cancelQuit() }
+        return allowed
     }
 
     func terminateAll() {

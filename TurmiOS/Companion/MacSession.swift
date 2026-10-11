@@ -22,6 +22,7 @@ final class MacSession: TerminalTab, BlockSession {
     private(set) var fitsDevice = false
     var editor: ShortcutTarget?
     var showsBranches = false
+    var files: String?
 
     @ObservationIgnored private weak var connection: MacConnection?
     @ObservationIgnored private var viewport = CGSize.zero
@@ -83,6 +84,24 @@ final class MacSession: TerminalTab, BlockSession {
     func changeDirectory(to path: String) {
         guard phase == .ready else { return }
         submit("cd " + Self.quoted(path))
+    }
+
+    func listFiles(in path: String) async throws -> [RemoteFileEntry] {
+        guard let connection else { throw MacRequestError(text: "Not connected to \(macName).") }
+        return try await connection.listFiles(of: id, path: path)
+    }
+
+    func readFile(at path: String) async throws -> Data {
+        guard let connection else { throw MacRequestError(text: "Not connected to \(macName).") }
+        return try await connection.readFile(of: id, path: path)
+    }
+
+    func upload(data: Data, named name: String, to directory: String) async throws {
+        guard let connection else { throw MacRequestError(text: "Not connected to \(macName).") }
+        let entries = try await connection.listFiles(of: id, path: directory)
+        let unique = FileNames.suffixed(name, existing: Set(entries.map(\.name)))
+        let path = (directory as NSString).appendingPathComponent(unique)
+        try await connection.upload(of: id, data: data, to: path)
     }
 
     func branches() async throws -> (names: [String], current: String?) {

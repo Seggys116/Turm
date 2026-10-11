@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TurmCore
 
@@ -74,4 +75,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func newWindow(_ sender: Any?) {
+        NSApp.activate()
+        NewWindowAction.open()
+    }
+}
+
+enum NewWindowAction {
+    static var open: () -> Void = {}
 }

@@ -88,6 +88,50 @@ struct GitInspectorTests {
         let totals = GitInspector.parseNumstat("")
         #expect(totals.files == 0 && totals.added == 0 && totals.removed == 0)
     }
+
+    @Test func createBranchSwitchesAndRejectsADuplicate() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("turm-branch-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await runInspectorGit(["init", "-q", "-b", "main"], in: root)
+        try "hi\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try await runInspectorGit(["add", "."], in: root)
+        try await runInspectorGit(["commit", "-q", "-m", "first"], in: root)
+
+        #expect(await GitInspector.createBranch(named: "  ", in: root.path) == "Enter a branch name.")
+        #expect(await GitInspector.createBranch(named: "feature", in: root.path) == nil)
+        #expect(await GitInspector.status(in: root.path)?.branch == "feature")
+        #expect(await GitInspector.branches(in: root.path).contains("feature"))
+        let duplicate = await GitInspector.createBranch(named: "feature", in: root.path)
+        #expect(duplicate?.contains("already exists") == true)
+        #expect(await GitInspector.status(in: root.path)?.branch == "feature")
+        #expect(await GitInspector.createBranch(named: "--orphan", in: root.path)?.isEmpty == false)
+        #expect(await GitInspector.status(in: root.path)?.branch == "feature")
+    }
+}
+
+@concurrent
+private nonisolated func runInspectorGit(_ arguments: [String], in repo: URL) async throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", repo.path, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"] + arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        process.terminationHandler = { process in
+            if process.terminationStatus == 0 {
+                continuation.resume()
+            } else {
+                continuation.resume(throwing: CocoaError(.fileWriteUnknown))
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            continuation.resume(throwing: error)
+        }
+    }
 }
 
 struct CommandHistoryTests {

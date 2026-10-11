@@ -20,6 +20,18 @@ Opening a Mac's shell shows its history as blocks, one per command with its exit
 
 A banner at the top shows when the Mac is not connected, is reconnecting, or closed the shell. The app disconnects when it goes to the background and reconnects when you return. The options menu has **Fit to This Device**, which sizes the shell on the Mac to your screen.
 
+Turm remembers the SSH hosts you had open. They come back disconnected, and nothing reconnects until you do.
+
+## Finish notifications
+
+Turm posts a local notification when a command finishes in a Mac shell you are attached to, if the app is running and is not the frontmost app. The notification shows the command, the exit code and how long the command ran.
+
+Once iOS has suspended the app, no notification is delivered. This release does not send commands to a push server to work around that.
+
+## Files
+
+A paired phone can ask the Mac to list a shell's folder, read a file there, and upload into one folder. Uploads stay off until you turn them on in the Mac's Remote Access settings and choose that folder. See [Remote Access](remote-access.md).
+
 ## SSH from the phone
 
 Add a host with **+** under SSH Hosts:

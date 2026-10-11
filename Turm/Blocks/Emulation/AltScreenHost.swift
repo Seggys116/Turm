@@ -86,6 +86,14 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
 final class FullScreenTerminalView: TerminalView {
     var onFiles: ([URL]) -> Void = { _ in }
     var onDragTarget: (Bool) -> Void = { _ in }
+    var onMouseDown: () -> Void = {}
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown()
+        super.mouseDown(with: event)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

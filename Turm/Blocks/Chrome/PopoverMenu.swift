@@ -45,7 +45,7 @@ private struct PopoverMenuModifier: ViewModifier {
     }
 }
 
-private enum MenuPlacement {
+enum MenuPlacement {
     case anchored
     case pointer(NSPoint)
 }
@@ -87,9 +87,11 @@ private final class MenuHostingView: NSHostingView<MenuRoot> {
 }
 
 @MainActor
-private final class MenuController {
-    let chip = ViewBox()
+final class MenuController {
+    fileprivate let chip = ViewBox()
     var onDismiss: () -> Void = {}
+    var isShowingMenu: Bool { panel != nil }
+    var rightClickInstalled: Bool { trigger != nil }
     private let presentation = MenuPresentation()
     private var panel: MenuPanel?
     private var host: MenuHostingView?
@@ -99,6 +101,10 @@ private final class MenuController {
     private var generation = 0
     private var placement = MenuPlacement.anchored
     private(set) var pointer = NSPoint.zero
+
+    func attachChip(to view: NSView) {
+        chip.view = view
+    }
 
     func installTrigger(_ open: @escaping () -> Void) {
         if let trigger { NSEvent.removeMonitor(trigger) }
@@ -115,7 +121,7 @@ private final class MenuController {
 
     func present(_ content: AnyView, placement: MenuPlacement) {
         guard let window = chip.view?.window else { return }
-        teardown()
+        retirePresented()
         self.placement = placement
         generation += 1
         presentation.shown = false
@@ -144,8 +150,9 @@ private final class MenuController {
     }
 
     func dismiss() {
-        guard panel != nil else { return }
+        guard let panel else { return }
         removeMonitors()
+        panel.ignoresMouseEvents = true
         presentation.shown = false
         generation += 1
         let token = generation
@@ -158,6 +165,10 @@ private final class MenuController {
     func teardown() {
         if let trigger { NSEvent.removeMonitor(trigger) }
         trigger = nil
+        retirePresented()
+    }
+
+    private func retirePresented() {
         removeMonitors()
         closePanel()
     }
@@ -285,6 +296,7 @@ struct MenuSurface<Content: View>: View {
 struct MenuRow: View {
     let title: String
     var symbol: String?
+    var program: RunningProgram?
     var detail: String?
     var isCurrent = false
     var isDestructive = false
@@ -297,7 +309,10 @@ struct MenuRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Group {
-                    if let symbol {
+                    if let program {
+                        ProgramGlyph(program, size: 11)
+                            .foregroundStyle(Theme.text.color)
+                    } else if let symbol {
                         Glyph(symbol: symbol, fallback: ProjectEcosystem.fallback(forSymbol: symbol), size: 10)
                     } else if isCurrent {
                         Image(systemName: "checkmark")
@@ -320,7 +335,7 @@ struct MenuRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.secondaryText.color)
                 }
-                if isCurrent && symbol != nil {
+                if isCurrent && (symbol != nil || program != nil) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.secondaryText.color)

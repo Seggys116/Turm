@@ -882,7 +882,10 @@ final class EditorTextView: NSTextView {
         return NSPoint(x: origin.x + rect.maxX, y: origin.y + rect.minY)
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
+        onFocus()
         onClick()
         super.mouseDown(with: event)
     }

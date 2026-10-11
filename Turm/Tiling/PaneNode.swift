@@ -1,10 +1,14 @@
 import Foundation
 
-nonisolated struct PaneID: Hashable, Sendable {
-    let raw = UUID()
+nonisolated struct PaneID: Hashable, Sendable, Codable {
+    let raw: UUID
+
+    init(raw: UUID = UUID()) {
+        self.raw = raw
+    }
 }
 
-enum SplitAxis: Sendable {
+enum SplitAxis: Sendable, Codable {
     case horizontal
     case vertical
 }
@@ -29,7 +33,7 @@ nonisolated enum DropAnchor: Hashable, Sendable {
     case root
 }
 
-indirect enum PaneNode: Equatable, Sendable {
+indirect enum PaneNode: Equatable, Sendable, Codable {
     case leaf(PaneID)
     case split(id: UUID, axis: SplitAxis, ratio: Double, first: PaneNode, second: PaneNode)
 
@@ -138,6 +142,10 @@ indirect enum PaneNode: Equatable, Sendable {
         case .split(let id, let axis, let ratio, let first, let second):
             return .split(id: id, axis: axis, ratio: ratio, first: first.mapLeaves(transform), second: second.mapLeaves(transform))
         }
+    }
+
+    func stripping(_ ids: Set<PaneID>) -> PaneNode? {
+        ids.reduce(Optional(self)) { node, id in node?.removing(id) }
     }
 
     func equalized(only target: UUID? = nil) -> PaneNode {
