@@ -39,6 +39,15 @@ jobs:
           path: DerivedData/SourcePackages
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Turm.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
+      - name: Resolve packages outside the sandbox
+        run: |
+          defaults write com.apple.dt.Xcode IDEPackageSupportDisableManifestSandbox -bool YES
+          defaults write com.apple.dt.Xcode IDEPackageSupportDisablePluginExecutionSandbox -bool YES
+          xcodebuild -resolvePackageDependencies \
+            -project Turm.xcodeproj \
+            -clonedSourcePackagesDirPath DerivedData/SourcePackages \
+            -skipPackagePluginValidation
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
