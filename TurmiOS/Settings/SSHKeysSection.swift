@@ -126,6 +126,7 @@ private struct KeyImportSheet: View {
     }
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             ChromeSection("Name") {
                 ChromeFieldRow("Name") {
@@ -156,16 +157,18 @@ private struct KeyImportSheet: View {
                     .padding(.horizontal, 6)
             }
         }
-        .chromeBar(
-            ChromeTopBar(
-                "Import Key",
-                leading: { ChromeBarButton(title: "Cancel", systemImage: "xmark") { dismiss() } },
-                trailing: {
-                    ChromeBarButton(title: "Import", systemImage: "square.and.arrow.down", kind: .prominent, action: importKey)
-                        .disabled(!canImport)
-                }
-            )
-        )
+        .navigationTitle("Import Key")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Import") { importKey() }
+                    .disabled(!canImport)
+            }
+        }
+        }
         .chromeSheet()
     }
 

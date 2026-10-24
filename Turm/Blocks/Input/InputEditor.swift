@@ -11,6 +11,7 @@ struct InputEditor: NSViewRepresentable {
     let onSubmit: () -> Void
     let onClear: () -> Void
     let onFocus: () -> Void
+    var stillFocused: () -> Bool = { true }
     let onAttach: ([URL]) -> Void
     let onDragTarget: (Bool) -> Void
     var onSelectAllBlocks: () -> Void = {}
@@ -53,6 +54,8 @@ struct InputEditor: NSViewRepresentable {
         view.isAutomaticSpellingCorrectionEnabled = false
         view.isContinuousSpellCheckingEnabled = false
         view.isGrammarCheckingEnabled = false
+        view.writingToolsBehavior = .none
+        view.inlinePredictionType = .no
         view.delegate = context.coordinator
         context.coordinator.textView = view
         view.onFocus = { context.coordinator.parent.onFocus() }
@@ -302,9 +305,10 @@ struct InputEditor: NSViewRepresentable {
         func attached() {
             guard parent.isFocused else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let view = self?.textView, let window = view.window else { return }
+                guard let self, self.parent.isFocused, self.parent.stillFocused() else { return }
+                guard let view = self.textView, let window = view.window else { return }
                 if window.firstResponder !== view { window.makeFirstResponder(view) }
-                self?.didFocus = true
+                self.didFocus = true
             }
         }
 
@@ -835,6 +839,8 @@ private extension HighlightKind {
 }
 
 final class EditorTextView: NSTextView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
     var onFocus: () -> Void = {}
     var onControl: (Character) -> Void = { _ in }
     var onAttach: () -> Void = {}

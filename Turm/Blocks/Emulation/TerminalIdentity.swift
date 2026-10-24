@@ -1,4 +1,5 @@
 import Foundation
+import TurmCore
 
 enum TerminalIdentity {
     static let program = "ghostty"
@@ -8,5 +9,6 @@ enum TerminalIdentity {
     static let environment: [String] = [
         "TERM_PROGRAM=\(program)",
         "TERM_PROGRAM_VERSION=\(version)",
+        "TERM_FEATURES=\(TerminalFeatures.encoded)",
     ]
 }

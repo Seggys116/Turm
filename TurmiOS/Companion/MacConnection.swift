@@ -147,7 +147,7 @@ final class MacConnection: Identifiable {
         send(.close(id: id, force: force))
     }
 
-    func createShell(directory: String?, created: @escaping (UUID) -> Void) {
+    func createShell(directory: String?, space: UUID? = nil, created: @escaping (UUID) -> Void) {
         let trimmed = directory?.trimmingCharacters(in: .whitespaces)
         awaitingShell = (Set(sessions.map(\.id)), created)
         awaitingTask?.cancel()
@@ -156,7 +156,7 @@ final class MacConnection: Identifiable {
             guard !Task.isCancelled else { return }
             self?.awaitingShell = nil
         }
-        send(.create(directory: trimmed?.isEmpty == false ? trimmed : nil, command: nil))
+        send(.create(directory: trimmed?.isEmpty == false ? trimmed : nil, command: nil, space: space))
     }
 
     private func claimNewShell() {

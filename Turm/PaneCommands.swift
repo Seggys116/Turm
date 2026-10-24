@@ -3,24 +3,22 @@ import SwiftUI
 
 extension FocusedValues {
     @Entry var workspace: Workspace?
+    @Entry var spaces: SpaceActions?
 }
 
 struct PaneCommands: Commands {
     @FocusedValue(\.workspace) private var workspace
     @FocusedValue(\.spotlightPresented) private var spotlight
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
-    @AppStorage(SidebarPlacement.key) private var placement = SidebarPlacement.left
+    @FocusedValue(\.spaces) private var spaces
 
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {}
         CommandGroup(replacing: .sidebar) {
-            Button(isSidebarVisible ? "Hide \(placement.noun)" : "Show \(placement.noun)") {
-                withAnimation(.easeInOut(duration: 0.18)) { isSidebarVisible.toggle() }
+            Button(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+                withAnimation(ChromeMetrics.motion) { isSidebarVisible.toggle() }
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
-            Picker("Sidebar Position", selection: $placement.animation(.easeInOut(duration: 0.18))) {
-                ForEach(SidebarPlacement.allCases) { Text($0.title).tag($0) }
-            }
         }
         CommandGroup(after: .textEditing) {
             Menu("Find") {
@@ -36,10 +34,17 @@ struct PaneCommands: Commands {
             .disabled(workspace?.focusedSession == nil)
         }
         CommandMenu("Shell") {
-            Button("Spotlight") { spotlight?.wrappedValue = true }
+            Button("Search") { spotlight?.wrappedValue = true }
                 .keyboardShortcut("t")
             Button("New Shell") { workspace?.newShell() }
                 .keyboardShortcut("t", modifiers: [.command, .option])
+            Button("New Space") { spaces?.newSpace() }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("Open Space in New Window") { spaces?.openCurrentInNewWindow() }
+            Button("Next Space") { spaces?.nextSpace() }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Button("Previous Space") { spaces?.previousSpace() }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             Button(workspace?.focusedSession?.showsFiles == true ? "Hide Files" : "Show Files") {
                 workspace?.focusedSession?.showsFiles.toggle()
             }

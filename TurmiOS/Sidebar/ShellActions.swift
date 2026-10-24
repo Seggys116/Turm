@@ -1,6 +1,7 @@
 import SwiftTerm
 import SwiftUI
 import TurmCore
+import UIKit
 
 /// The app-wide bar buttons, shared by the sidebar, the session detail and the iPhone Duo vertical bar.
 struct NewMenuButton: View {
@@ -45,18 +46,67 @@ struct SessionsBackButton: View {
     }
 }
 
-/// The buttons that act on the open session: the software keyboard for SSH, and the session menu.
+/// System toolbar controls for the open session. The navigation bar draws them.
+struct SessionToolbar: View {
+    let workspace: Workspace
+    let tab: any TerminalTab
+
+    var body: some View {
+        if let surface = keyboardSurface {
+            Button("Keyboard", systemImage: "keyboard") {
+                _ = surface.becomeFirstResponder()
+            }
+        }
+        Menu("Session", systemImage: "ellipsis") {
+            sessionMenu
+        }
+    }
+
+    private var keyboardSurface: UIView? {
+        if let ssh = tab as? SSHTerminalSession, !ssh.usesBlocks { return ssh.surface.view }
+        if let blocks = tab as? any BlockSession { return blocks.fullScreen?.view }
+        return nil
+    }
+
+    @ViewBuilder
+    private var sessionMenu: some View {
+        Button("New Session", systemImage: "plus") { workspace.showsHostPicker = true }
+        if let mac = tab as? MacSession {
+            Divider()
+            Button(mac.fitsDevice ? "Use Mac Size" : "Fit to This Device") { mac.setFitsDevice(!mac.fitsDevice) }
+            if mac.macColumns > 0 {
+                Text("Mac size \(mac.macColumns) by \(mac.macRows)")
+            }
+        }
+        if !workspace.windowMenuItems(for: tab).isEmpty {
+            Divider()
+        }
+        ForEach(workspace.windowMenuItems(for: tab)) { item in
+            Button(item.title, systemImage: item.systemImage ?? "macwindow") { item.action() }
+        }
+        Divider()
+        Button("Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
+    }
+}
+
+/// The buttons that act on the open session: the software keyboard, and the session menu.
 struct SessionButtons: View {
     let workspace: Workspace
     let tab: any TerminalTab
 
     var body: some View {
-        if let ssh = tab as? SSHTerminalSession, !ssh.usesBlocks {
+        if let surface = keyboardSurface {
             ChromeIconButton(systemImage: "keyboard", label: "Keyboard") {
-                _ = ssh.surface.view.becomeFirstResponder()
+                _ = surface.becomeFirstResponder()
             }
         }
         ChromeMenuButton(systemImage: "ellipsis", label: "Session") { items }
+    }
+
+    private var keyboardSurface: UIView? {
+        if let ssh = tab as? SSHTerminalSession, !ssh.usesBlocks { return ssh.surface.view }
+        if let blocks = tab as? any BlockSession { return blocks.fullScreen?.view }
+        return nil
     }
 
     private var items: [ChromeMenuItem] {

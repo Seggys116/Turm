@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TurmCore
 
 final class AltScreenHost: NSObject, TerminalViewDelegate {
     let view: FullScreenTerminalView
@@ -13,6 +14,8 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     var onTitle: (String) -> Void = { _ in }
     var onResize: (Int, Int) -> Void = { _, _ in }
     private var isReplaying = false
+    private var graphicHold = GraphicHold()
+    private var inlineGraphics = InlineGraphicsSession()
 
     init(cols: Int, rows: Int) {
         var options = TerminalOptions.default
@@ -24,7 +27,31 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     }
 
     func feed(_ bytes: [UInt8]) {
-        view.feed(byteArray: bytes[...])
+        let cell = InlineGraphics.Cell(
+            height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(BlockEmulator.backingScale)
+        )
+        guard let ready = graphicHold.intake(bytes) else { return }
+        let split = TerminalGraphics.split(ready)
+        for piece in split.pieces {
+            switch piece {
+            case .bytes(let raw):
+                view.feed(byteArray: raw)
+            case .sixel(let image):
+                guard image.count <= TerminalGraphics.byteLimit else { continue }
+                view.feed(byteArray: image)
+            case .osc(let payload):
+                let text = String(decoding: payload, as: UTF8.self)
+                if text.lowercased().hasPrefix("file=") {
+                    var sequence = Array("\u{1B}]1337;".utf8)
+                    sequence.append(contentsOf: payload)
+                    sequence.append(contentsOf: [0x1B, 0x5C])
+                    view.feed(byteArray: sequence[...])
+                } else if case .reply(let reply) = inlineGraphics.receive(payload, cell: cell) {
+                    onInput(reply)
+                }
+            }
+        }
+        graphicHold.hold(split.remainder)
     }
 
     func replay(_ bytes: [UInt8]) {
@@ -78,7 +105,13 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         ClipboardPermission.readClipboard()
     }
 
-    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
+        let cell = InlineGraphics.Cell(
+            height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(BlockEmulator.backingScale)
+        )
+        guard case .reply(let bytes) = inlineGraphics.receive(content, cell: cell) else { return }
+        onInput(bytes)
+    }
 
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }

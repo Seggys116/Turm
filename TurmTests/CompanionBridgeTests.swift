@@ -345,7 +345,7 @@ struct CompanionBridgeTests {
         defer { rig.finish() }
         try #require(await wait { rig.session.phase == .ready })
 
-        rig.bridge.handle(.create(directory: nil, command: nil), from: rig.peer)
+        rig.bridge.handle(.create(directory: nil, command: nil, space: nil), from: rig.peer)
 
         let entries = rig.workspace.sessionEntries
         #expect(entries.count == 2)
@@ -359,7 +359,7 @@ struct CompanionBridgeTests {
         defer { rig.finish() }
         try #require(await wait { rig.session.phase == .ready })
 
-        rig.bridge.handle(.create(directory: "/definitely/not/a/folder-\(UUID().uuidString)", command: nil), from: rig.peer)
+        rig.bridge.handle(.create(directory: "/definitely/not/a/folder-\(UUID().uuidString)", command: nil, space: nil), from: rig.peer)
 
         #expect(rig.outbox.errorCodes == [CompanionErrorCode.failed])
         #expect(rig.workspace.sessionEntries.count == 1)

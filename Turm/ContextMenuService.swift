@@ -114,6 +114,10 @@ final class ContextMenuService: NSObject {
         }
     }
 
+    func workspace(in window: NSWindow) -> Workspace? {
+        workspaces.object(forKey: window)
+    }
+
     func register(_ workspace: Workspace, in window: NSWindow) {
         workspaces.setObject(workspace, forKey: window)
         if window.isKeyWindow || lastKeyWindow == nil { lastKeyWindow = window }

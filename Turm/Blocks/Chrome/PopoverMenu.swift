@@ -107,16 +107,27 @@ final class MenuController {
     }
 
     func installTrigger(_ open: @escaping () -> Void) {
+        chip.tracksPointer = true
+        PointerTargets.shared.track(chip)
         if let trigger { NSEvent.removeMonitor(trigger) }
         trigger = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
             nonisolated(unsafe) let captured = event
             MainActor.assumeIsolated {
-                guard let self, self.chip.contains(captured) else { return }
+                guard let self, self.chip.claims(captured) else { return }
                 self.pointer = NSEvent.mouseLocation
                 open()
             }
             return event
         }
+    }
+
+    func claims(_ event: NSEvent) -> Bool {
+        chip.claims(event)
+    }
+
+    var anchorFrameInWindow: NSRect? {
+        guard let view = chip.view, view.window != nil else { return nil }
+        return view.convert(view.bounds, to: nil)
     }
 
     func present(_ content: AnyView, placement: MenuPlacement) {
@@ -163,6 +174,8 @@ final class MenuController {
     }
 
     func teardown() {
+        chip.tracksPointer = false
+        PointerTargets.shared.untrack(chip)
         if let trigger { NSEvent.removeMonitor(trigger) }
         trigger = nil
         retirePresented()
@@ -253,12 +266,124 @@ final class MenuController {
     }
 }
 
+/// Inactive shells stay mounted behind the active one, so several rows contain the same click.
+/// Only the frontmost row that is actually on screen opens its menu.
+@MainActor
+private final class PointerTargets {
+    static let shared = PointerTargets()
+    private var boxes: [ObjectIdentifier: WeakBox] = [:]
+
+    func track(_ box: ViewBox) {
+        guard box.tracksPointer else { return }
+        boxes[ObjectIdentifier(box)] = WeakBox(box)
+    }
+
+    func untrack(_ box: ViewBox) {
+        boxes.removeValue(forKey: ObjectIdentifier(box))
+    }
+
+    func winner(for event: NSEvent) -> ViewBox? {
+        guard let window = event.window else { return nil }
+        let point = event.locationInWindow
+        var stale: [ObjectIdentifier] = []
+        var candidates: [(ViewBox, NSView)] = []
+        for (key, entry) in boxes {
+            guard let box = entry.box, let view = box.view else {
+                stale.append(key)
+                continue
+            }
+            guard view.window === window, Self.covers(view, point) else { continue }
+            candidates.append((box, view))
+        }
+        stale.forEach { boxes.removeValue(forKey: $0) }
+        guard !candidates.isEmpty else { return nil }
+        return frontmost(narrowed(candidates, at: point, in: window))
+    }
+
+    private func frontmost(_ pool: [(ViewBox, NSView)]) -> ViewBox? {
+        var best: (ViewBox, NSView)?
+        for candidate in pool {
+            guard let current = best else {
+                best = candidate
+                continue
+            }
+            if Self.isInFront(candidate.1, of: current.1) { best = candidate }
+        }
+        return best?.0
+    }
+
+    private func narrowed(_ candidates: [(ViewBox, NSView)], at point: NSPoint, in window: NSWindow) -> [(ViewBox, NSView)] {
+        guard let hit = window.contentView?.hitTest(point) else { return candidates }
+        let owners = candidates.filter { hit === $0.1 || hit.isDescendant(of: $0.1) }
+        return owners.isEmpty ? candidates : owners
+    }
+
+    private static func covers(_ view: NSView, _ point: NSPoint) -> Bool {
+        guard isShown(view) else { return false }
+        let visible = view.visibleRect.intersection(view.bounds)
+        guard !visible.isNull, visible.width > 0, visible.height > 0 else { return false }
+        return view.convert(visible, to: nil).contains(point)
+    }
+
+    private static func isShown(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let view = current {
+            if view.isHidden || view.alphaValue < 0.01 { return false }
+            current = view.superview
+        }
+        return true
+    }
+
+    /// A row inside another row is more specific. Otherwise the later sibling is the one drawn on top.
+    private static func isInFront(_ a: NSView, of b: NSView) -> Bool {
+        if a === b { return false }
+        if a.isDescendant(of: b) { return true }
+        if b.isDescendant(of: a) { return false }
+        var node = a
+        while let parent = node.superview {
+            if let branch = child(of: parent, containing: b), branch !== node {
+                guard let indexA = parent.subviews.firstIndex(where: { $0 === node }),
+                      let indexB = parent.subviews.firstIndex(where: { $0 === branch }) else { return false }
+                return indexA > indexB
+            }
+            node = parent
+        }
+        return false
+    }
+
+    private static func child(of parent: NSView, containing view: NSView) -> NSView? {
+        if view === parent { return nil }
+        var node: NSView? = view
+        while let current = node {
+            if current.superview === parent { return current }
+            node = current.superview
+        }
+        return nil
+    }
+
+    private struct WeakBox {
+        weak var box: ViewBox?
+        init(_ box: ViewBox) { self.box = box }
+    }
+}
+
+@MainActor
 private final class ViewBox {
-    weak var view: NSView?
+    weak var view: NSView? {
+        didSet {
+            guard view !== oldValue, tracksPointer else { return }
+            PointerTargets.shared.track(self)
+        }
+    }
+    var tracksPointer = false
 
     func contains(_ event: NSEvent) -> Bool {
         guard let view, let window = view.window, event.window === window else { return false }
         return view.convert(view.bounds, to: nil).contains(event.locationInWindow)
+    }
+
+    func claims(_ event: NSEvent) -> Bool {
+        PointerTargets.shared.winner(for: event) === self
     }
 }
 

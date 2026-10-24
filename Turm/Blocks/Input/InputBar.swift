@@ -64,6 +64,7 @@ struct InputBar: View {
                     onSubmit: submit,
                     onClear: session.clearBlocks,
                     onFocus: session.focus,
+                    stillFocused: { session.isPaneFocused },
                     onAttach: attach,
                     onDragTarget: { session.isDropTargeted = $0 },
                     onSelectAllBlocks: {

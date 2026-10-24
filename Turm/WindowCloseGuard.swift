@@ -1,13 +1,16 @@
 import SwiftUI
 
 struct WindowCloseGuard: NSViewRepresentable {
-    let workspace: Workspace
+    let host: WindowHost
 
     func makeNSView(context: Context) -> WindowCloseView {
-        WindowCloseView(workspace: workspace)
+        WindowCloseView(host: host)
     }
 
-    func updateNSView(_ view: WindowCloseView, context: Context) {}
+    func updateNSView(_ view: WindowCloseView, context: Context) {
+        view.host = host
+        view.bindCurrentWorkspace()
+    }
 
     static func dismantleNSView(_ view: WindowCloseView, coordinator: ()) {
         view.detach()
@@ -15,12 +18,13 @@ struct WindowCloseGuard: NSViewRepresentable {
 }
 
 final class WindowCloseView: NSView, NSWindowDelegate {
-    private let workspace: Workspace
+    var host: WindowHost
     private weak var observedWindow: NSWindow?
     private weak var originalDelegate: (any NSWindowDelegate)?
+    private weak var boundWorkspace: Workspace?
 
-    init(workspace: Workspace) {
-        self.workspace = workspace
+    init(host: WindowHost) {
+        self.host = host
         super.init(frame: .zero)
     }
 
@@ -37,7 +41,15 @@ final class WindowCloseView: NSView, NSWindowDelegate {
         observedWindow = window
         originalDelegate = window.delegate
         window.delegate = self
+        bindCurrentWorkspace()
+    }
+
+    func bindCurrentWorkspace() {
+        guard let window else { return }
+        let workspace = SpaceLibrary.shared.workspace(for: host)
+        guard boundWorkspace !== workspace else { return }
         ContextMenuService.shared.register(workspace, in: window)
+        boundWorkspace = workspace
     }
 
     func detach() {
@@ -47,11 +59,15 @@ final class WindowCloseView: NSView, NSWindowDelegate {
         }
         observedWindow = nil
         originalDelegate = nil
+        boundWorkspace = nil
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard originalDelegate?.windowShouldClose?(sender) ?? true else { return false }
-        return workspace.shouldCloseWindow()
+        if Self.otherMainWindows(besides: sender) > 0 { return true }
+        let count = SpaceLibrary.shared.shellsRequiringConfirmation()
+        if count == 0 { return true }
+        return CloseCoordinator.shared.confirm(.application(shellCount: count))
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -62,18 +78,16 @@ final class WindowCloseView: NSView, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow {
             ContextMenuService.shared.unregister(window)
-            workspace.noteFrame(window.frame, isKey: window.isKeyWindow)
+            let others = Self.otherMainWindows(besides: window)
+            SpaceLibrary.shared.noteWindowClosing(host, frame: window.frame, isLast: others == 0)
         }
         if WorkspacePersistence.savesOnClose(otherVisibleMainWindows: Self.otherMainWindows(besides: window)) {
-            if let window = notification.object as? NSWindow {
-                workspace.noteFrame(window.frame, isKey: true)
-            }
             WorkspacePersistence.prepareToQuit()
-            WorkspacePersistence.save(workspace)
+            SpaceLibrary.shared.saveAll()
+            CloseCoordinator.shared.terminateAll()
         } else {
-            WorkspacePersistence.remove(workspace)
+            SpaceLibrary.shared.saveAll()
         }
-        workspace.terminateAll()
         originalDelegate?.windowWillClose?(notification)
     }
 

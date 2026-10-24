@@ -47,9 +47,11 @@ extension NSColor {
 
 enum Theme {
     static let terminalBackground = ThemeColor(TurmCore.TerminalPalette.background)
+    static let windowBackground = ThemeColor(light: 0xD4D4DA, dark: 0x232328)
     static let inputBackground = ThemeColor(light: 0xF5F5F7, dark: 0x111113)
     static let topBar = ThemeColor(light: 0xE6E6EA, dark: 0x1B1B1F)
     static let sidebar = ThemeColor(light: 0xEBEBEE, dark: 0x0E0E10)
+    static let filesSurface = ThemeColor(light: 0xF2F2F5, dark: 0x141418)
     static let statusBar = ThemeColor(light: 0xECECF0, dark: 0x151518)
     static let text = ThemeColor(TurmCore.TerminalPalette.foreground)
     static let divider = ThemeColor(

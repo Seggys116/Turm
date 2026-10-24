@@ -56,6 +56,7 @@ final class CloseCoordinator {
     }
 
     func shouldQuit() -> Bool {
+        SpaceLibrary.shared.noteFrontWindow()
         WorkspacePersistence.prepareToQuit()
         WorkspacePersistence.saveRegistered(registeredWorkspaces.filter { !$0.didTerminate })
         let count = workspaces.allObjects.reduce(0) { $0 + $1.shellsRequiringConfirmationCount }

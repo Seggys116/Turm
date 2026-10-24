@@ -212,9 +212,11 @@ final class SSHShell {
     }
 
     private func enterFullScreen(replaying chunk: [UInt8]) {
-        let surface = TerminalSurface()
+        let surface = TerminalSurface(capturesKeyboard: true)
         surface.view.resize(cols: size.cols, rows: size.rows)
+        surface.replays = true
         surface.feed(chunk[...])
+        surface.replays = false
         surface.onInput = { [weak self] bytes in self?.sendInput(Array(bytes)) }
         surface.onResize = { [weak self] cols, rows in
             guard let self, cols >= 2, rows >= 2 else { return }

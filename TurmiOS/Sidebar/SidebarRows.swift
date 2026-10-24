@@ -49,12 +49,11 @@ struct MacRow: View {
 
 struct HostRow: View {
     let host: SSHHost
+    var connected = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "network")
-                .font(.system(size: 13))
-                .foregroundStyle(Chrome.secondaryText)
+            StatusDot(color: connected ? Chrome.success : Chrome.secondaryText, filled: connected)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.token)

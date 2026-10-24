@@ -7,6 +7,7 @@ enum KittyLanding {
     case place
     case harvest
     case frame
+    case query
     case discard
 }
 
@@ -106,7 +107,7 @@ extension BlockEmulator {
             continueChunk(Array(apc), command)
             return
         }
-        if command.imageID != nil, command.imageNumber != nil, "acdfp".contains(action) {
+        if command.imageID != nil, command.imageNumber != nil, "acdfpq".contains(action) {
             fail(("EINVAL", "Must not specify both image id and image number"), command)
             if action == "f", command.more { start([], KittyJob(command: command, landing: .discard)) }
             return
@@ -118,12 +119,15 @@ extension BlockEmulator {
         case "f": beginFrame(apc, command)
         case "t", "T": beginTransmit(apc, command)
         case "p": beginPut(apc, command)
+        case "q": start(Array(apc), KittyJob(command: command, landing: .query))
         default: run(rewritten(apc, command), filter: KittyReplyFilter(quiet: command.quiet))
         }
     }
 
     private func admit(_ job: inout KittyJob, _ bytes: [UInt8], first: Bool, more: Bool) -> Admission {
-        guard job.landing != .discard, job.command.transmits || job.command.action == "f" else { return .feed(bytes) }
+        guard job.landing != .discard, job.command.transmits || job.command.action == "f" || job.landing == .query else {
+            return .feed(bytes)
+        }
         if first {
             if let failure = KittyLoadCheck.initialize(job.command) { return .reject(failure) }
             job.load.firstBytes = bytes
@@ -172,6 +176,10 @@ extension BlockEmulator {
         case .hold:
             chunked = job
         case .feed(let out):
+            if job.landing == .query {
+                finishQuery(job, more: command.more)
+                return
+            }
             if command.more {
                 chunked = job
                 terminal.feed(byteArray: out)
@@ -181,6 +189,16 @@ extension BlockEmulator {
                 release(job)
             }
         }
+    }
+
+    private func finishQuery(_ job: KittyJob, more: Bool) {
+        if more {
+            chunked = job
+            return
+        }
+        chunked = nil
+        emit(identity(job.command), "OK", quiet: job.command.quiet)
+        release(job)
     }
 
     private func release(_ job: KittyJob) {
@@ -204,6 +222,10 @@ extension BlockEmulator {
         case .hold:
             chunked = job
         case .feed(let out):
+            if job.landing == .query {
+                finishQuery(job, more: job.command.more)
+                return
+            }
             let engine = toEngine(out, &job)
             if job.command.more {
                 chunked = job
@@ -417,7 +439,7 @@ extension BlockEmulator {
         case .place:
             if job.command.transmits { store(cgImage, job.command) }
             recordKitty(image, pixels: pixels, command: job.command)
-        case .discard:
+        case .query, .discard:
             break
         }
         return true
@@ -754,14 +776,14 @@ extension BlockEmulator {
 
     func clearGraphics(all: Bool) {
         if all {
-            images.removeAll { $0.fromKitty }
+            images.removeAll()
         } else {
             let top = terminal.buffer.yDisp + terminal.buffer.totalLinesTrimmed
             let snapshot = images
             let virtual = placeholderLayout().origins
             images.removeAll { image in
-                guard image.fromKitty, let origin = snapshot.origin(of: image, virtual: virtual) else { return false }
-                return origin.row + max(image.rowSpan, 1) > top
+                let origin = snapshot.origin(of: image, virtual: virtual)?.row ?? image.anchor
+                return origin + max(image.rowSpan, 1) > top
             }
         }
         images.removeOrphans(keeping: virtualKeys)
@@ -849,7 +871,11 @@ extension BlockEmulator {
     func pruneScrolledOff() {
         let trimmed = terminal.buffer.totalLinesTrimmed
         guard trimmed > 0 else { return }
-        images.removeAll { $0.fromKitty && $0.parent == nil && $0.anchor + max($0.rowSpan, 1) <= trimmed }
+        images.removeAll { image in
+            let end = image.anchor + max(image.rowSpan, 1)
+            if image.fromKitty { return image.parent == nil && end <= trimmed }
+            return image.rowSpan > 0 && end <= trimmed
+        }
         images.removeOrphans(keeping: virtualKeys)
     }
 

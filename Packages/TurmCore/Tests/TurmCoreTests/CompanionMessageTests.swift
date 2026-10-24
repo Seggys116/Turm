@@ -9,6 +9,17 @@ struct CompanionMessageTests {
     private let git = CompanionGit(branch: "main", files: 3, added: 10, removed: 2)
     private var shortcut: Shortcut { Shortcut(id: id, kind: .directory, key: "proj", name: "Projects", value: "/Users/z/Projects") }
 
+    @Test func anOlderSessionSummaryStillDecodes() throws {
+        let raw = """
+        {"id":"\(id.uuidString)","title":"build","location":"~/Projects","phase":"running"}
+        """
+        let decoded = try JSONDecoder().decode(SessionSummary.self, from: Data(raw.utf8))
+        #expect(decoded.title == "build")
+        #expect(decoded.phase == .running)
+        #expect(decoded.spaceID == nil)
+        #expect(decoded.spaceName == nil)
+    }
+
     private var summary: SessionSummary {
         SessionSummary(
             id: id, title: "build", location: "~/Projects", phase: .running, activity: .progress(percent: 42),
@@ -31,8 +42,8 @@ struct CompanionMessageTests {
             .input(id: id, bytes: Data([3, 27, 91, 65])),
             .interrupt(id: id),
             .resize(id: id, cols: 80, rows: 24),
-            .create(directory: "~/Projects", command: "make"),
-            .create(directory: nil, command: nil),
+            .create(directory: "~/Projects", command: "make", space: nil),
+            .create(directory: nil, command: nil, space: id),
             .close(id: id, force: true),
             .welcome(version: .current, macName: "Mac"),
             .incompatible(version: CompanionVersion(app: "1.4.0", kinds: ["hello"], essential: ["hello"])),

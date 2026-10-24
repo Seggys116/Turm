@@ -2,25 +2,26 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
-/// How the window is divided between the sidebar and the session detail.
+/// How a wide window divides the sidebar and the session.
+///
+/// Side by side only when the system will keep two columns: a regular width (iPad, a large phone
+/// in landscape, iPhone Duo unfolded) or an active vertical fold with room on both sides.
+/// A compact phone, in either orientation, stays a stack so the sidebar is a page you can return to.
 struct ShellLayout {
-    static let wideCompactWidth: CGFloat = 640
-
     var split: Bool
     var sidebarWidth: CGFloat
     var detailLeading: CGFloat
 
-    /// Side by side for regular width, and for short compact windows at least 640pt wide; one column otherwise.
-    init(horizontal: UserInterfaceSizeClass?, vertical: UserInterfaceSizeClass?, width: CGFloat, fold: ClosedRange<CGFloat>? = nil) {
-        let regular = horizontal == .regular
-        split = regular || (vertical == .compact && width >= Self.wideCompactWidth)
-        guard split else {
-            sidebarWidth = width
+    init(horizontal: UserInterfaceSizeClass?, width: CGFloat, fold: ClosedRange<CGFloat>? = nil) {
+        let foldSplits = fold.map { $0.lowerBound >= 220 && width - $0.upperBound >= 280 } ?? false
+        split = horizontal == .regular || foldSplits
+        guard split, width > 1 else {
+            sidebarWidth = max(width, 1)
             detailLeading = 0
             return
         }
-        let range: ClosedRange<CGFloat> = regular ? 260...360 : 240...300
-        sidebarWidth = min(max(width * 0.3, range.lowerBound), range.upperBound)
+        let range: ClosedRange<CGFloat> = horizontal == .regular ? 260...420 : 240...360
+        sidebarWidth = min(max(width * 0.34, range.lowerBound), range.upperBound)
         detailLeading = sidebarWidth
         if let fold, fold.lowerBound >= 220, width - fold.upperBound >= 280 {
             sidebarWidth = fold.lowerBound
@@ -33,107 +34,111 @@ struct AdaptiveShell: View {
     let workspace: Workspace
     let macs: MacManager
     @Environment(\.horizontalSizeClass) private var horizontal
-    @Environment(\.verticalSizeClass) private var vertical
-    @GestureState(resetTransaction: Transaction(animation: Chrome.columnMotion)) private var edgeDrag: CGFloat = 0
-    private let keyboard = KeyboardOverlap.shared
+    @State private var columnVisibility = NavigationSplitViewVisibility.doubleColumn
+    @State private var preferredColumn = NavigationSplitViewColumn.sidebar
+    @State private var width: CGFloat = 0
+    @State private var fold: ClosedRange<CGFloat>?
+    @State private var homePath: [HomeRoute] = []
 
-    var body: some View {
-        ToolbarVerticalEdgeReader { rail in
-            GeometryReader { proxy in
-                shell(in: proxy, rail: rail)
-            }
-            .ignoresSafeArea(.keyboard)
-        }
-        .background(Chrome.sidebar.ignoresSafeArea())
+    private var layout: ShellLayout {
+        ShellLayout(horizontal: horizontal, width: width, fold: fold)
     }
 
-    private func shell(in proxy: GeometryProxy, rail: HorizontalEdge?) -> some View {
-        let insets = proxy.safeAreaInsets
-        let lift = max(0, keyboard.height - insets.bottom)
-        let height = max(0, proxy.size.height - lift)
-        let strip = rail == .leading ? insets.leading : rail == .trailing ? insets.trailing : 0
-        let inStrip = strip >= Chrome.Metrics.minimumStrip
-        let railWidth = rail == nil || inStrip ? 0 : Chrome.Metrics.railWidth
-        let leadingRail = rail == .leading ? railWidth : 0
-        let width = max(0, proxy.size.width - railWidth)
-        let fold = ReservedArea.verticalFold(in: proxy).map { ($0.lowerBound - leadingRail)...($0.upperBound - leadingRail) }
-        let layout = ShellLayout(horizontal: horizontal, vertical: vertical, width: width, fold: fold)
-        let split = layout.split
-        let sidebarShown = split ? !workspace.sidebarHidden : workspace.compactColumn == .sidebar
-        let detailShown = split || workspace.compactColumn == .detail
-        let detailX = split && !workspace.sidebarHidden ? layout.detailLeading : 0
-        let sidebarSlide = split && workspace.sidebarHidden ? -(layout.sidebarWidth + insets.leading + leadingRail) : 0
-        let detailSlide = !split && workspace.compactColumn == .sidebar ? proxy.size.width + insets.leading + insets.trailing : 0
-        return ZStack(alignment: .topLeading) {
-            AppSidebar(workspace: workspace, macs: macs)
-                .frame(width: layout.sidebarWidth)
-                .overlay(alignment: .trailing) {
-                    if split { Chrome.divider.frame(width: 1).ignoresSafeArea(edges: .vertical) }
-                }
-                .offset(x: sidebarSlide)
-                .animation(Chrome.columnMotion, value: sidebarSlide)
-                .accessibilityHidden(!sidebarShown)
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredColumn) {
+            NavigationStack(path: $homePath) {
+                AppSidebar(workspace: workspace, macs: macs, path: $homePath)
+                    .navigationDestination(for: HomeRoute.self) { route in
+                        homeDestination(route)
+                    }
+            }
+            .navigationSplitViewColumnWidth(min: 220, ideal: max(layout.sidebarWidth, 220), max: 560)
+        } detail: {
             TerminalDetail(workspace: workspace)
-                .frame(width: max(0, width - detailX))
-                .overlay(alignment: .leading) {
-                    if !split { Chrome.divider.frame(width: 1).ignoresSafeArea(edges: .vertical) }
-                }
-                .simultaneousGesture(edgeSwipe(width: width), isEnabled: !split && detailShown)
-                .padding(.leading, detailX)
-                .transaction(value: detailX) { $0.animation = nil }
-                .offset(x: detailSlide)
-                .animation(Chrome.columnMotion, value: detailSlide)
-                .offset(x: edgeDrag)
-                .accessibilityHidden(!detailShown)
         }
-        .frame(width: width, height: height, alignment: .topLeading)
-        .environment(\.splitLayout, split)
-        .environment(\.chromeBarSuppressed, rail != nil)
-        .modifier(ChromeBarPlacement(bar: railBar(split: split), top: nil, side: inStrip ? nil : rail))
-        .overlay(alignment: rail == .leading ? .topLeading : .topTrailing) {
-            if inStrip, let rail {
-                stripBar(split: split, side: rail, width: strip, insets: insets, lift: lift, height: proxy.size.height)
+        .navigationSplitViewStyle(.balanced)
+        .environment(\.splitLayout, layout.split)
+        .background { MacClosePrompt(macs: macs) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { fold = ReservedArea.verticalFold(in: proxy) }
+                    .onChange(of: proxy.size) { _, _ in fold = ReservedArea.verticalFold(in: proxy) }
+            }
+        }
+        .onChange(of: homePath) { _, path in
+            guard path.count >= 2, path[path.count - 1] == path[path.count - 2] else { return }
+            homePath.removeLast()
+        }
+        .onChange(of: columnVisibility) { _, visibility in
+            guard layout.split else { return }
+            switch visibility {
+            case .detailOnly:
+                if !workspace.sidebarHidden { workspace.sidebarHidden = true }
+            case .doubleColumn, .all:
+                if workspace.sidebarHidden { workspace.sidebarHidden = false }
+            default:
+                break
+            }
+        }
+        .onChange(of: workspace.sidebarHidden) { _, hidden in
+            if layout.split {
+                revealColumns(hidden)
+            } else {
+                preferredColumn = hidden ? .detail : .sidebar
+                workspace.compactColumn = hidden ? .detail : .sidebar
+            }
+        }
+        .onChange(of: layout.split) { _, split in
+            if split {
+                revealColumns(workspace.sidebarHidden)
+            } else {
+                if columnVisibility != .automatic { columnVisibility = .automatic }
+                let page: NavigationSplitViewColumn = workspace.selectedID == nil ? .sidebar : .detail
+                preferredColumn = page
+                workspace.compactColumn = page == .sidebar ? .sidebar : .detail
             }
         }
         .onChange(of: workspace.compactColumn) { _, column in
-            guard !split else { return }
+            guard !layout.split else { return }
+            let next: NavigationSplitViewColumn = column == .sidebar ? .sidebar : .detail
+            if preferredColumn != next { preferredColumn = next }
+        }
+        .onChange(of: workspace.selectedID) { _, id in
+            let column: WorkspaceColumn = id == nil ? .sidebar : .detail
+            workspace.compactColumn = column
+            if !layout.split { preferredColumn = column == .sidebar ? .sidebar : .detail }
             focus(for: column)
         }
-        .frame(height: proxy.size.height, alignment: .top)
+        .onAppear { if layout.split { revealColumns(workspace.sidebarHidden) } }
     }
 
-    /// The iPhone Duo vertical bar: navigation first, then the app actions, then the open session's actions.
-    private func railBar(split: Bool) -> some View {
-        let detailShown = split || workspace.compactColumn == .detail
-        return ChromeTopBar(
-            workspace.selected?.title ?? "Turm",
-            leading: {
-                if split {
-                    SidebarToggleButton(workspace: workspace)
-                } else if detailShown {
-                    SessionsBackButton(workspace: workspace)
-                }
-            },
-            trailing: {
-                NewMenuButton(workspace: workspace)
-                SettingsButton(workspace: workspace)
-                if detailShown, let tab = workspace.selected {
-                    SessionButtons(workspace: workspace, tab: tab)
-                }
+    @ViewBuilder
+    private func homeDestination(_ route: HomeRoute) -> some View {
+        switch route {
+        case .mac(let id):
+            if let connection = macs.connection(for: id), let entry = macs.macs.first(where: { $0.id == id }) {
+                MacSpacesPage(workspace: workspace, macs: macs, connection: connection, entry: entry, path: $homePath)
+            } else {
+                ContentUnavailableView("Mac Unavailable", systemImage: "desktopcomputer", description: Text("This Mac is no longer paired."))
             }
-        )
+        case .space(let macID, let spaceID):
+            if let connection = macs.connection(for: macID) {
+                let group = MacSpaces.groups(in: connection.sessions).first { $0.id == spaceID }
+                    ?? MacSpaceGroup(id: spaceID, name: "Space", symbol: "terminal", sessions: [])
+                MacSpaceShells(workspace: workspace, connection: connection, group: group)
+            } else {
+                ContentUnavailableView("Mac Unavailable", systemImage: "desktopcomputer", description: Text("This Mac is no longer paired."))
+            }
+        }
     }
 
-    // the system's vertical status strip is also where Apple puts an app's vertical bar, below the camera and status
-    private func stripBar(split: Bool, side: HorizontalEdge, width: CGFloat, insets: EdgeInsets, lift: CGFloat, height: CGFloat) -> some View {
-        railBar(split: split)
-            .environment(\.chromeBarStyle, .vertical(side))
-            .padding(.bottom, insets.bottom + lift)
-            .frame(width: width, height: height + insets.top + insets.bottom)
-            .ignoresSafeArea()
-            // negative padding rather than offset, so the bar's measured camera and fold regions match where it is drawn
-            .padding(side == .trailing ? .trailing : .leading, -width)
-            .padding(.top, -insets.top)
+    /// Both columns stay up until the sidebar is hidden. `.automatic` would collapse them again
+    /// as soon as a session is selected.
+    private func revealColumns(_ hidden: Bool) {
+        let next: NavigationSplitViewVisibility = hidden ? .detailOnly : .doubleColumn
+        if columnVisibility != next { columnVisibility = next }
     }
 
     private func focus(for column: WorkspaceColumn) {
@@ -144,19 +149,53 @@ struct AdaptiveShell: View {
             if let ssh = workspace.selected as? SSHTerminalSession, !ssh.usesBlocks { _ = ssh.surface.view.becomeFirstResponder() }
         }
     }
+}
 
-    // only drags that start at the leading edge pull the sessions back in; a cancelled drag (the scroll view took it) resets the offset
-    private func edgeSwipe(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .local)
-            .updating($edgeDrag) { value, offset, _ in
-                guard value.startLocation.x <= 22, abs(value.translation.width) > abs(value.translation.height) else { return }
-                offset = max(0, value.translation.width)
+/// Stays mounted for the life of the window, so a close confirmation is shown on the swipe
+/// instead of waiting until a later page appears.
+private struct MacClosePrompt: View {
+    let macs: MacManager
+    @Environment(\.chromeOverlays) private var overlays
+    @State private var token = UUID()
+
+    private var pendingID: UUID? {
+        macs.connections.compactMap(\.closeRequest).first?.id
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: pendingID, initial: true) { _, id in
+                show(id)
             }
-            .onEnded { value in
-                let sideways = value.translation.width > abs(value.translation.height)
-                guard value.startLocation.x <= 22, value.translation.width > 0, sideways else { return }
-                let leave = value.translation.width > width * 0.35 || value.predictedEndTranslation.width > width * 0.6
-                if leave { withAnimation(Chrome.columnMotion) { workspace.compactColumn = .sidebar } }
+    }
+
+    private func show(_ id: UUID?) {
+        guard let overlays else { return }
+        guard let id,
+              let connection = macs.connections.first(where: { $0.closeRequest?.id == id }),
+              let request = connection.closeRequest
+        else {
+            overlays.dismissDialog(token: token)
+            return
+        }
+        overlays.present(
+            dialog: ChromeDialogSpec(
+                title: "Close this shell?",
+                message: request.message,
+                actions: [
+                    ChromeDialogSpec.Action(title: "Cancel", role: .cancel),
+                    ChromeDialogSpec.Action(title: "Close Anyway", role: .destructive) { _ in
+                        connection.closeSession(request.id, force: true)
+                    },
+                ]
+            ),
+            token: token
+        ) {
+            if connection.closeRequest?.id == request.id {
+                connection.closeRequest = nil
             }
+        }
     }
 }

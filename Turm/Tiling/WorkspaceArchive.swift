@@ -169,6 +169,10 @@ enum WorkspacePersistence {
     static func save(_ workspace: Workspace, force: Bool = false) {
         guard !workspace.didTerminate else { return }
         guard force || (allowsDisk && workspace.persistsToDisk) else { return }
+        if workspace.isTemporarySpace {
+            purgeTemporary(windowID: workspace.windowID, spaceID: workspace.spaceID)
+            return
+        }
         let captured = workspace.captureWindow()
         var document = (try? store().load()) ?? WorkspaceDocument(windows: [], keyWindowID: nil)
         if let index = document.windows.firstIndex(where: { $0.id == captured.id }) {
@@ -179,6 +183,20 @@ enum WorkspacePersistence {
         if workspace.savedIsKey || document.keyWindowID == nil {
             document.keyWindowID = captured.id
         }
+        if workspace.spaceID != nil, document.spaces.isEmpty, !document.windows.isEmpty {
+            document.spaces = document.spaceCatalog
+        }
+        if let spaceID = workspace.spaceID {
+            let space = SavedSpace(
+                id: spaceID, name: workspace.spaceName, symbol: workspace.spaceSymbol, session: captured,
+                isTemporary: workspace.isTemporarySpace
+            )
+            if let index = document.spaces.firstIndex(where: { $0.id == spaceID }) {
+                document.spaces[index] = space
+            } else {
+                document.spaces.append(space)
+            }
+        }
         try? store().save(document)
         for session in workspace.archivedSessions() {
             try? store().save(session.blocks, for: session.pane.raw)
@@ -186,7 +204,7 @@ enum WorkspacePersistence {
     }
 
     static func saveBlocks(of workspace: Workspace) {
-        guard allowsDisk, workspace.persistsToDisk else { return }
+        guard allowsDisk, workspace.persistsToDisk, !workspace.isTemporarySpace else { return }
         for session in workspace.archivedSessions() {
             try? store().save(session.blocks, for: session.pane.raw)
         }
@@ -199,6 +217,55 @@ enum WorkspacePersistence {
     static func remove(_ workspace: Workspace) {
         guard allowsDisk, workspace.persistsToDisk else { return }
         try? store().removeWindow(workspace.windowID)
+    }
+
+    /// Drops a scratch space, including one that was written before it was marked temporary.
+    private static func purgeTemporary(windowID: UUID, spaceID: UUID?) {
+        guard allowsDisk, var document = try? store().load() else { return }
+        let ids = Set([windowID, spaceID].compactMap { $0 })
+        let purged = document.discardingTemporarySpaces()
+        let windows = purged.windows.filter { !ids.contains($0.id) }
+        let spaces = purged.spaces.filter { !ids.contains($0.id) && !ids.contains($0.session.id) }
+        var key = purged.keyWindowID
+        if let current = key, ids.contains(current) {
+            key = spaces.first?.id ?? windows.first?.id
+        }
+        let next = WorkspaceDocument(windows: windows, keyWindowID: key, spaces: spaces)
+        guard next != document else { return }
+        document = next
+        try? store().save(document)
+    }
+
+    static func removeSpace(_ id: UUID) {
+        guard allowsDisk, var document = try? store().load() else { return }
+        document = document.removingWindow(id)
+        document.spaces.removeAll { $0.id == id || $0.session.id == id }
+        if document.keyWindowID == id { document.keyWindowID = document.spaces.first?.id ?? document.windows.first?.id }
+        try? store().save(document)
+    }
+
+    static func renameSpace(_ id: UUID, to name: String) {
+        guard allowsDisk, var document = try? store().load(),
+              let index = document.spaces.firstIndex(where: { $0.id == id })
+        else { return }
+        document.spaces[index].name = name
+        try? store().save(document)
+    }
+
+    static func setSpaceSymbol(_ id: UUID, to symbol: String) {
+        guard allowsDisk, var document = try? store().load(),
+              let index = document.spaces.firstIndex(where: { $0.id == id })
+        else { return }
+        document.spaces[index].symbol = symbol
+        try? store().save(document)
+    }
+
+    static func consumeLaunchDocument() -> WorkspaceDocument? {
+        guard allowsDisk else { return nil }
+        if consumedLaunch { return nil }
+        consumedLaunch = true
+        guard shouldRestore(), let document = try? store().load() else { return nil }
+        return document
     }
 
     static func clear() {

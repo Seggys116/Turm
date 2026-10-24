@@ -88,7 +88,8 @@ struct KeyBarEditor: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Chrome.sidebar.ignoresSafeArea())
-        .chromeBar(ChromeTopBar("Keyboard Bar", leading: { ChromeBackButton { dismiss() } }))
+        .navigationTitle("Keyboard Bar")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func header(_ title: String) -> some View {

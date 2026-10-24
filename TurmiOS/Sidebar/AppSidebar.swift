@@ -1,134 +1,185 @@
 import SwiftUI
 import TurmCore
 
+enum HomeRoute: Hashable {
+    case mac(String)
+    case space(mac: String, space: String)
+}
+
 struct AppSidebar: View {
-    let workspace: Workspace
+    @Bindable var workspace: Workspace
     let macs: MacManager
+    @Binding var path: [HomeRoute]
     #if targetEnvironment(simulator)
     var hosts = DemoContent.hosts ?? SSHHostStore.shared
     #else
     var hosts = SSHHostStore.shared
     #endif
-    @Environment(\.splitLayout) private var splitLayout
+    @State private var query = ""
 
     var body: some View {
-        ChromeScroll(spacing: 18) {
+        List(selection: $workspace.selectedID) {
             sessionsSection
-            macsSection
             hostsSection
+            macsSection
         }
-        .chromeBar(
-            ChromeTopBar(
-                "Turm",
-                leading: {
-                    if splitLayout { SidebarToggleButton(workspace: workspace) }
-                },
-                trailing: {
-                    // side by side, the app actions live in the session bar so hiding the sidebar never moves them
-                    if !splitLayout {
-                        NewMenuButton(workspace: workspace)
-                        SettingsButton(workspace: workspace)
-                    }
-                }
-            )
-            .environment(\.chromeBarShowsMark, true)
-        )
+        .listStyle(.insetGrouped)
+        .navigationTitle("Turm")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $query, prompt: "Search hosts and devices")
+        .modifier(BottomSearch())
+        .toolbar { sidebarToolbar }
         .background(Chrome.sidebar.ignoresSafeArea())
         .sessionDrop(into: workspace)
         .animation(.snappy(duration: 0.25), value: workspace.sessions.count)
     }
 
+    @ToolbarContentBuilder
+    private var sidebarToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Menu("New", systemImage: "plus") {
+                Button("New Session", systemImage: "terminal") { workspace.showsHostPicker = true }
+                Button("New SSH Host", systemImage: "network") { workspace.editingHost = SSHHost(key: "", hostname: "") }
+                Button("Pair a Mac", systemImage: "link") { workspace.showsPairing = true }
+            }
+            Button("Settings", systemImage: "gearshape") { workspace.showsSettings = true }
+        }
+    }
+
     @ViewBuilder
     private var sessionsSection: some View {
-        if !workspace.sessions.isEmpty {
-            ChromeSection("Open Sessions") {
-                ForEach(workspace.sessions, id: \.id) { tab in
-                    ChromeSwipeRow(actions: [closeAction(tab)]) {
-                        SessionRow(tab: tab)
-                            .rowSurface(selected: tab.id == workspace.selectedID)
-                            .chromeTap { workspace.select(tab) }
-                            .sessionDrag(tab)
-                            .chromeContextMenu {
-                                workspace.windowMenuItems(for: tab) + [
-                                    ChromeMenuItem(title: "Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) },
-                                ]
-                            }
-                    }
+        let shown = filteredSessions
+        if !shown.isEmpty {
+            Section("Open Sessions") {
+                ForEach(shown, id: \.id) { tab in
+                    SessionRow(tab: tab)
+                        .tag(tab.id as UUID?)
+                        .sessionDrag(tab)
+                        .swipeActions(edge: .trailing) {
+                            Button("Close", role: .destructive) { workspace.close(tab) }
+                        }
+                        .contextMenu {
+                            Button("Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
+                        }
                 }
             }
+        }
+    }
+
+    private var filteredSessions: [any TerminalTab] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return workspace.sessions }
+        return workspace.sessions.filter {
+            $0.title.localizedStandardContains(needle) || $0.subtitle.localizedStandardContains(needle)
         }
     }
 
     private var macsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ChromeSectionHeader(
-                title: "Macs",
-                action: ChromeSectionAction(systemImage: "plus", label: "Pair a Mac") { workspace.showsPairing = true }
-            )
-            if macs.macs.isEmpty {
-                ChromeGroup {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("No Macs yet")
-                            .font(Chrome.Typeface.body)
-                            .foregroundStyle(Chrome.text)
-                        Text("Pair a Mac running Turm to open its shells from here.")
-                            .font(Chrome.Typeface.caption)
-                            .foregroundStyle(Chrome.secondaryText)
-                    }
-                    .rowSurface()
-                    SidebarAction(title: "Pair a Mac", systemImage: "link") { workspace.showsPairing = true }
-                }
+        Section {
+            if visibleMacs.isEmpty {
+                Button("Pair a Mac", systemImage: "link") { workspace.showsPairing = true }
             } else {
-                ForEach(macs.macs) { entry in
+                ForEach(visibleMacs) { entry in
                     if let connection = macs.connection(for: entry.id) {
-                        MacGroup(workspace: workspace, macs: macs, connection: connection, entry: entry)
+                        Button {
+                            path.append(.mac(entry.id))
+                        } label: {
+                            HStack(spacing: 8) {
+                                MacRow(mac: entry)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     } else {
-                        ChromeGroup {
+                        Button {
+                            workspace.showsPairing = true
+                        } label: {
                             MacRow(mac: entry)
-                                .rowSurface()
-                                .chromeTap { workspace.showsPairing = true }
                         }
                     }
                 }
             }
+        } header: {
+            HStack {
+                Text("Mac")
+                Spacer()
+                Button("Pair a Mac", systemImage: "plus") { workspace.showsPairing = true }
+                    .labelStyle(.iconOnly)
+            }
+        } footer: {
+            Text("Open a Mac to use the spaces on that machine.")
+        }
+    }
+
+    private var visibleMacs: [MacEntry] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return macs.macs }
+        return macs.macs.filter {
+            $0.name.localizedStandardContains(needle) || $0.detail.localizedStandardContains(needle)
         }
     }
 
     private var hostsSection: some View {
-        ChromeSection(
-            "SSH Hosts",
-            action: ChromeSectionAction(systemImage: "plus", label: "Add SSH Host") { addHost() }
-        ) {
-            if hosts.hosts.isEmpty {
-                SidebarAction(title: "Add an SSH Host", systemImage: "plus") { addHost() }
+        Section {
+            if visibleHosts.isEmpty {
+                Button("Add an SSH Host", systemImage: "plus") { addHost() }
             } else {
-                ForEach(hosts.hosts) { host in
-                    ChromeSwipeRow(actions: [
-                        ChromeSwipeAction(title: "Delete", systemImage: "trash", role: .destructive) { hosts.remove(host.id) },
-                        ChromeSwipeAction(title: "Edit", systemImage: "pencil") { workspace.editingHost = host },
-                    ]) {
-                        HostRow(host: host)
-                            .rowSurface()
-                            .chromeTap { workspace.open(host) }
-                            .chromeContextMenu {
-                                [
-                                    ChromeMenuItem(title: "Connect", systemImage: "terminal") { workspace.open(host) },
-                                    ChromeMenuItem(title: "Edit", systemImage: "pencil") { workspace.editingHost = host },
-                                    ChromeMenuItem(title: "Delete", systemImage: "trash", role: .destructive) { hosts.remove(host.id) },
-                                ]
-                            }
+                ForEach(visibleHosts) { host in
+                    Button {
+                        workspace.open(host)
+                    } label: {
+                        HostRow(host: host, connected: isConnected(host))
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", role: .destructive) { hosts.remove(host.id) }
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button("Edit") { workspace.editingHost = host }
+                    }
+                    .contextMenu {
+                        Button("Connect", systemImage: "terminal") { workspace.open(host) }
+                        Button("Edit", systemImage: "pencil") { workspace.editingHost = host }
+                        Button("Delete", systemImage: "trash", role: .destructive) { hosts.remove(host.id) }
                     }
                 }
+            }
+        } header: {
+            HStack {
+                Text("SSH Hosts")
+                Spacer()
+                Button("Add SSH Host", systemImage: "plus") { addHost() }
+                    .labelStyle(.iconOnly)
             }
         }
     }
 
-    private func closeAction(_ tab: any TerminalTab) -> ChromeSwipeAction {
-        ChromeSwipeAction(title: "Close", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
+    private var visibleHosts: [SSHHost] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return hosts.hosts }
+        return hosts.hosts.filter {
+            $0.key.localizedStandardContains(needle) || $0.hostname.localizedStandardContains(needle)
+        }
+    }
+
+    private func isConnected(_ host: SSHHost) -> Bool {
+        workspace.sessions.contains { ($0 as? SSHTerminalSession)?.host.id == host.id }
     }
 
     private func addHost() {
         workspace.editingHost = SSHHost(key: "", hostname: "")
+    }
+}
+
+private struct BottomSearch: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.toolbar {
+                DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -142,6 +193,7 @@ struct HostPicker: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             ChromeSection("SSH Hosts") {
                 ForEach(hosts.hosts) { host in
@@ -167,7 +219,14 @@ struct HostPicker: View {
                 }
             }
         }
-        .chromeBar(ChromeTopBar("New Session", trailing: { ChromeBarButton(title: "Cancel", systemImage: "xmark") { dismiss() } }))
+        .navigationTitle("New Session")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+        }
         .chromeSheet()
     }
 

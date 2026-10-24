@@ -3,6 +3,7 @@ import CoreGraphics
 import Foundation
 import SwiftTerm
 import SwiftUI
+import TurmCore
 
 final class BlockEmulator: TerminalDelegate {
     static let scrollback = 20_000
@@ -18,6 +19,9 @@ final class BlockEmulator: TerminalDelegate {
     var settled: (row: Int, rows: Int)?
     var replyFilter = KittyReplyFilter()
     private var held: [UInt8] = []
+    private var graphicHold = GraphicHold()
+    private var inlineGraphics = InlineGraphicsSession()
+    private var cursorAdvance = 0
     private var sgrRewriter = SGRRewriter()
     private var lineCache: [RenderedLine?] = []
     private var cacheBase = 0
@@ -134,7 +138,7 @@ final class BlockEmulator: TerminalDelegate {
             let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
             if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
                 guard held.count > Self.heldLimit else { return }
-                terminal.feed(byteArray: held)
+                feedTerminal(held)
                 held = []
                 return
             }
@@ -142,7 +146,7 @@ final class BlockEmulator: TerminalDelegate {
             held = []
         }
         guard bytes.contains(0x1B) else {
-            terminal.feed(byteArray: bytes)
+            feedTerminal(bytes)
             return
         }
         let split = KittyGraphicsScanner.split(bytes)
@@ -150,10 +154,10 @@ final class BlockEmulator: TerminalDelegate {
         for piece in split.pieces {
             switch piece.kind {
             case .text:
-                terminal.feed(byteArray: Array(piece.bytes))
+                feedTerminal(Array(piece.bytes))
                 settleBufferSwitch()
             case .clear(let scope):
-                terminal.feed(byteArray: Array(piece.bytes))
+                feedTerminal(Array(piece.bytes))
                 settleBufferSwitch()
                 clearPlacements(scope)
             case .graphics(let command):
@@ -161,6 +165,54 @@ final class BlockEmulator: TerminalDelegate {
             }
         }
         pruneScrolledOff()
+    }
+
+    /// Images are taken out of the stream before SwiftTerm sees them, and the cursor moves past each one
+    /// before the following text is fed. A sequence that is still arriving stays in `graphicHold`.
+    private func feedTerminal(_ bytes: [UInt8]) {
+        guard let ready = graphicHold.intake(bytes) else { return }
+        let split = TerminalGraphics.split(ready)
+        for piece in split.pieces {
+            switch piece {
+            case .osc(let payload):
+                showInlineCommand(payload)
+                movePastImages()
+            case .sixel(let image):
+                guard image.count <= TerminalGraphics.byteLimit else { continue }
+                terminal.feed(byteArray: Array(image))
+                movePastImages()
+            case .bytes(let raw):
+                guard !raw.isEmpty else { continue }
+                terminal.feed(byteArray: Array(raw))
+                movePastImages()
+            }
+        }
+        graphicHold.hold(split.remainder)
+    }
+
+    private func showInlineCommand(_ payload: ArraySlice<UInt8>) {
+        let cell = InlineGraphics.Cell(
+            height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(Self.backingScale)
+        )
+        guard let outcome = inlineGraphics.receive(payload, cell: cell) else { return }
+        switch outcome {
+        case .reply(let bytes):
+            onResponse(bytes[...])
+        case .image(let placement):
+            guard let image = NSImage(data: placement.data) else { return }
+            let motion = MotionPicture.decode(placement.data)
+            record(
+                image, width: Self.request(placement.width), height: Self.request(placement.height),
+                animation: motion?.animation, pixels: motion?.pixels ?? Self.pixelSize(of: image)
+            )
+        }
+    }
+
+    private func movePastImages() {
+        let rows = cursorAdvance
+        guard rows > 0 else { return }
+        cursorAdvance = 0
+        terminal.feed(byteArray: Array(String(repeating: "\r\n", count: rows).utf8))
     }
 
     func resize(cols: Int, rows: Int) {
@@ -240,7 +292,7 @@ final class BlockEmulator: TerminalDelegate {
         let trimmed = terminal.buffer.totalLinesTrimmed
         let holders = placeholderLayout()
         let placements = normalStore.images.compactMap { image -> InlineImage? in
-            guard image.fromKitty, image.rowSpan > 0, let origin = normalStore.images.origin(of: image, virtual: holders.origins)
+            guard image.rowSpan > 0, let origin = normalStore.images.origin(of: image, virtual: holders.origins)
             else { return nil }
             var placed = image
             placed.anchor = origin.row
@@ -249,7 +301,7 @@ final class BlockEmulator: TerminalDelegate {
         } + holders.tiles
         let tileRows = Set(holders.tiles.map(\.anchor))
         let bands = Self.bands(of: placements)
-        let legacy = normalStore.images.filter { !($0.fromKitty && $0.rowSpan > 0) }
+        let legacy = normalStore.images.filter { $0.rowSpan <= 0 }
         let lastRow = max(lines.last?.row ?? trimmed - 1, (bands.last?.range.upperBound ?? 0) - 1)
         var byRow = [RenderedLine?](repeating: nil, count: max(lastRow - trimmed + 1, 0))
         for line in lines where line.row >= trimmed && line.row <= lastRow {
@@ -563,17 +615,39 @@ final class BlockEmulator: TerminalDelegate {
         cellPixels
     }
 
+    func iTermContent(source: Terminal, content: ArraySlice<UInt8>) {
+        let cell = InlineGraphics.Cell(
+            height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(Self.backingScale)
+        )
+        guard let outcome = inlineGraphics.receive(content, cell: cell) else { return }
+        switch outcome {
+        case .reply(let bytes):
+            onResponse(bytes[...])
+        case .image(let placement):
+            guard let image = NSImage(data: placement.data) else { return }
+            let motion = MotionPicture.decode(placement.data)
+            record(
+                image, width: Self.request(placement.width), height: Self.request(placement.height),
+                animation: motion?.animation, pixels: motion?.pixels ?? Self.pixelSize(of: image)
+            )
+        }
+    }
+
     func createImage(
         source: Terminal, data: Data, width: ImageSizeRequest, height: ImageSizeRequest, preserveAspectRatio: Bool
     ) {
-        guard let image = NSImage(data: data) else { return }
-        if !landKitty(image, pixels: Self.pixelSize(of: image)) {
-            record(image, width: width, height: height)
+        guard data.count <= TerminalGraphics.byteLimit, let image = NSImage(data: data) else { return }
+        let motion = MotionPicture.decode(data)
+        let pixels = motion?.pixels ?? Self.pixelSize(of: image)
+        if !landKitty(image, pixels: pixels) {
+            record(image, width: width, height: height, animation: motion?.animation, pixels: pixels)
         }
     }
 
     func createImageFromBitmap(source: Terminal, bytes: inout [UInt8], width: Int, height: Int) {
-        guard width > 0, height > 0, bytes.count >= width * height * 4,
+        let byteCount = Int64(width) * Int64(height) * 4
+        guard width > 0, height > 0, byteCount > 0, byteCount <= Int64(TerminalGraphics.byteLimit),
+              bytes.count >= Int(byteCount),
               let provider = CGDataProvider(data: Data(bytes) as CFData),
               let cgImage = CGImage(
                   width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
@@ -583,8 +657,18 @@ final class BlockEmulator: TerminalDelegate {
               )
         else { return }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
-        if !landKitty(image, pixels: CGSize(width: width, height: height)) {
-            record(image, width: .auto, height: .auto)
+        let pixels = CGSize(width: width, height: height)
+        if !landKitty(image, pixels: pixels) {
+            record(image, width: .auto, height: .auto, pixels: pixels)
+        }
+    }
+
+    private static func request(_ size: InlineGraphics.Size) -> ImageSizeRequest {
+        switch size {
+        case .auto: return .auto
+        case .cells(let count): return .cells(count)
+        case .pixels(let count): return .pixels(count)
+        case .percent(let count): return .percent(count)
         }
     }
 
@@ -595,15 +679,26 @@ final class BlockEmulator: TerminalDelegate {
         return image.size
     }
 
-    private func record(_ image: NSImage, width: ImageSizeRequest, height: ImageSizeRequest) {
+    private func record(
+        _ image: NSImage, width: ImageSizeRequest, height: ImageSizeRequest,
+        animation: KittyAnimation? = nil, pixels: CGSize? = nil
+    ) {
         // full-screen programs draw on the alternate screen, and that content vanishes when they exit
         guard !terminal.isCurrentBufferAlternate else { return }
-        let buffer = terminal.buffer
-        var row = buffer.yDisp + buffer.y + buffer.totalLinesTrimmed
-        if let line = terminal.getLine(row: buffer.y), !renderLine(line).characters.isEmpty {
-            row += 1
+        var placement = InlineImage(image: image, width: width, height: height, anchor: cursorRow)
+        placement.column = min(terminal.buffer.x, max(terminal.cols - 1, 0))
+        placement.animation = animation
+        if let pixels {
+            placement.pixelSize = pixels
+            placement.scale = Self.backingScale
         }
-        images.append(InlineImage(image: image, width: width, height: height, anchor: row))
+        let size = placement.requestedSize(cellWidth: TerminalMetrics.cellWidth, lineHeight: TerminalMetrics.lineHeight)
+        let rows = max(1, min(10_000, Int(ceil(size.height / TerminalMetrics.lineHeight))))
+        let columns = max(1, min(terminal.cols, Int(ceil(size.width / TerminalMetrics.cellWidth))))
+        placement.rowSpan = rows
+        placement.columnSpan = columns
+        images.append(placement)
+        cursorAdvance += rows
     }
 
     func showCursor(source: Terminal) { cursorHidden = false }

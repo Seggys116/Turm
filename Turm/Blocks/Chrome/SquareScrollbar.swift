@@ -26,9 +26,16 @@ enum ScrollbarMetrics {
     }
 }
 
+enum ScrollbarAxis {
+    case vertical
+    case horizontal
+}
+
 extension View {
-    func squareScrollbar(position: Binding<ScrollPosition>? = nil, onDrag: ((Bool) -> Void)? = nil) -> some View {
-        modifier(SquareScrollbar(external: position, onDrag: onDrag))
+    func squareScrollbar(
+        axis: ScrollbarAxis = .vertical, overlays: Bool = false, position: Binding<ScrollPosition>? = nil, onDrag: ((Bool) -> Void)? = nil
+    ) -> some View {
+        modifier(SquareScrollbar(axis: axis, overlays: overlays, external: position, onDrag: onDrag))
     }
 }
 
@@ -57,6 +64,8 @@ private final class ScrollbarState {
 }
 
 private struct SquareScrollbar: ViewModifier {
+    var axis: ScrollbarAxis = .vertical
+    var overlays = false
     let external: Binding<ScrollPosition>?
     let onDrag: ((Bool) -> Void)?
     @State private var own = ScrollPosition()
@@ -65,79 +74,99 @@ private struct SquareScrollbar: ViewModifier {
     func body(content: Content) -> some View {
         let position = external ?? $own
         let state = state
+        let vertical = axis == .vertical
         content
             .scrollIndicators(.never)
             .scrollPosition(position)
             .onScrollGeometryChange(for: ScrollMetrics.self) { geometry in
                 ScrollMetrics(
-                    offset: geometry.contentOffset.y,
-                    viewport: geometry.containerSize.height,
-                    content: geometry.contentSize.height
+                    offset: vertical ? geometry.contentOffset.y : geometry.contentOffset.x,
+                    viewport: vertical ? geometry.containerSize.height : geometry.containerSize.width,
+                    content: vertical ? geometry.contentSize.height : geometry.contentSize.width
                 )
             } action: { old, new in
                 state.metrics = new
-                if old.offset != new.offset { state.reveal() }
+                if abs(old.offset - new.offset) > 1 { state.reveal() }
             }
-            .padding(.trailing, state.overflows ? ScrollbarMetrics.hitWidth : 0)
-            .overlay(alignment: .trailing) {
-                ScrollbarKnob(state: state, position: position, onDrag: onDrag)
+            .background(ScrollIndicatorSuppressor())
+            .padding(.trailing, vertical && state.overflows && !overlays ? ScrollbarMetrics.hitWidth : 0)
+            .overlay(alignment: vertical ? .trailing : .bottom) {
+                ScrollbarKnob(axis: axis, state: state, position: position, onDrag: onDrag)
             }
     }
 }
 
 private struct ScrollbarKnob: View {
+    var axis: ScrollbarAxis = .vertical
     let state: ScrollbarState
     let position: Binding<ScrollPosition>
     let onDrag: ((Bool) -> Void)?
-
-    private var alwaysShown: Bool { NSScroller.preferredScrollerStyle == .legacy }
 
     var body: some View {
         if state.overflows {
             GeometryReader { proxy in
                 let metrics = state.metrics
-                let track = proxy.size.height - ScrollbarMetrics.inset * 2
+                let vertical = axis == .vertical
+                let span = vertical ? proxy.size.height : proxy.size.width
+                let track = span - ScrollbarMetrics.inset * 2
                 let knob = ScrollbarMetrics.knobLength(track: track, viewport: metrics.viewport, content: metrics.content)
-                let top = ScrollbarMetrics.knobOffset(track: track, knob: knob, offset: metrics.offset, range: state.range)
+                let origin = ScrollbarMetrics.knobOffset(track: track, knob: knob, offset: metrics.offset, range: state.range)
+                let thickness = state.active ? ScrollbarMetrics.activeThickness : ScrollbarMetrics.thickness
                 Rectangle()
                     .fill((state.active ? Theme.scrollKnobActive : Theme.scrollKnob).color)
-                    .frame(width: state.active ? ScrollbarMetrics.activeThickness : ScrollbarMetrics.thickness, height: knob)
-                    .offset(y: ScrollbarMetrics.inset + top)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.trailing, ScrollbarMetrics.inset)
+                    .frame(width: vertical ? thickness : knob, height: vertical ? knob : thickness)
+                    .offset(x: vertical ? 0 : ScrollbarMetrics.inset + origin, y: vertical ? ScrollbarMetrics.inset + origin : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: vertical ? .topTrailing : .bottomLeading)
+                    .padding(vertical ? .trailing : .bottom, ScrollbarMetrics.inset)
                     .contentShape(Rectangle())
-                    .gesture(drag(track: track, knob: knob, top: top))
+                    .gesture(drag(track: track, knob: knob, origin: origin))
             }
-            .frame(width: ScrollbarMetrics.hitWidth)
-            .opacity(state.visible || state.active || alwaysShown ? 1 : 0)
+            .frame(width: axis == .vertical ? ScrollbarMetrics.hitWidth : nil, height: axis == .horizontal ? ScrollbarMetrics.hitWidth : nil)
+            .opacity(state.visible || state.dragOrigin != nil ? 1 : 0)
             .animation(.easeOut(duration: 0.15), value: state.active)
             .animation(.easeOut(duration: 0.25), value: state.visible)
-            .onHover { inside in
-                state.hovering = inside
-                if !inside { state.reveal() }
-            }
+            .onHover { state.hovering = $0 }
         }
     }
 
-    private func drag(track: CGFloat, knob: CGFloat, top: CGFloat) -> some Gesture {
+    private func drag(track: CGFloat, knob: CGFloat, origin: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                let vertical = axis == .vertical
                 if state.dragOrigin == nil {
                     onDrag?(true)
-                    let pressed = value.startLocation.y - ScrollbarMetrics.inset
-                    state.dragOrigin = (top...(top + knob)).contains(pressed) ? top : pressed - knob / 2
+                    let pressed = (vertical ? value.startLocation.y : value.startLocation.x) - ScrollbarMetrics.inset
+                    state.dragOrigin = (origin...(origin + knob)).contains(pressed) ? origin : pressed - knob / 2
                 }
-                guard let origin = state.dragOrigin else { return }
-                let y = ScrollbarMetrics.contentOffset(
-                    forKnobOffset: origin + value.translation.height, track: track, knob: knob, range: state.range
+                guard let start = state.dragOrigin else { return }
+                let travel = ScrollbarMetrics.contentOffset(
+                    forKnobOffset: start + (vertical ? value.translation.height : value.translation.width),
+                    track: track, knob: knob, range: state.range
                 )
-                position.wrappedValue.scrollTo(y: y)
+                if vertical {
+                    position.wrappedValue.scrollTo(y: travel)
+                } else {
+                    position.wrappedValue.scrollTo(x: travel)
+                }
             }
             .onEnded { _ in
                 state.dragOrigin = nil
                 onDrag?(false)
                 state.reveal()
             }
+    }
+}
+
+private struct ScrollIndicatorSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let scroll = nsView.enclosingScrollView else { return }
+            scroll.hasHorizontalScroller = false
+            scroll.hasVerticalScroller = false
+            scroll.autohidesScrollers = true
+        }
     }
 }
 

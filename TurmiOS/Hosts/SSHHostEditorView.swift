@@ -40,19 +40,25 @@ struct SSHHostEditorView: View {
     private var canSave: Bool { !cleanKey.isEmpty && conflict == nil && hostnameSet && portValid && problem == nil }
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             nameSection
             connectionSection
             authenticationSection
         }
-        .chromeBar(
-            ChromeTopBar(
-                isNew ? "Add SSH Host" : "Edit SSH Host",
-                leading: { ChromeBarButton(title: "Cancel", systemImage: "xmark", action: close) },
-                trailing: { ChromeBarButton(title: "Save", systemImage: "checkmark", kind: .prominent, action: save).disabled(!canSave) }
-            )
-        )
+        .navigationTitle(isNew ? "Add SSH Host" : "Edit SSH Host")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: close)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(!canSave)
+            }
+        }
         .onAppear { if isNew { focus = .key } }
+        }
         .chromeSheet()
     }
 

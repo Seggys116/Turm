@@ -47,6 +47,7 @@ struct PairMacView: View {
     }
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             ChromeSegmented(options: [(Mode.scan, "Scan QR Code"), (Mode.code, "Enter Code")], selection: $mode)
             if mode == .scan {
@@ -56,14 +57,16 @@ struct PairMacView: View {
             }
             statusSection
         }
-        .chromeBar(
-            ChromeTopBar("Pair a Mac", trailing: {
-                ChromeBarButton(title: "Cancel", systemImage: "xmark") {
+        .navigationTitle("Pair a Mac")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
                     pairing.cancel()
                     dismiss()
                 }
-            })
-        )
+            }
+        }
         .onChange(of: pairing.state) { _, state in
             switch state {
             case .done:
@@ -81,6 +84,7 @@ struct PairMacView: View {
             }
         }
         .onChange(of: mode) { _, _ in pairing.reset() }
+        }
         .chromeSheet()
         .interactiveDismissDisabled(pairing.isWorking)
     }

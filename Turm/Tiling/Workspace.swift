@@ -68,6 +68,10 @@ final class Workspace {
     private var sessions: [PaneID: TerminalSession] = [:]
     private let closeCoordinator: CloseCoordinator
     let windowID: UUID
+    var spaceID: UUID?
+    var spaceName = "Space"
+    var spaceSymbol = "terminal"
+    var isTemporarySpace = false
     var restoredDiffs: [PaneID: SavedDiff] = [:]
     var viewers: [PaneID: ViewerPane] = [:]
     private(set) var savedFrame: SavedFrame?
@@ -133,6 +137,14 @@ final class Workspace {
     func noteFrame(_ rect: NSRect, isKey: Bool) {
         savedFrame = SavedFrame(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
         savedIsKey = isKey
+    }
+
+    func releaseKey() {
+        savedIsKey = false
+    }
+
+    func claimKey() {
+        savedIsKey = true
     }
 
     func captureWindow() -> SavedWindow {
@@ -548,14 +560,22 @@ final class Workspace {
         guard let index = tabs.firstIndex(where: { $0.layout.contains(pane) }) else { return }
         if tabs[index].focusedPane != pane { tabs[index].focusedPane = pane }
         if tabs[index].id != activeTabID { activeTabID = tabs[index].id }
+        notePaneFocus(pane)
     }
 
     // views in hidden tabs can still become first responder, which must not pull their tab to the front
     func focusInActiveTab(_ pane: PaneID) {
-        guard let index = tabs.firstIndex(where: { $0.layout.contains(pane) }), tabs[index].id == activeTabID,
-              tabs[index].focusedPane != pane
-        else { return }
-        tabs[index].focusedPane = pane
+        guard let index = tabs.firstIndex(where: { $0.layout.contains(pane) }), tabs[index].id == activeTabID else { return }
+        if tabs[index].focusedPane != pane { tabs[index].focusedPane = pane }
+        notePaneFocus(pane)
+    }
+
+    /// Clears key-focus on every other shell immediately, so a pending terminal focus restore cannot steal the editor.
+    private func notePaneFocus(_ pane: PaneID) {
+        for (id, session) in sessions {
+            let focused = id == pane
+            if session.isPaneFocused != focused { session.setPaneFocused(focused) }
+        }
     }
 
     func focusNext() {

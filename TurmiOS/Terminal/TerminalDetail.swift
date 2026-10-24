@@ -18,24 +18,15 @@ struct TerminalDetail: View {
                 EmptyDetail(workspace: workspace)
             }
         }
-        .chromeBar(
-            ChromeTopBar(
-                workspace.selected == nil && !splitLayout ? "Turm" : "",
-                leading: {
-                    if !splitLayout {
-                        SessionsBackButton(workspace: workspace)
-                    } else if workspace.sidebarHidden {
-                        SidebarToggleButton(workspace: workspace)
-                    }
-                },
-                trailing: {
-                    if let tab = workspace.selected { SessionButtons(workspace: workspace, tab: tab) }
-                    NewMenuButton(workspace: workspace)
-                    SettingsButton(workspace: workspace)
+        .navigationTitle(workspace.selected?.title ?? "Turm")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let tab = workspace.selected {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    SessionToolbar(workspace: workspace, tab: tab)
                 }
-            ),
-            clearsCorners: workspace.selected == nil
-        )
+            }
+        }
         .background(Chrome.terminalBackground.ignoresSafeArea())
         .sessionDrop(into: workspace)
     }

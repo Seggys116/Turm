@@ -8,6 +8,7 @@ extension FocusedValues {
 
 struct SpotlightView: View {
     let workspace: Workspace
+    var growsUpward = false
     let close: (_ launched: Bool) -> Void
     @State private var query = ""
     @State private var selection = 0
@@ -55,38 +56,53 @@ struct SpotlightView: View {
         let visible = rows
         let current = min(selection, max(visible.count - 1, 0))
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: SpotlightModel.isSearch(query) ? "magnifyingglass" : "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.secondaryText.color)
-                    .frame(width: 14)
-                SpotlightField(
-                    text: $query,
-                    directory: directory,
-                    placeholder: "Run a command, @folder, !shortcut, or ? to search shells"
-                ) { key in
-                    handle(key, rows: visible, current: current)
-                }
-                .frame(height: TerminalMetrics.lineHeight)
+            if growsUpward {
+                results(rows: visible, current: current)
             }
-            .padding(.horizontal, 12)
-            .frame(height: SpotlightPresenter.fieldHeight)
-            if !visible.isEmpty {
-                Divider()
-                list(rows: visible, current: current)
-            } else if SpotlightModel.isSearch(query) {
-                Divider()
-                Text("No shells or commands match")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondaryText.color)
-                    .frame(maxWidth: .infinity, minHeight: Self.rowHeight)
+            field(rows: visible, current: current)
+            if !growsUpward {
+                results(rows: visible, current: current)
             }
         }
-        .frame(width: SpotlightPresenter.width)
-        .background(Theme.inputBackground.color, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.chipStroke.color, lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 14, y: 4)
+        .background(Theme.inputBackground.color, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.chipStroke.color, lineWidth: 1))
+        .shadow(color: .black.opacity(0.32), radius: 18, y: 8)
         .onChange(of: query) { selection = 0 }
+    }
+
+    private func field(rows: [SpotlightRow], current: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: SpotlightModel.isSearch(query) ? "magnifyingglass" : "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText.color)
+                .frame(width: 16)
+            SpotlightField(
+                text: $query,
+                directory: directory,
+                placeholder: "Run a command, @folder, !shortcut, or ? to search shells"
+            ) { key in
+                handle(key, rows: rows, current: current)
+            }
+            .frame(height: TerminalMetrics.lineHeight)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: SpotlightPresenter.fieldHeight)
+    }
+
+    @ViewBuilder
+    private func results(rows: [SpotlightRow], current: Int) -> some View {
+        if !rows.isEmpty {
+            if !growsUpward { Divider() }
+            list(rows: rows, current: current)
+            if growsUpward { Divider() }
+        } else if SpotlightModel.isSearch(query) {
+            if !growsUpward { Divider() }
+            Text("No shells or commands match")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.secondaryText.color)
+                .frame(maxWidth: .infinity, minHeight: Self.rowHeight)
+            if growsUpward { Divider() }
+        }
     }
 
     private func list(rows: [SpotlightRow], current: Int) -> some View {

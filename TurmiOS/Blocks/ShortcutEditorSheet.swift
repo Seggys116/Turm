@@ -27,6 +27,7 @@ struct ShortcutEditorSheet<Session: BlockSession>: View {
     }
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             if let binding = Binding($draft) {
                 editor(binding)
@@ -35,13 +36,18 @@ struct ShortcutEditorSheet<Session: BlockSession>: View {
             }
             if let failure { note(failure, failure: true) }
         }
-        .chromeBar(
-            ChromeTopBar(
-                title,
-                leading: { ChromeBarButton(title: "Cancel", systemImage: "xmark") { dismiss() } },
-                trailing: { ChromeBarButton(title: "Save", systemImage: "checkmark", kind: .prominent, action: save).disabled(!canSave) }
-            )
-        )
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(!canSave)
+            }
+        }
+        }
         .task { await load() }
         .chromeSheet()
     }

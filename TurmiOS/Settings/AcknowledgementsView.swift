@@ -30,7 +30,8 @@ struct AcknowledgementsView: View {
                 .padding(16)
         }
         .background(Chrome.sidebar.ignoresSafeArea())
-        .chromeBar(ChromeTopBar("Acknowledgements", leading: { ChromeBackButton { dismiss() } }))
+        .navigationTitle("Acknowledgements")
+        .navigationBarTitleDisplayMode(.inline)
         .task { text = Self.bundledNotices() }
     }
 

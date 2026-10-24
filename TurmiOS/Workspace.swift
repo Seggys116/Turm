@@ -38,6 +38,9 @@ final class Workspace {
     var selectedID: UUID?
     var compactColumn = WorkspaceColumn.sidebar
     var sidebarHidden = false
+    private(set) var spaceList: [PhoneSpaceInfo]
+    private(set) var activeSpaceID: UUID
+    private var parked: [UUID: ParkedPhoneSpace] = [:]
     var showsSettings = false
     var showsHostPicker = false
     var showsPairing = false
@@ -48,7 +51,78 @@ final class Workspace {
     }
 
     init() {
+        let temporary = UUID()
+        let id = UUID()
+        spaceList = [
+            PhoneSpaceInfo(id: temporary, name: SavedSpace.temporaryName, symbol: SavedSpace.temporarySymbol, isTemporary: true),
+            PhoneSpaceInfo(id: id, name: "Space", symbol: "terminal"),
+        ]
+        activeSpaceID = id
         loadPhoneWorkspace()
+    }
+
+    var activeSpaceName: String {
+        spaceList.first { $0.id == activeSpaceID }?.name ?? "Space"
+    }
+
+    func showSpace(_ id: UUID) {
+        guard id != activeSpaceID, spaceList.contains(where: { $0.id == id }) else { return }
+        parked[activeSpaceID] = ParkedPhoneSpace(sessions: sessions, selectedID: selectedID)
+        activeSpaceID = id
+        if let restored = parked.removeValue(forKey: id) {
+            sessions = restored.sessions
+            selectedID = restored.selectedID
+        } else {
+            sessions = []
+            selectedID = nil
+        }
+        compactColumn = selectedID == nil ? .sidebar : .detail
+        persistSessions()
+    }
+
+    func createSpace() {
+        parked[activeSpaceID] = ParkedPhoneSpace(sessions: sessions, selectedID: selectedID)
+        let info = PhoneSpaceInfo(
+            id: UUID(), name: nextSpaceName(), symbol: SavedSpace.symbol(at: spaceList.count)
+        )
+        spaceList.append(info)
+        sessions = []
+        selectedID = nil
+        activeSpaceID = info.id
+        compactColumn = .sidebar
+        persistSessions()
+    }
+
+    func renameSpace(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = spaceList.firstIndex(where: { $0.id == id }), !spaceList[index].isTemporary else { return }
+        spaceList[index].name = trimmed
+        persistSessions()
+    }
+
+    func deleteSpace(_ id: UUID) {
+        guard spaceList.count > 1, let target = spaceList.first(where: { $0.id == id }), !target.isTemporary else { return }
+        let tabs = id == activeSpaceID ? sessions : (parked[id]?.sessions ?? [])
+        for tab in tabs {
+            tab.close()
+            SessionHub.shared.unassign(tab.id, from: self)
+        }
+        parked[id] = nil
+        spaceList.removeAll { $0.id == id }
+        guard activeSpaceID == id else {
+            persistSessions()
+            return
+        }
+        activeSpaceID = spaceList[0].id
+        if let restored = parked.removeValue(forKey: activeSpaceID) {
+            sessions = restored.sessions
+            selectedID = restored.selectedID
+        } else {
+            sessions = []
+            selectedID = nil
+        }
+        compactColumn = selectedID == nil ? .sidebar : .detail
+        persistSessions()
     }
 
     func open(_ host: SSHHost) {
@@ -73,9 +147,25 @@ final class Workspace {
     }
 
     func close(_ tab: any TerminalTab) {
-        guard let index = sessions.firstIndex(where: { $0.id == tab.id }) else { return }
-        tab.close()
-        remove(at: index)
+        if let index = sessions.firstIndex(where: { $0.id == tab.id }) {
+            tab.close()
+            remove(at: index)
+            return
+        }
+        // A session keeps running after its space is parked. The exit still has to take it out of that space,
+        // or the dead tab is saved and comes back the next time the space is opened.
+        for key in Array(parked.keys) {
+            guard var space = parked[key], let index = space.sessions.firstIndex(where: { $0.id == tab.id }) else { continue }
+            tab.close()
+            space.sessions.remove(at: index)
+            if space.selectedID == tab.id {
+                space.selectedID = space.sessions.indices.contains(index) ? space.sessions[index].id : space.sessions.last?.id
+            }
+            parked[key] = space
+            SessionHub.shared.unassign(tab.id, from: self)
+            persistSessions()
+            return
+        }
     }
 
     func release(_ id: UUID) -> (any TerminalTab)? {
@@ -135,8 +225,27 @@ final class Workspace {
         return WorkspaceStore(root: appSupport.appendingPathComponent("Turm/PhoneWorkspace"))
     }
 
+    private func nextSpaceName() -> String {
+        let used = Set(spaceList.map(\.name))
+        if !used.contains("Space") { return "Space" }
+        var index = 2
+        while used.contains("Space \(index)") { index += 1 }
+        return "Space \(index)"
+    }
+
     private func persistSessions() {
-        let phoneSessions: [PhoneSession] = sessions.compactMap { tab in
+        let encoded = spaceList.map { info in
+            let tabs = info.isTemporary ? [] : (info.id == activeSpaceID ? sessions : (parked[info.id]?.sessions ?? []))
+            return PhoneSpace(
+                id: info.id, name: info.name, symbol: info.symbol, sessions: phoneSessions(from: tabs), isTemporary: info.isTemporary
+            )
+        }
+        let active = encoded.first { $0.id == activeSpaceID }?.sessions ?? []
+        try? phoneStore.save(PhoneWorkspace(sessions: active, spaces: encoded, activeSpaceID: activeSpaceID))
+    }
+
+    private func phoneSessions(from tabs: [any TerminalTab]) -> [PhoneSession] {
+        tabs.compactMap { tab in
             if let ssh = tab as? SSHTerminalSession {
                 return PhoneSession(id: ssh.id, kind: .ssh(hostID: ssh.host.id))
             }
@@ -145,24 +254,67 @@ final class Workspace {
             }
             return nil
         }
-        try? phoneStore.save(PhoneWorkspace(sessions: phoneSessions))
     }
 
     private func loadPhoneWorkspace() {
         guard let saved = try? phoneStore.loadPhone() else { return }
-        let hostStore = SSHHostStore.shared
-        for session in saved.sessions {
-            switch session.kind {
-            case .ssh(let hostID):
-                guard let host = hostStore.hosts.first(where: { $0.id == hostID }) else { continue }
-                let sshSession = SSHTerminalSession(host: host)
-                watchExit(of: sshSession)
-                sessions.append(sshSession)
-                SessionHub.shared.assign(sshSession.id, to: self)
-            case .mac:
-                break
+        let restored = restoredSpaces(from: saved)
+        spaceList = restored.list
+        activeSpaceID = restored.active
+        parked = [:]
+        sessions = []
+        for info in spaceList {
+            let tabs = materialize(restored.sessions[info.id] ?? [])
+            if info.id == activeSpaceID {
+                sessions = tabs
+            } else {
+                parked[info.id] = ParkedPhoneSpace(sessions: tabs, selectedID: nil)
             }
         }
         persistSessions()
     }
+
+    private func restoredSpaces(from saved: PhoneWorkspace) -> (list: [PhoneSpaceInfo], active: UUID, sessions: [UUID: [PhoneSession]]) {
+        var source = saved.spaces.isEmpty
+            ? [PhoneSpace(id: UUID(), name: "Space", symbol: "terminal", sessions: saved.sessions)]
+            : saved.spaces
+        if !source.contains(where: \.isTemporary) {
+            source.insert(
+                PhoneSpace(id: UUID(), name: SavedSpace.temporaryName, symbol: SavedSpace.temporarySymbol, sessions: [], isTemporary: true),
+                at: 0
+            )
+        }
+        let list = source.map { PhoneSpaceInfo(id: $0.id, name: $0.name, symbol: $0.symbol, isTemporary: $0.isTemporary) }
+        let active = saved.activeSpaceID.flatMap { id in list.contains { $0.id == id } ? id : nil } ?? list[0].id
+        let sessions = Dictionary(uniqueKeysWithValues: source.map { ($0.id, $0.isTemporary ? [] : $0.sessions) })
+        return (list, active, sessions)
+    }
+
+    private func materialize(_ saved: [PhoneSession]) -> [any TerminalTab] {
+        let hostStore = SSHHostStore.shared
+        return saved.compactMap { session in
+            switch session.kind {
+            case .ssh(let hostID):
+                guard let host = hostStore.hosts.first(where: { $0.id == hostID }) else { return nil }
+                let sshSession = SSHTerminalSession(host: host)
+                watchExit(of: sshSession)
+                SessionHub.shared.assign(sshSession.id, to: self)
+                return sshSession
+            case .mac:
+                return nil
+            }
+        }
+    }
+}
+
+struct PhoneSpaceInfo: Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var symbol: String
+    var isTemporary = false
+}
+
+private struct ParkedPhoneSpace {
+    var sessions: [any TerminalTab]
+    var selectedID: UUID?
 }

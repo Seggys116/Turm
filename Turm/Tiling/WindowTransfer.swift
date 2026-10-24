@@ -7,14 +7,19 @@ final class WindowTransfer {
     static let windowID = "turm.main"
 
     struct Pending {
-        let shell: ShellTransfer
-        let frame: NSRect
+        var shell: ShellTransfer?
+        var spaceID: UUID?
+        var frame: NSRect
     }
 
     private var queue: [Pending] = []
 
     func enqueue(_ shell: ShellTransfer, frame: NSRect) {
-        queue.append(Pending(shell: shell, frame: frame))
+        queue.append(Pending(shell: shell, spaceID: nil, frame: frame))
+    }
+
+    func enqueue(space spaceID: UUID) {
+        queue.append(Pending(shell: nil, spaceID: spaceID, frame: .zero))
     }
 
     func take() -> Pending? {
@@ -22,7 +27,7 @@ final class WindowTransfer {
     }
 
     var pendingSessions: [TerminalSession] {
-        queue.flatMap { $0.shell.sessions.values }
+        queue.flatMap { $0.shell.map { Array($0.sessions.values) } ?? [] }
     }
 
     static func frame(size: CGSize, at point: NSPoint) -> NSRect {

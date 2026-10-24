@@ -441,7 +441,7 @@ extension View {
             .sheetVerticalBarDisabled()
             .chromeOverlayHost()
             .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
+            .presentationDragIndicator(.visible)
             .presentationBackground(Chrome.sidebar)
             .presentationCornerRadius(22)
             .tint(Chrome.accent)

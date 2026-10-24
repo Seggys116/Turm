@@ -115,7 +115,7 @@ enum ShellIntegration {
     }
 
     private static let identityKeys: Set<String> = [
-        "TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "TERMINAL_EMULATOR",
+        "TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_FEATURES", "TERM_SESSION_ID", "TERMINAL_EMULATOR",
         "LC_TERMINAL", "LC_TERMINAL_VERSION", "STY", "TMUX", "TMUX_PANE", "__CFBundleIdentifier",
     ]
     private static let identityPrefixes = [

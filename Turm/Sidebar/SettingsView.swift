@@ -184,7 +184,6 @@ struct SettingsView: View {
     @AppStorage(AppearancePreference.key) private var appearance = AppearancePreference.system
     @AppStorage(AppIconPreference.key) private var appIcon = AppIconPreference.automatic
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
-    @AppStorage(SidebarPlacement.key) private var sidebarPlacement = SidebarPlacement.left
     @State private var tab = SettingsTab.appearance
     @State private var isContextMenuEnabled = ContextMenuService.isEnabled
     @State private var isCopyPathEnabled = ContextMenuService.isCopyPathEnabled
@@ -250,16 +249,12 @@ struct SettingsView: View {
             }
         }
         section("Layout") {
-            row("Show sidebar", detail: "List your shells beside or above the terminal.") {
+            row("Show sidebar", detail: "The shell list sits on the window background. Hiding it leaves an edge you can hover to bring it back.") {
                 Toggle("Show sidebar", isOn: $isSidebarVisible)
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
             }
-            row("Sidebar position", detail: "Keep shells on the left, or as a tab bar under the title bar.") {
-                SlidingPicker(selection: $sidebarPlacement, options: SidebarPlacement.allCases, title: \.title)
-                    .frame(width: 240)
-            }
-            row("Restore windows", detail: "Reopen windows, folders and finished commands. The files are in Application Support and can contain command output.") {
+            row("Restore windows", detail: "Reopen spaces, folders and finished commands. The files are in Application Support and can contain command output.") {
                 Toggle("Restore windows", isOn: Binding(
                     get: { WorkspacePersistence.restoreEnabled() },
                     set: { WorkspacePersistence.setRestoreEnabled($0) }
@@ -267,7 +262,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .toggleStyle(SquareToggleStyle())
             }
-            row("Saved workspace", detail: "Remove the stored windows and command output from this Mac.") {
+            row("Saved spaces", detail: "Remove the stored spaces and command output from this Mac.") {
                 Button("Clear Saved Workspace") { WorkspacePersistence.clear() }
                     .buttonStyle(SettingsButtonStyle())
             }

@@ -48,7 +48,7 @@ final class DemoMac {
             interrupt(id)
         case .input(let id, let bytes):
             if bytes.contains(0x03) { interrupt(id) }
-        case .create(let directory, let command):
+        case .create(let directory, let command, _):
             create(in: directory, running: command)
         case .close(let id, _):
             shells[id] = nil

@@ -15,7 +15,13 @@ struct SettingsView: View {
                 ICloudSection()
                 AboutSection()
             }
-            .chromeBar(ChromeTopBar("Settings", trailing: { ChromeBarButton(title: "Done", systemImage: "checkmark", kind: .prominent) { dismiss() } }))
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
         .chromeSheet()
     }

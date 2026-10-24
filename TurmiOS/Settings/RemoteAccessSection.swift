@@ -152,7 +152,8 @@ struct MacDetailView: View {
                 ChromeActionRow("Forget This Mac", systemImage: "trash", role: .destructive) { confirmingForget = true }
             }
         }
-        .chromeBar(ChromeTopBar(connection.name, leading: { ChromeBackButton { dismiss() } }))
+        .navigationTitle(connection.name)
+        .navigationBarTitleDisplayMode(.inline)
         .onDisappear(perform: save)
         .onChange(of: connection.record.hosts) { _, learned in hosts = learned }
         .onChange(of: connection.record.port) { _, learned in port = String(learned == 0 ? Companion.defaultPort : learned) }

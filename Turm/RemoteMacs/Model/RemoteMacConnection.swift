@@ -150,7 +150,7 @@ final class RemoteMacConnection: Identifiable {
             guard !Task.isCancelled else { return }
             self?.awaitingShell = nil
         }
-        send(.create(directory: trimmed?.isEmpty == false ? trimmed : nil, command: nil))
+        send(.create(directory: trimmed?.isEmpty == false ? trimmed : nil, command: nil, space: nil))
     }
 
     private func claimNewShell() {

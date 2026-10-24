@@ -17,6 +17,8 @@ struct MouseReporter: NSViewRepresentable {
 
 final class MouseView: NSView {
     var session: TerminalSession?
+
+    override var mouseDownCanMoveWindow: Bool { false }
     private var held: MouseButton?
     private var horizontal = WheelAccumulator()
     private var vertical = WheelAccumulator()

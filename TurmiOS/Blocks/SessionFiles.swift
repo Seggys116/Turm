@@ -21,6 +21,7 @@ struct SessionFilesSheet<Session: BlockSession>: View {
     }
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             if let failure {
                 Text(failure)
@@ -49,12 +50,20 @@ struct SessionFilesSheet<Session: BlockSession>: View {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 32)
             }
         }
-        .chromeBar(ChromeTopBar(
-            "Files",
-            subtitle: (path as NSString).lastPathComponent,
-            leading: { leading },
-            trailing: { ChromeBarButton(title: "Upload", systemImage: "square.and.arrow.up") { importing = true } }
-        ))
+        .navigationTitle((path as NSString).lastPathComponent)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                if path != root {
+                    Button("Back") { path = (path as NSString).deletingLastPathComponent }
+                } else {
+                    Button("Done") { dismiss() }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("Upload", systemImage: "square.and.arrow.up") { importing = true }
+            }
+        }
         .task(id: path) { await load() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
             guard case .success(let url) = result else { return }
@@ -62,6 +71,7 @@ struct SessionFilesSheet<Session: BlockSession>: View {
         }
         .sheet(item: $preview) { item in
             FilePreviewSheet(item: item)
+        }
         }
         .chromeSheet()
     }
@@ -169,6 +179,7 @@ private struct FilePreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        NavigationStack {
         Group {
             if let image = item.image {
                 Image(uiImage: image)
@@ -188,7 +199,14 @@ private struct FilePreviewSheet: View {
             }
         }
         .background(Chrome.terminalBackground.ignoresSafeArea())
-        .chromeBar(ChromeTopBar(item.name, leading: { ChromeBarButton(title: "Done", systemImage: "checkmark") { dismiss() } }, trailing: { EmptyView() }))
+        .navigationTitle(item.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        }
         .chromeSheet()
     }
 }

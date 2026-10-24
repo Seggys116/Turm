@@ -3,46 +3,27 @@ import SwiftUI
 import TurmCore
 
 struct ShellSidebar: View {
-    static let width: CGFloat = 196
-    static let stripHeight: CGFloat = 32
+    static let width: CGFloat = ChromeMetrics.sidebarDefaultWidth
     private static let gap: CGFloat = 4
-    static let corner: CGFloat = 2
-    private static let rowHeight: CGFloat = 26
-    private static let chipHeight: CGFloat = 24
-    private static let chipWidthRange: ClosedRange<CGFloat> = 72...200
-    /// Row padding, indicator and the spacing after it.
-    private static let chipChrome: CGFloat = 34
-    private static let disclosureWidth: CGFloat = 14
+    static let corner: CGFloat = ChromeMetrics.rowCornerRadius
+    private static let rowHeight: CGFloat = ChromeMetrics.rowHeight
     private static let paneIndent: CGFloat = 18
-    private static let chipFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private static let countFont = NSFont.systemFont(ofSize: 10, weight: .medium)
-    private static let stripSearchWidth: CGFloat = 150
     private static let space = "shellTabs"
     private static let slide = Animation.spring(duration: 0.24, bounce: 0.1)
 
     let workspace: Workspace
-    let placement: SidebarPlacement
     let tileDrag: TileDrag
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var drag: TabDrag?
     @State private var rowFrames: [UUID: CGRect] = [:]
-    @State private var stripPosition = ScrollPosition(edge: .leading)
-    @State private var stripOffset: CGFloat = 0
-    @State private var stripOverflow: CGFloat = 0
     @State private var collapsed: Set<UUID> = []
     @State private var listOrigin: CGPoint = .zero
 
     var body: some View {
-        Group {
-            if placement == .top {
-                strip
-            } else {
-                column
-            }
-        }
-        .onOutsideFieldClick(isActive: searchFocused) { searchFocused = false }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TileDrag.space)) } action: { tileDrag.sidebarFrame = $0 }
+        column
+            .onOutsideFieldClick(isActive: searchFocused) { searchFocused = false }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TileDrag.space)) } action: { tileDrag.sidebarFrame = $0 }
     }
 
     private var column: some View {
@@ -54,28 +35,7 @@ struct ShellSidebar: View {
             .padding(8)
             list
         }
-        .frame(width: Self.width)
-        .frame(maxHeight: .infinity)
-        .background(Theme.sidebar.color)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Theme.divider.color).frame(width: 1)
-        }
-    }
-
-    private var strip: some View {
-        HStack(spacing: Self.gap) {
-            chips
-            newShellButton
-            searchField
-                .frame(width: Self.stripSearchWidth)
-        }
-        .padding(.horizontal, Self.gap)
-        .frame(height: Self.stripHeight)
-        .frame(maxWidth: .infinity)
-        .background(Theme.sidebar.color)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.divider.color).frame(height: 1)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var searchField: some View {
@@ -142,6 +102,7 @@ struct ShellSidebar: View {
                     .padding(.bottom, 8)
                 }
                 .squareScrollbar()
+                .scrollDisabled(drag != nil || tileDrag.isActive)
                 .onChange(of: workspace.activeTabID) { _, id in
                     guard drag == nil else { return }
                     withAnimation { proxy.scrollTo(id) }
@@ -151,71 +112,18 @@ struct ShellSidebar: View {
     }
 
     @ViewBuilder
-    private var chips: some View {
-        let shells = workspace.shells(matching: query)
-        if shells.isEmpty {
-            emptyLabel
-                .padding(.leading, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    reorderable(shells)
-                        .padding(.horizontal, 2)
-                    .padding(.vertical, 4)
-                }
-                .scrollIndicators(.never)
-                .scrollPosition($stripPosition)
-                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
-                    stripOffset = x
-                }
-                .onScrollGeometryChange(for: CGFloat.self) { max($0.contentSize.width - $0.containerSize.width, 0) } action: { _, overflow in
-                    stripOverflow = overflow
-                }
-                .background(VerticalWheelMonitor(onScroll: scrollStrip))
-                .onAppear { proxy.scrollTo(workspace.activeTabID) }
-                .onChange(of: workspace.activeTabID) { _, id in
-                    guard drag == nil else { return }
-                    withAnimation { proxy.scrollTo(id) }
-                }
-            }
-        }
-    }
-
-    private func scrollStrip(by delta: CGFloat) {
-        let target = min(max(stripOffset - delta, 0), stripOverflow)
-        guard target != stripOffset else { return }
-        stripOffset = target
-        stripPosition.scrollTo(x: target)
-    }
-
-    private func chipWidth(for title: String, paneCount: Int = 1, activity: ShellActivity = .inactive) -> CGFloat? {
-        guard placement == .top else { return nil }
-        var width = Self.chipChrome + Self.textWidth(title, font: Self.chipFont)
-        if paneCount > 1 {
-            width += 8 + Self.textWidth("\(paneCount)", font: Self.countFont) + Self.disclosureWidth
-        }
-        if case .progress = activity {
-            width += 8 + Self.textWidth("100%", font: Self.countFont)
-        }
-        return min(max(width, Self.chipWidthRange.lowerBound), Self.chipWidthRange.upperBound)
-    }
-
-    private static func textWidth(_ text: String, font: NSFont) -> CGFloat {
-        ceil((text as NSString).size(withAttributes: [.font: font]).width)
-    }
-
-    @ViewBuilder
-    private func row(for tab: ShellTab) -> some View {
-        let height = placement == .top ? Self.chipHeight : Self.rowHeight
+    private func row(for tab: ShellTab, tracksPointer: Bool) -> some View {
+        let height = Self.rowHeight
         if tab.isSettings {
             SettingsRow(
                 height: height,
                 isSelected: workspace.activeTabID == tab.id,
                 select: { workspace.selectTab(tab.id) },
-                close: { workspace.closeTab(tab.id) }
+                close: { workspace.closeTab(tab.id) },
+                tracksPointer: tracksPointer,
+                onWindowDrag: { updateShellDrag(tab, windowPoint: $0) },
+                onWindowDragEnd: { endShellDrag(tab) }
             )
-            .frame(width: chipWidth(for: "Settings"))
         } else if let session = workspace.representative(of: tab) {
             let title = title(of: tab, representative: session)
             let isGroup = tab.layout.leaves.count > 1
@@ -251,9 +159,11 @@ struct ShellSidebar: View {
                     workspace.selectTab(tab.id)
                     workspace.equalizePanes()
                 } : nil,
+                tracksPointer: tracksPointer,
+                onWindowDrag: { updateShellDrag(tab, windowPoint: $0) },
+                onWindowDragEnd: { endShellDrag(tab) },
                 hover: { tileDrag.hover(Set(tab.layout.leaves), $0) }
             )
-            .frame(width: chipWidth(for: title, paneCount: tab.layout.leaves.count, activity: activity))
         }
     }
 
@@ -294,14 +204,10 @@ struct ShellSidebar: View {
 
     @ViewBuilder
     private func group(for tab: ShellTab, interactive: Bool) -> some View {
-        let header = row(for: tab)
+        let header = row(for: tab, tracksPointer: interactive)
         let showsPanes = !isHorizontal && !tab.isSettings && tab.layout.leaves.count > 1 && !collapsed.contains(tab.id)
         VStack(spacing: 2) {
-            if interactive {
-                header.simultaneousGesture(dragGesture(for: tab))
-            } else {
-                header
-            }
+            header
             if showsPanes {
                 ForEach(tab.layout.leaves, id: \.self) { pane in
                     if let session = workspace.session(for: pane) {
@@ -311,11 +217,13 @@ struct ShellSidebar: View {
                             select: { workspace.focus(pane) },
                             close: { workspace.close(pane) },
                             breakOut: { workspace.breakOut(pane) },
+                            tracksPointer: interactive,
+                            onWindowDrag: { updatePaneDrag(pane, in: tab, title: session.customTitle ?? session.location, windowPoint: $0) },
+                            onWindowDragEnd: { endPaneDrag(pane) },
                             hover: { tileDrag.hover([pane], $0) }
                         )
                         .padding(.leading, Self.paneIndent)
                         .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
-                        .simultaneousGesture(interactive ? paneDragGesture(for: pane, in: tab, title: session.customTitle ?? session.location) : nil)
                     } else if let viewer = workspace.viewers[pane] {
                         ViewerPaneRow(
                             title: viewer.title,
@@ -324,39 +232,54 @@ struct ShellSidebar: View {
                             select: { workspace.focus(pane) },
                             close: { workspace.close(pane) },
                             breakOut: { workspace.breakOut(pane) },
+                            tracksPointer: interactive,
+                            onWindowDrag: { updatePaneDrag(pane, in: tab, title: viewer.title, windowPoint: $0) },
+                            onWindowDragEnd: { endPaneDrag(pane) },
                             hover: { tileDrag.hover([pane], $0) }
                         )
                         .padding(.leading, Self.paneIndent)
                         .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
-                        .simultaneousGesture(interactive ? paneDragGesture(for: pane, in: tab, title: viewer.title) : nil)
                     }
                 }
             }
         }
     }
 
-    private func windowPoint(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: point.x + listOrigin.x, y: point.y + listOrigin.y)
+    private func updatePaneDrag(_ pane: PaneID, in tab: ShellTab, title: String, windowPoint: CGPoint) {
+        if !tileDrag.isActive {
+            guard drag == nil else { return }
+            let home = rowFrames[tab.id].map { $0.offsetBy(dx: listOrigin.x, dy: listOrigin.y) }
+            tileDrag.begin(.pane(pane), title: title, home: home, in: workspace)
+        }
+        guard tileDrag.item == .pane(pane) else { return }
+        tileDrag.move(to: windowPoint, in: workspace)
     }
 
-    private func paneDragGesture(for pane: PaneID, in tab: ShellTab, title: String) -> some Gesture {
-        DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.space))
-            .onChanged { value in
-                if !tileDrag.isActive {
-                    guard drag == nil else { return }
-                    let home = rowFrames[tab.id].map { $0.offsetBy(dx: listOrigin.x, dy: listOrigin.y) }
-                    tileDrag.begin(.pane(pane), title: title, home: home, in: workspace)
-                }
-                guard tileDrag.item == .pane(pane) else { return }
-                tileDrag.move(to: windowPoint(value.location), in: workspace)
-            }
-            .onEnded { _ in
-                guard tileDrag.item == .pane(pane) else { return }
-                withAnimation(Self.slide) { _ = tileDrag.end(in: workspace) }
-            }
+    private func endPaneDrag(_ pane: PaneID) {
+        guard tileDrag.item == .pane(pane) else { return }
+        withAnimation(Self.slide) { _ = tileDrag.end(in: workspace) }
     }
 
-    private var isHorizontal: Bool { placement == .top }
+    private func updateShellDrag(_ tab: ShellTab, windowPoint: CGPoint) {
+        let listPoint = CGPoint(x: windowPoint.x - listOrigin.x, y: windowPoint.y - listOrigin.y)
+        if drag == nil {
+            guard let frame = rowFrames[tab.id] else { return }
+            drag = TabDrag(id: tab.id, pointer: mainAxis(listPoint), grab: mainAxis(listPoint) - mainOrigin(frame))
+        }
+        guard drag?.id == tab.id else { return }
+        drag?.pointer = mainAxis(listPoint)
+        track(tab, at: windowPoint)
+    }
+
+    private func endShellDrag(_ tab: ShellTab) {
+        guard tileDrag.item == .tab(tab.id) else { return finishDrag() }
+        withAnimation(Self.slide) {
+            _ = tileDrag.end(in: workspace)
+            drag = nil
+        }
+    }
+
+    private var isHorizontal: Bool { false }
 
     private func mainAxis(_ point: CGPoint) -> CGFloat { isHorizontal ? point.x : point.y }
     private func mainOrigin(_ frame: CGRect) -> CGFloat { isHorizontal ? frame.minX : frame.minY }
@@ -416,26 +339,6 @@ struct ShellSidebar: View {
                 .offset(x: isHorizontal ? position : frame.minX, y: isHorizontal ? frame.minY : position)
                 .allowsHitTesting(false)
         }
-    }
-
-    private func dragGesture(for tab: ShellTab) -> some Gesture {
-        DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.space))
-            .onChanged { value in
-                if drag == nil {
-                    guard let frame = rowFrames[tab.id] else { return }
-                    drag = TabDrag(id: tab.id, pointer: mainAxis(value.location), grab: mainAxis(value.startLocation) - mainOrigin(frame))
-                }
-                guard drag?.id == tab.id else { return }
-                drag?.pointer = mainAxis(value.location)
-                track(tab, at: windowPoint(value.location))
-            }
-            .onEnded { _ in
-                guard tileDrag.item == .tab(tab.id) else { return finishDrag() }
-                withAnimation(Self.slide) {
-                    _ = tileDrag.end(in: workspace)
-                    drag = nil
-                }
-            }
     }
 
     private func track(_ tab: ShellTab, at point: CGPoint) {
@@ -518,6 +421,9 @@ private struct ShellRow: View {
     let split: (SplitAxis) -> Void
     let tile: ((PaneEdge) -> Void)?
     let evenOut: (() -> Void)?
+    var tracksPointer = true
+    var onWindowDrag: (CGPoint) -> Void = { _ in }
+    var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
     @State private var isHovered = false
     @State private var isRenaming = false
@@ -568,9 +474,7 @@ private struct ShellRow: View {
                 }
             }
             .modifier(HoverClose(isVisible: isHovered && !isRenaming, label: "Close Shell", close: close))
-            .contentShape(Rectangle())
-            .onTapGesture(perform: select)
-            .simultaneousGesture(TapGesture(count: 2).onEnded(beginRename))
+        .contentShape(Rectangle())
         }
         .padding(.horizontal, 8)
         .frame(height: height)
@@ -582,10 +486,30 @@ private struct ShellRow: View {
         .contentShape(Rectangle())
         .onOutsideFieldClick(isActive: isRenaming, perform: commitRename)
         .onHover { inside in
+            guard !tracksPointer else { return }
             isHovered = inside
             hover(inside)
         }
         .onDisappear { hover(false) }
+        .overlay {
+            if tracksPointer, !isRenaming {
+                GeometryReader { geo in
+                    RowDragSurface(
+                        origin: geo.frame(in: .named(TileDrag.space)).origin,
+                        leadingPassthrough: disclosure == nil ? 0 : 22,
+                        onHover: { inside in
+                            isHovered = inside
+                            hover(inside)
+                        },
+                        onClick: { count in
+                            if count >= 2 { beginRename() } else { select() }
+                        },
+                        onDrag: onWindowDrag,
+                        onDragEnd: onWindowDragEnd
+                    )
+                }
+            }
+        }
         .pointerMenu(isOpen: $menuOpen) {
             MenuSurface(width: 190) {
                 MenuRow(title: "Rename Shell", symbol: "pencil") {
@@ -715,6 +639,9 @@ private struct PaneRow: View {
     let select: () -> Void
     let close: () -> Void
     let breakOut: () -> Void
+    var tracksPointer = true
+    var onWindowDrag: (CGPoint) -> Void = { _ in }
+    var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
     @State private var isHovered = false
     @State private var menuOpen = false
@@ -734,12 +661,29 @@ private struct PaneRow: View {
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
         )
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
+        .onTapGesture { if !tracksPointer { select() } }
         .onHover { inside in
+            guard !tracksPointer else { return }
             isHovered = inside
             hover(inside)
         }
         .onDisappear { hover(false) }
+        .overlay {
+            if tracksPointer {
+                GeometryReader { geo in
+                    RowDragSurface(
+                        origin: geo.frame(in: .named(TileDrag.space)).origin,
+                        onHover: { inside in
+                            isHovered = inside
+                            hover(inside)
+                        },
+                        onClick: { _ in select() },
+                        onDrag: onWindowDrag,
+                        onDragEnd: onWindowDragEnd
+                    )
+                }
+            }
+        }
         .help("Drag onto the grid to tile, or onto the sidebar to move it to its own shell")
         .pointerMenu(isOpen: $menuOpen) {
             MenuSurface(width: 200) {
@@ -766,6 +710,9 @@ private struct ViewerPaneRow: View {
     let select: () -> Void
     let close: () -> Void
     let breakOut: () -> Void
+    var tracksPointer = true
+    var onWindowDrag: (CGPoint) -> Void = { _ in }
+    var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
     @State private var isHovered = false
     @State private var menuOpen = false
@@ -788,12 +735,29 @@ private struct ViewerPaneRow: View {
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
         )
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
+        .onTapGesture { if !tracksPointer { select() } }
         .onHover { inside in
+            guard !tracksPointer else { return }
             isHovered = inside
             hover(inside)
         }
         .onDisappear { hover(false) }
+        .overlay {
+            if tracksPointer {
+                GeometryReader { geo in
+                    RowDragSurface(
+                        origin: geo.frame(in: .named(TileDrag.space)).origin,
+                        onHover: { inside in
+                            isHovered = inside
+                            hover(inside)
+                        },
+                        onClick: { _ in select() },
+                        onDrag: onWindowDrag,
+                        onDragEnd: onWindowDragEnd
+                    )
+                }
+            }
+        }
         .help("Drag onto the grid to tile, or onto the sidebar to move it to its own shell")
         .pointerMenu(isOpen: $menuOpen) {
             MenuSurface(width: 200) {
@@ -807,6 +771,117 @@ private struct ViewerPaneRow: View {
                     close()
                 }
             }
+        }
+    }
+}
+
+private struct RowDragSurface: NSViewRepresentable {
+    var origin: CGPoint
+    var leadingPassthrough: CGFloat = 0
+    var trailingPassthrough: CGFloat = 22
+    var onHover: (Bool) -> Void
+    var onClick: (Int) -> Void
+    var onDrag: (CGPoint) -> Void
+    var onDragEnd: () -> Void
+
+    func makeNSView(context: Context) -> DragView {
+        let view = DragView()
+        apply(view)
+        return view
+    }
+
+    func updateNSView(_ view: DragView, context: Context) {
+        apply(view)
+    }
+
+    private func apply(_ view: DragView) {
+        view.origin = origin
+        view.leadingPassthrough = leadingPassthrough
+        view.trailingPassthrough = trailingPassthrough
+        view.onHover = onHover
+        view.onClick = onClick
+        view.onDrag = onDrag
+        view.onDragEnd = onDragEnd
+    }
+
+    final class DragView: NSView {
+        var leadingPassthrough: CGFloat = 0
+        var trailingPassthrough: CGFloat = 22
+        var onHover: (Bool) -> Void = { _ in }
+        var onClick: (Int) -> Void = { _ in }
+        var onDrag: (CGPoint) -> Void = { _ in }
+        var onDragEnd: () -> Void = {}
+        var origin = CGPoint.zero
+        private var tracking: NSTrackingArea?
+        private var press: CGPoint?
+        private var startWindow: NSPoint?
+        private var armed = false
+
+        override var isFlipped: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let local = convert(point, from: superview)
+            guard bounds.contains(local) else { return nil }
+            if local.x < leadingPassthrough || bounds.width - local.x < trailingPassthrough { return nil }
+            return self
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            tracking = area
+        }
+
+        override func mouseEntered(with event: NSEvent) { onHover(true) }
+        override func mouseExited(with event: NSEvent) { onHover(false) }
+
+        override func mouseDown(with event: NSEvent) {
+            press = pointer(for: event)
+            startWindow = event.locationInWindow
+            if event.clickCount >= 2 {
+                onClick(event.clickCount)
+                press = nil
+                startWindow = nil
+                armed = false
+                return
+            }
+            armed = false
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let startWindow, let press else { return }
+            if !armed {
+                let dx = event.locationInWindow.x - startWindow.x
+                let dy = event.locationInWindow.y - startWindow.y
+                guard hypot(dx, dy) >= 4 else { return }
+                armed = true
+                onDrag(press)
+            }
+            onDrag(pointer(for: event))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if armed {
+                onDragEnd()
+            } else if press != nil, event.clickCount < 2 {
+                onClick(1)
+            }
+            press = nil
+            startWindow = nil
+            armed = false
+        }
+
+        private func pointer(for event: NSEvent) -> CGPoint {
+            let local = convert(event.locationInWindow, from: nil)
+            return CGPoint(x: origin.x + local.x, y: origin.y + local.y)
         }
     }
 }
@@ -1015,6 +1090,9 @@ private struct SettingsRow: View {
     let isSelected: Bool
     let select: () -> Void
     let close: () -> Void
+    var tracksPointer = false
+    var onWindowDrag: (CGPoint) -> Void = { _ in }
+    var onWindowDragEnd: () -> Void = {}
     @State private var isHovered = false
 
     var body: some View {
@@ -1037,56 +1115,27 @@ private struct SettingsRow: View {
                 .fill(isSelected ? Theme.chipFill.color : (isHovered ? Theme.subtleDivider.color : .clear))
         )
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
+        .onTapGesture {
+            guard !tracksPointer else { return }
+            select()
+        }
         .onHover { isHovered = $0 }
+        .overlay {
+            if tracksPointer {
+                GeometryReader { geo in
+                    RowDragSurface(
+                        origin: geo.frame(in: .named(TileDrag.space)).origin,
+                        leadingPassthrough: 0,
+                        onHover: { isHovered = $0 },
+                        onClick: { _ in select() },
+                        onDrag: onWindowDrag,
+                        onDragEnd: onWindowDragEnd
+                    )
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-    }
-}
-
-/// Turns vertical mouse-wheel scrolling over the view into horizontal scrolling, which a horizontal ScrollView ignores.
-private struct VerticalWheelMonitor: NSViewRepresentable {
-    let onScroll: (CGFloat) -> Void
-
-    func makeNSView(context: Context) -> MonitorView {
-        let view = MonitorView()
-        view.onScroll = onScroll
-        return view
-    }
-
-    func updateNSView(_ view: MonitorView, context: Context) {
-        view.onScroll = onScroll
-    }
-
-    final class MonitorView: NSView {
-        private static let lineScale: CGFloat = 10
-
-        var onScroll: (CGFloat) -> Void = { _ in }
-        private var monitor: Any?
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-                self.monitor = nil
-            }
-            guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                let consumed = MainActor.assumeIsolated { self?.consume(event) ?? false }
-                return consumed ? nil : event
-            }
-        }
-
-        private func consume(_ event: NSEvent) -> Bool {
-            guard event.window === window,
-                  abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
-                  bounds.contains(convert(event.locationInWindow, from: nil))
-            else { return false }
-            onScroll(event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * Self.lineScale)
-            return true
-        }
     }
 }
 

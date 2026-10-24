@@ -39,11 +39,14 @@ public nonisolated struct SessionSummary: Codable, Sendable, Equatable, Identifi
     public var branch: String?
     public var directory: String?
     public var program: RunningProgram?
+    public var spaceID: UUID?
+    public var spaceName: String?
+    public var spaceSymbol: String?
 
     public init(
         id: UUID, title: String, location: String, phase: CompanionPhase, activity: CompanionActivity = .inactive,
         remoteLabel: String? = nil, windowTitle: String? = nil, branch: String? = nil, directory: String? = nil,
-        program: RunningProgram? = nil
+        program: RunningProgram? = nil, spaceID: UUID? = nil, spaceName: String? = nil, spaceSymbol: String? = nil
     ) {
         self.program = program
         self.id = id
@@ -55,6 +58,48 @@ public nonisolated struct SessionSummary: Codable, Sendable, Equatable, Identifi
         self.windowTitle = windowTitle
         self.branch = branch
         self.directory = directory
+        self.spaceID = spaceID
+        self.spaceName = spaceName
+        self.spaceSymbol = spaceSymbol
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, location, phase, activity, remoteLabel, windowTitle, branch, directory, program
+        case spaceID, spaceName, spaceSymbol
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        location = try container.decode(String.self, forKey: .location)
+        phase = try container.decode(CompanionPhase.self, forKey: .phase)
+        activity = try container.decodeIfPresent(CompanionActivity.self, forKey: .activity) ?? .inactive
+        remoteLabel = try container.decodeIfPresent(String.self, forKey: .remoteLabel)
+        windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
+        branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        directory = try container.decodeIfPresent(String.self, forKey: .directory)
+        program = try container.decodeIfPresent(RunningProgram.self, forKey: .program)
+        spaceID = try container.decodeIfPresent(UUID.self, forKey: .spaceID)
+        spaceName = try container.decodeIfPresent(String.self, forKey: .spaceName)
+        spaceSymbol = try container.decodeIfPresent(String.self, forKey: .spaceSymbol)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(location, forKey: .location)
+        try container.encode(phase, forKey: .phase)
+        try container.encode(activity, forKey: .activity)
+        try container.encodeIfPresent(remoteLabel, forKey: .remoteLabel)
+        try container.encodeIfPresent(windowTitle, forKey: .windowTitle)
+        try container.encodeIfPresent(branch, forKey: .branch)
+        try container.encodeIfPresent(directory, forKey: .directory)
+        try container.encodeIfPresent(program, forKey: .program)
+        try container.encodeIfPresent(spaceID, forKey: .spaceID)
+        try container.encodeIfPresent(spaceName, forKey: .spaceName)
+        try container.encodeIfPresent(spaceSymbol, forKey: .spaceSymbol)
     }
 }
 
@@ -174,7 +219,7 @@ public nonisolated enum CompanionMessage: Codable, Sendable, Equatable {
     case input(id: UUID, bytes: Data)
     case interrupt(id: UUID)
     case resize(id: UUID, cols: Int, rows: Int)
-    case create(directory: String?, command: String?)
+    case create(directory: String?, command: String?, space: UUID?)
     case close(id: UUID, force: Bool)
     case directoryShortcut(path: String)
     case commandShortcut(command: String)

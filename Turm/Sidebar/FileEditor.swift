@@ -4,6 +4,27 @@ import SwiftUI
 import TurmCore
 import UniformTypeIdentifiers
 
+struct PaneCloseButton: View {
+    var help: String
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .frame(width: 16, height: 16)
+                .foregroundStyle(hovering ? Theme.text.color : Theme.secondaryText.color)
+                .background(Circle().fill(hovering ? Theme.chipFill.color : Color.clear))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 struct ViewerPaneView: View {
     let workspace: Workspace
     let pane: PaneID
@@ -17,20 +38,13 @@ struct ViewerPaneView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                Button {
-                    workspace.close(pane)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 14, height: 14)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.secondaryText.color)
-                .help("Close")
+                PaneCloseButton(help: "Close") { workspace.close(pane) }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Theme.sidebar.color)
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded { workspace.focus(pane) })
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,10 +72,10 @@ struct ViewerPaneView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .file(let path):
-            FileEditor(path: path)
+            FileEditor(path: path, onFocus: { workspace.focus(pane) })
         case .remoteFile(let shell, let path):
             if let session = workspace.session(for: shell) {
-                RemoteFileEditor(session: session, path: path)
+                RemoteFileEditor(session: session, path: path, onFocus: { workspace.focus(pane) })
             } else {
                 Text("The shell for this file was closed.")
                     .font(.system(size: 12))
@@ -74,6 +88,7 @@ struct ViewerPaneView: View {
 
 struct FileEditor: View {
     let path: String
+    var onFocus: () -> Void = {}
     @State private var text = ""
     @State private var saved = ""
     @State private var notice: String?
@@ -83,7 +98,6 @@ struct FileEditor: View {
 
     private var language: SourceLanguage { SourceLanguage.detect(path) }
     private var dirty: Bool { loaded && image == nil && videoURL == nil && text != saved }
-    private var showsEditorChrome: Bool { image == nil && videoURL == nil && notice == nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,24 +122,11 @@ struct FileEditor: View {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay {
-                            SourceEditor(text: $text, language: language, onSave: save)
+                            SourceEditor(text: $text, language: language, onSave: save, onFocus: onFocus)
                         }
+                        .overlay(alignment: .topTrailing) { editedMark }
                         .clipped()
                 }
-            }
-            if showsEditorChrome {
-                HStack {
-                    Text(dirty ? "Edited" : "Saved")
-                        .foregroundStyle(dirty ? Theme.syntaxFlag.color : Theme.secondaryText.color)
-                    Spacer()
-                    Button("Save", action: save)
-                        .buttonStyle(SettingsButtonStyle(prominent: true))
-                        .disabled(!dirty)
-                }
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Theme.sidebar.color)
             }
         }
         .task { load() }
@@ -181,6 +182,17 @@ struct FileEditor: View {
         return "Could not read this file."
     }
 
+    @ViewBuilder
+    private var editedMark: some View {
+        if dirty {
+            Text("Edited  ⌘S")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.syntaxFlag.color)
+                .padding(8)
+                .allowsHitTesting(false)
+        }
+    }
+
     private func save() {
         guard dirty else { return }
         do {
@@ -196,6 +208,7 @@ struct FileEditor: View {
 private struct RemoteFileEditor: View {
     let session: TerminalSession
     let path: String
+    var onFocus: () -> Void = {}
     @State private var text = ""
     @State private var saved = ""
     @State private var notice: String?
@@ -229,26 +242,27 @@ private struct RemoteFileEditor: View {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay {
-                        SourceEditor(text: $text, language: language, onSave: save)
+                        SourceEditor(text: $text, language: language, onSave: save, onFocus: onFocus)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if dirty {
+                            Text("Edited  ⌘S")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Theme.syntaxFlag.color)
+                                .padding(8)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        if let notice {
+                            Text(notice)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                                .foregroundStyle(Theme.removed.color)
+                                .padding(8)
+                        }
                     }
                     .clipped()
-                HStack {
-                    Text(dirty ? "Edited" : "Saved")
-                        .foregroundStyle(dirty ? Theme.syntaxFlag.color : Theme.secondaryText.color)
-                    if let notice {
-                        Text(notice)
-                            .lineLimit(1)
-                            .foregroundStyle(Theme.removed.color)
-                    }
-                    Spacer()
-                    Button("Save", action: save)
-                        .buttonStyle(SettingsButtonStyle(prominent: true))
-                        .disabled(!dirty)
-                }
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Theme.sidebar.color)
             } else {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -429,6 +443,7 @@ struct SourceEditor: NSViewRepresentable {
     @Binding var text: String
     let language: SourceLanguage
     let onSave: () -> Void
+    var onFocus: () -> Void = {}
 
     func makeNSView(context: Context) -> SourceHost {
         let textView = EditingTextView()
@@ -440,13 +455,17 @@ struct SourceEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: 320, height: CGFloat.greatestFiniteMagnitude)
         textView.onSave = onSave
+        textView.onFocus = onFocus
         let host = SourceHost(textView: textView)
+        host.gutter.onFocus = onFocus
         context.coordinator.host = host
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        textView.writingToolsBehavior = .none
+        textView.inlinePredictionType = .no
         textView.allowsUndo = true
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textContainerInset = NSSize(width: 12, height: 10)
@@ -470,6 +489,8 @@ struct SourceEditor: NSViewRepresentable {
     func updateNSView(_ host: SourceHost, context: Context) {
         let textView = host.textView
         textView.onSave = onSave
+        textView.onFocus = onFocus
+        host.gutter.onFocus = onFocus
         textView.backgroundColor = Theme.terminalBackground.resolved(dark: dark)
         host.gutter.needsDisplay = true
         if textView.string != text, host.window?.firstResponder !== textView {
@@ -604,8 +625,15 @@ final class LineNumberGutter: NSView {
     private weak var textView: NSTextView?
     private let numberFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
     var thickness: CGFloat = 36
+    var onFocus: () -> Void = {}
 
     override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        onFocus()
+        window?.makeFirstResponder(textView)
+    }
 
     init(textView: NSTextView) {
         self.textView = textView
@@ -715,6 +743,20 @@ final class LineNumberGutter: NSView {
 
 final class EditingTextView: NSTextView {
     var onSave: () -> Void = {}
+    var onFocus: () -> Void = {}
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        onFocus()
+        super.mouseDown(with: event)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocus() }
+        return accepted
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {

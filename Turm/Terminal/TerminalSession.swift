@@ -557,6 +557,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         altScreen?.apply(dark: dark)
     }
 
+    var isPaneFocused: Bool { paneFocused }
+
     func setPaneFocused(_ focused: Bool) {
         paneFocused = focused
         if showsFocusedCursor != focused { showsFocusedCursor = focused }

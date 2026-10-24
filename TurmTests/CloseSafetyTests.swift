@@ -234,30 +234,29 @@ struct CloseSafetyTests {
         #expect(count == 1)
     }
 
-    @Test func windowGuardPreservesDelegateAndTerminatesOnlyItsWorkspace() async throws {
+    @Test func windowGuardPreservesDelegateAndLeavesAnUnrelatedWorkspace() {
         let coordinator = CloseCoordinator { _ in false }
         let workspace = Workspace(closeCoordinator: coordinator)
-        let other = Workspace(closeCoordinator: coordinator)
-        defer { coordinator.terminateAll() }
-        let session = try #require(workspace.focusedSession)
-        try #require(await wait { session.phase == .ready })
-        session.submit(":")
-        try #require(await wait { session.phase == .ready })
+        let host = WindowHost()
+        defer {
+            SpaceLibrary.shared.workspace(for: host).terminateAll()
+            coordinator.terminateAll()
+            WorkspacePersistence.cancelQuit()
+        }
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         let delegate = OriginalWindowDelegate()
         window.delegate = delegate
-        let guardView = WindowCloseView(workspace: workspace)
+        let guardView = WindowCloseView(host: host)
         window.contentView = guardView
 
         #expect(window.delegate === guardView)
-        #expect(!guardView.windowShouldClose(window))
+        #expect(guardView.windowShouldClose(window))
         #expect(delegate.closeChecks == 1)
         #expect(workspace.openShellCount == 1)
 
         guardView.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: window))
-        #expect(workspace.openShellCount == 0)
-        #expect(other.openShellCount == 1)
+        #expect(workspace.openShellCount == 1)
         #expect(delegate.closeNotifications == 1)
         guardView.detach()
         #expect(window.delegate === delegate)

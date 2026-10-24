@@ -93,8 +93,8 @@ final class CompanionBridge {
             guard let session = entries[id]?.session else { return notFound(peer) }
             guard (2...500).contains(cols), (2...300).contains(rows) else { return malformed(peer) }
             session.resize(cols: cols, rows: rows)
-        case .create(let directory, let command):
-            create(directory: directory, command: command, for: peer)
+        case .create(let directory, let command, let space):
+            create(directory: directory, command: command, space: space, for: peer)
         case .close(let id, let force):
             close(id, force: force, for: peer)
         case .directoryShortcut(let path):
@@ -237,10 +237,16 @@ final class CompanionBridge {
         peer.send(.error(code: CompanionErrorCode.malformed, text: "That request was not understood."))
     }
 
-    private func create(directory: String?, command: String?, for peer: CompanionPeer) {
+    private func create(directory: String?, command: String?, space: UUID?, for peer: CompanionPeer) {
         let workspaces = coordinator.registeredWorkspaces
-        guard let workspace = workspaces.first(where: { $0.openShellCount > 0 }) ?? workspaces.first else {
-            peer.send(.error(code: CompanionErrorCode.failed, text: "Turm has no open window on the Mac."))
+        let workspace: Workspace?
+        if let space {
+            workspace = workspaces.first { $0.spaceID == space }
+        } else {
+            workspace = workspaces.first { $0.openShellCount > 0 } ?? workspaces.first
+        }
+        guard let workspace else {
+            peer.send(.error(code: CompanionErrorCode.failed, text: space == nil ? "Turm has no open window on the Mac." : "That space is not open on the Mac."))
             return
         }
         var path: String?
@@ -330,7 +336,8 @@ final class CompanionBridge {
         return SessionSummary(
             id: id, title: session.title, location: session.location, phase: Self.phase(of: session),
             activity: Self.activity(of: session), remoteLabel: session.remoteLabel, windowTitle: entry.workspace?.focusedTitle,
-            branch: session.git?.branch, directory: session.directory, program: session.displayedProgram
+            branch: session.git?.branch, directory: session.directory, program: session.displayedProgram,
+            spaceID: entry.workspace?.spaceID, spaceName: entry.workspace?.spaceName, spaceSymbol: entry.workspace?.spaceSymbol
         )
     }
 

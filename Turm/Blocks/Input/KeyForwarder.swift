@@ -15,9 +15,9 @@ struct KeyForwarder: NSViewRepresentable {
         view.session = session
         guard isFocused else { return }
         DispatchQueue.main.async {
-            // a forwarder fading out after its command ended must not pull focus from the input
-            guard view.session?.isRunning == true, let window = view.window, window.firstResponder !== view,
-                  !(window.firstResponder is SelectionResponderView)
+            // a forwarder fading out after its command ended must not pull focus from the input or another pane
+            guard view.session?.isPaneFocused == true, view.session?.isRunning == true, let window = view.window,
+                  window.firstResponder !== view, !(window.firstResponder is SelectionResponderView)
             else { return }
             window.makeFirstResponder(view)
         }
@@ -25,6 +25,8 @@ struct KeyForwarder: NSViewRepresentable {
 }
 
 final class KeyView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
     var session: TerminalSession?
 
     override var acceptsFirstResponder: Bool { true }

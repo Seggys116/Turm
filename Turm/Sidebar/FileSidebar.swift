@@ -9,8 +9,6 @@ struct FileSidebar: View {
     @State private var listing = ListedDirectory(path: "", entries: [])
     @State private var children: [String: ListedDirectory] = [:]
     @State private var expanded: Set<String> = []
-    @State private var expandable: Set<String> = []
-    @State private var expandableToken = 0
     @State private var filter = ""
     @State private var includeHidden = false
     @State private var targeted: String?
@@ -28,27 +26,22 @@ struct FileSidebar: View {
             filterField
             contents
         }
-        .frame(width: 220)
-        .background(Theme.sidebar.color)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: session.directory, initial: true) { _, path in
             root = path
             expanded = []
             children = [:]
-            expandable = []
             reloadRoot()
         }
         .onChange(of: session.connection?.integrated) { _, _ in
             reloadRoot()
-        }
-        .onChange(of: includeHidden) { _, _ in
-            refreshExpandable()
         }
     }
 
     private var header: some View {
         HStack(spacing: 6) {
             Text(PathDisplay.abbreviate(root))
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.text.color)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -62,20 +55,10 @@ struct FileSidebar: View {
             .buttonStyle(.plain)
             .foregroundStyle(Theme.secondaryText.color)
             .help(includeHidden ? "Hide hidden files" : "Show hidden files")
-            Button {
-                session.showsFiles = false
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 14, height: 14)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.secondaryText.color)
-            .help("Hide Files")
+            PaneCloseButton(help: "Hide Files") { session.showsFiles = false }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, ChromeMetrics.sidebarHorizontalPadding)
+        .padding(.vertical, 10)
         .modifier(DirectoryDrop(directory: root, receive: { providers, folder in
             receive(providers, into: folder)
         }))
@@ -84,13 +67,16 @@ struct FileSidebar: View {
     private var filterField: some View {
         TextField("Filter", text: $filter)
             .textFieldStyle(.plain)
-            .font(.system(size: 11))
+            .font(.system(size: 12))
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Theme.chipFill.color)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .padding(.horizontal, 8)
-            .padding(.bottom, 6)
+            .frame(height: 26)
+            .background(Theme.chipFill.color, in: RoundedRectangle(cornerRadius: ChromeMetrics.rowCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: ChromeMetrics.rowCornerRadius, style: .continuous)
+                    .stroke(Theme.chipStroke.color, lineWidth: 1)
+            )
+            .padding(.horizontal, ChromeMetrics.sidebarHorizontalPadding)
+            .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -118,7 +104,7 @@ struct FileSidebar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 2)
             }
-            .squareScrollbar()
+            .squareScrollbar(overlays: true)
             .modifier(DirectoryDrop(directory: root, receive: { providers, folder in
                 receive(providers, into: folder)
             }))
@@ -155,7 +141,7 @@ struct FileSidebar: View {
     private func row(_ entry: FileEntry, depth: Int) -> some View {
         let open = expanded.contains(entry.path)
         HStack(spacing: 4) {
-            if entry.isDirectory, expandable.contains(entry.path) {
+            if entry.isDirectory {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText.color)
@@ -174,31 +160,36 @@ struct FileSidebar: View {
                     .onExitCommand { renaming = nil }
             } else {
                 Text(entry.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.text.color)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, 8 + CGFloat(depth) * 14)
-        .padding(.trailing, 8)
-        .frame(height: 26)
+        .padding(.leading, ChromeMetrics.sidebarHorizontalPadding + CGFloat(depth) * 14)
+        .padding(.trailing, ChromeMetrics.sidebarHorizontalPadding)
+        .frame(minHeight: ChromeMetrics.rowHeight)
+        .onOutsideFieldClick(isActive: renaming == entry.path) { commitRename(entry) }
         .background(targeted == entry.path ? Theme.dropFill.color : Color.clear)
         .contentShape(Rectangle())
-        .onDrag { provider(for: entry) }
-        .onDrop(of: dropTypes, isTargeted: binding(for: entry.path)) { providers in
-            guard entry.isDirectory else { return false }
-            receive(providers, into: entry.path, fromRow: true)
-            return true
-        }
-        .onTapGesture {
-            guard entry.isDirectory, expandable.contains(entry.path) else { return }
-            toggle(entry.path)
-        }
-        .onTapGesture(count: 2) {
-            guard !entry.isDirectory else { return }
-            openFile(entry)
+        .overlay {
+            if renaming != entry.path {
+                FileRowClicks(
+                    isDirectory: entry.isDirectory,
+                    path: entry.path,
+                    onToggle: { toggle(entry.path) },
+                    onOpen: { openFile(entry) },
+                    onDrop: { providers in
+                        guard entry.isDirectory else { return false }
+                        receive(providers, into: entry.path, fromRow: true)
+                        return true
+                    },
+                    onTarget: { isTargeted in
+                        if isTargeted { targeted = entry.path } else if targeted == entry.path { targeted = nil }
+                    }
+                )
+            }
         }
         .pointerMenu(isOpen: Binding(
             get: { menuPath == entry.path },
@@ -343,30 +334,6 @@ struct FileSidebar: View {
         }
     }
 
-    private var dropTypes: [UTType] {
-        [.fileURL, UTType(importedAs: FileDrop.moveType)]
-    }
-
-    private func binding(for path: String) -> Binding<Bool> {
-        Binding(
-            get: { targeted == path },
-            set: { isTargeted in
-                if isTargeted { targeted = path } else if targeted == path { targeted = nil }
-            }
-        )
-    }
-
-    private func provider(for entry: FileEntry) -> NSItemProvider {
-        let provider = NSItemProvider(object: URL(fileURLWithPath: entry.path) as NSURL)
-        let path = entry.path
-        provider.registerDataRepresentation(forTypeIdentifier: FileDrop.moveType, visibility: .ownProcess) { completion in
-            completion(Data(path.utf8), nil)
-            return nil
-        }
-        provider.suggestedName = entry.name
-        return provider
-    }
-
     private func toggle(_ path: String) {
         if expanded.contains(path) {
             expanded.remove(path)
@@ -393,7 +360,6 @@ struct FileSidebar: View {
             }
             guard root == path else { return }
             listing = listed
-            refreshExpandable()
         }
     }
 
@@ -411,47 +377,7 @@ struct FileSidebar: View {
             }
             guard expanded.contains(path), root == session.directory else { return }
             children[path] = listed
-            refreshExpandable()
         }
-    }
-
-    private func refreshExpandable() {
-        expandableToken += 1
-        let token = expandableToken
-        let hidden = includeHidden
-        let currentRoot = root
-        let paths = directoryPaths()
-        let channel = session.remoteChannel
-        let remote = session.isRemote
-        Task {
-            let found: Set<String>
-            if let channel {
-                found = await Task.detached { channel.directoriesWithVisibleEntries(paths, includeHidden: hidden) }.value
-            } else if remote {
-                found = []
-            } else {
-                found = await Task.detached {
-                    LocalDirectory.directoriesWithVisibleEntries(paths, includeHidden: hidden)
-                }.value
-            }
-            guard token == expandableToken, root == currentRoot else { return }
-            expandable = found
-            expanded.formIntersection(found)
-        }
-    }
-
-    private func directoryPaths() -> [String] {
-        var paths: [String] = []
-        func collect(_ entries: [FileEntry]) {
-            for entry in entries where entry.isDirectory {
-                paths.append(entry.path)
-                if let listed = children[entry.path] {
-                    collect(listed.entries)
-                }
-            }
-        }
-        collect(listing.entries)
-        return paths
     }
 
     private func reloadVisible() {
@@ -554,6 +480,154 @@ private struct FileTypeIcon: View {
         case "pdf": ("doc.richtext", "doc.richtext")
         case "zip", "gz", "tar": ("doc.zipper", "doc.zipper")
         default: ("doc.text", "doc.text")
+        }
+    }
+}
+
+private struct FileRowClicks: NSViewRepresentable {
+    var isDirectory: Bool
+    var path: String
+    var onToggle: () -> Void
+    var onOpen: () -> Void
+    var onDrop: ([NSItemProvider]) -> Bool
+    var onTarget: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ClickView {
+        let view = ClickView()
+        view.isDirectory = isDirectory
+        view.path = path
+        view.onToggle = onToggle
+        view.onOpen = onOpen
+        view.onDrop = onDrop
+        view.onTarget = onTarget
+        return view
+    }
+
+    func updateNSView(_ view: ClickView, context: Context) {
+        view.isDirectory = isDirectory
+        view.path = path
+        view.onToggle = onToggle
+        view.onOpen = onOpen
+        view.onDrop = onDrop
+        view.onTarget = onTarget
+    }
+
+    final class ClickView: NSView, NSDraggingSource {
+        var isDirectory = false
+        var path = ""
+        var onToggle: () -> Void = {}
+        var onOpen: () -> Void = {}
+        var onDrop: ([NSItemProvider]) -> Bool = { _ in false }
+        var onTarget: (Bool) -> Void = { _ in }
+        private var start: NSPoint?
+        private var didDrag = false
+
+        override var isFlipped: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let local = convert(point, from: superview)
+            return bounds.contains(local) ? self : nil
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            registerForDraggedTypes([.fileURL, NSPasteboard.PasteboardType(FileDrop.moveType)])
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount >= 2 {
+                if !isDirectory { onOpen() }
+                start = nil
+                return
+            }
+            start = event.locationInWindow
+            didDrag = false
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start, !didDrag else { return }
+            let dx = event.locationInWindow.x - start.x
+            let dy = event.locationInWindow.y - start.y
+            guard hypot(dx, dy) >= 4 else { return }
+            didDrag = true
+            let writer = NSPasteboardItem()
+            let url = URL(fileURLWithPath: path)
+            writer.setString(url.absoluteString, forType: .fileURL)
+            writer.setData(Data(path.utf8), forType: NSPasteboard.PasteboardType(FileDrop.moveType))
+            let item = NSDraggingItem(pasteboardWriter: writer)
+            let local = convert(event.locationInWindow, from: nil)
+            item.draggingFrame = NSRect(x: local.x - 12, y: local.y - 12, width: 24, height: 24)
+            beginDraggingSession(with: [item], event: event, source: self)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            if !didDrag, event.clickCount < 2, isDirectory { onToggle() }
+            start = nil
+            didDrag = false
+        }
+
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            context == .outsideApplication ? .copy : [.copy, .move]
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard accepts(sender) else { return [] }
+            onTarget(true)
+            return operation(for: sender)
+        }
+
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard accepts(sender) else { return [] }
+            return operation(for: sender)
+        }
+
+        override func draggingExited(_ sender: NSDraggingInfo?) {
+            onTarget(false)
+        }
+
+        override func draggingEnded(_ sender: NSDraggingInfo) {
+            onTarget(false)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            onTarget(false)
+            let providers = Self.providers(from: sender)
+            guard !providers.isEmpty else { return false }
+            return onDrop(providers)
+        }
+
+        private func accepts(_ sender: NSDraggingInfo) -> Bool {
+            guard isDirectory, let types = sender.draggingPasteboard.types else { return false }
+            return types.contains(.fileURL) || types.contains(NSPasteboard.PasteboardType(FileDrop.moveType))
+        }
+
+        private func operation(for sender: NSDraggingInfo) -> NSDragOperation {
+            let move = sender.draggingPasteboard.types?.contains(NSPasteboard.PasteboardType(FileDrop.moveType)) == true
+            return move ? .move : .copy
+        }
+
+        private static func providers(from info: NSDraggingInfo) -> [NSItemProvider] {
+            guard let items = info.draggingPasteboard.pasteboardItems else { return [] }
+            return items.compactMap { item in
+                let provider = NSItemProvider()
+                var wrote = false
+                if let data = item.data(forType: NSPasteboard.PasteboardType(FileDrop.moveType)) {
+                    provider.registerDataRepresentation(forTypeIdentifier: FileDrop.moveType, visibility: .all) { completion in
+                        completion(data, nil)
+                        return nil
+                    }
+                    wrote = true
+                }
+                if let text = item.string(forType: .fileURL) {
+                    provider.registerDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier, visibility: .all) { completion in
+                        completion(Data(text.utf8), nil)
+                        return nil
+                    }
+                    wrote = true
+                }
+                return wrote ? provider : nil
+            }
         }
     }
 }

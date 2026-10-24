@@ -205,20 +205,131 @@ public nonisolated struct SavedBlock: Codable, Sendable, Equatable, Identifiable
     }
 }
 
+public nonisolated struct SavedSpace: Codable, Sendable, Equatable, Identifiable {
+    public static let temporaryName = "Tmp"
+    public static let temporarySymbol = "clock"
+
+    public var id: UUID
+    public var name: String
+    public var symbol: String
+    public var session: SavedWindow
+    public var isTemporary: Bool
+
+    public init(id: UUID, name: String, symbol: String, session: SavedWindow, isTemporary: Bool = false) {
+        self.id = id
+        self.name = name
+        self.symbol = symbol
+        self.session = session
+        self.isTemporary = isTemporary
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, symbol, session, isTemporary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        session = try container.decode(SavedWindow.self, forKey: .session)
+        isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(symbol, forKey: .symbol)
+        try container.encode(session, forKey: .session)
+        try container.encode(isTemporary, forKey: .isTemporary)
+    }
+
+    public static let symbols = ["terminal", "folder", "hammer", "leaf", "star", "book.closed", "cube", "globe"]
+
+    public static func symbol(at index: Int) -> String {
+        symbols[index % symbols.count]
+    }
+}
+
 public nonisolated struct WorkspaceDocument: Codable, Sendable, Equatable {
     public var windows: [SavedWindow]
     public var keyWindowID: UUID?
+    public var spaces: [SavedSpace]
 
-    public init(windows: [SavedWindow], keyWindowID: UUID?) {
+    public init(windows: [SavedWindow], keyWindowID: UUID?, spaces: [SavedSpace] = []) {
         self.windows = windows
         self.keyWindowID = keyWindowID
+        self.spaces = spaces
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case windows, keyWindowID, spaces
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        windows = try container.decode([SavedWindow].self, forKey: .windows)
+        keyWindowID = try container.decodeIfPresent(UUID.self, forKey: .keyWindowID)
+        spaces = try container.decodeIfPresent([SavedSpace].self, forKey: .spaces) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(windows, forKey: .windows)
+        try container.encodeIfPresent(keyWindowID, forKey: .keyWindowID)
+        try container.encode(spaces, forKey: .spaces)
     }
 
     public func removingWindow(_ id: UUID) -> WorkspaceDocument {
         WorkspaceDocument(
             windows: windows.filter { $0.id != id },
-            keyWindowID: keyWindowID == id ? nil : keyWindowID
+            keyWindowID: keyWindowID == id ? nil : keyWindowID,
+            spaces: spaces.filter { $0.id != id && $0.session.id != id }
         )
+    }
+
+    /// Temp is a scratch space. Its shells are not part of the layout that comes back on the next launch.
+    public func discardingTemporarySpaces() -> WorkspaceDocument {
+        let temporaryIDs = Set(spaces.filter(\.isTemporary).flatMap { [$0.id, $0.session.id] })
+        guard !temporaryIDs.isEmpty else { return self }
+        let keptSpaces = spaces.filter { !$0.isTemporary }
+        let keptWindows = windows.filter { !temporaryIDs.contains($0.id) }
+        let key: UUID?
+        if let keyWindowID, temporaryIDs.contains(keyWindowID) {
+            key = keptSpaces.first?.id ?? keptWindows.first?.id
+        } else {
+            key = keyWindowID
+        }
+        return WorkspaceDocument(windows: keptWindows, keyWindowID: key, spaces: keptSpaces)
+    }
+
+    /// Named spaces when the file has them, otherwise one space for each saved window.
+    public var spaceCatalog: [SavedSpace] {
+        if !spaces.isEmpty { return spaces }
+        return windows.enumerated().map { offset, window in
+            SavedSpace(
+                id: window.id,
+                name: Self.derivedSpaceName(for: window, index: offset),
+                symbol: SavedSpace.symbol(at: offset),
+                session: window
+            )
+        }
+    }
+
+    public func space(forKey id: UUID?) -> SavedSpace? {
+        let catalog = spaceCatalog
+        if let id, let match = catalog.first(where: { $0.id == id || $0.session.id == id }) {
+            return match
+        }
+        return catalog.first
+    }
+
+    private static func derivedSpaceName(for window: SavedWindow, index: Int) -> String {
+        if let title = window.tabs.first?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        return "Space \(index + 1)"
     }
 }
 
@@ -237,11 +348,71 @@ public nonisolated struct PhoneSession: Codable, Sendable, Equatable, Identifiab
     }
 }
 
+public nonisolated struct PhoneSpace: Codable, Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var symbol: String
+    public var sessions: [PhoneSession]
+    public var isTemporary: Bool
+
+    public init(id: UUID, name: String, symbol: String, sessions: [PhoneSession], isTemporary: Bool = false) {
+        self.id = id
+        self.name = name
+        self.symbol = symbol
+        self.sessions = sessions
+        self.isTemporary = isTemporary
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, symbol, sessions, isTemporary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        sessions = try container.decode([PhoneSession].self, forKey: .sessions)
+        isTemporary = try container.decodeIfPresent(Bool.self, forKey: .isTemporary) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(symbol, forKey: .symbol)
+        try container.encode(sessions, forKey: .sessions)
+        try container.encode(isTemporary, forKey: .isTemporary)
+    }
+}
+
 public nonisolated struct PhoneWorkspace: Codable, Sendable, Equatable {
     public var sessions: [PhoneSession]
+    public var spaces: [PhoneSpace]
+    public var activeSpaceID: UUID?
 
-    public init(sessions: [PhoneSession]) {
+    public init(sessions: [PhoneSession], spaces: [PhoneSpace] = [], activeSpaceID: UUID? = nil) {
         self.sessions = sessions
+        self.spaces = spaces
+        self.activeSpaceID = activeSpaceID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessions, spaces, activeSpaceID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessions = try container.decode([PhoneSession].self, forKey: .sessions)
+        spaces = try container.decodeIfPresent([PhoneSpace].self, forKey: .spaces) ?? []
+        activeSpaceID = try container.decodeIfPresent(UUID.self, forKey: .activeSpaceID)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessions, forKey: .sessions)
+        try container.encode(spaces, forKey: .spaces)
+        try container.encodeIfPresent(activeSpaceID, forKey: .activeSpaceID)
     }
 }
 

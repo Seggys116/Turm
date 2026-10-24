@@ -181,9 +181,11 @@ final class MacShell {
     }
 
     private func enterFullScreen(replaying chunk: [UInt8]) {
-        let surface = TerminalSurface()
+        let surface = TerminalSurface(capturesKeyboard: true)
         if macColumns >= 2, macRows >= 2 { surface.view.resize(cols: macColumns, rows: macRows) }
+        surface.replays = true
         surface.feed(chunk[...])
+        surface.replays = false
         surface.onInput = { [weak self] bytes in self?.sendInput(Data(bytes)) }
         surface.onResize = { [weak self] cols, rows in
             guard let self, cols >= 2, rows >= 2 else { return }

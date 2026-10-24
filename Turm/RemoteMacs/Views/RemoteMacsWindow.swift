@@ -60,6 +60,7 @@ struct RemoteMacsWindow: View {
             detail
         }
         .frame(minWidth: 820, minHeight: 520)
+        .writingToolsBehavior(.disabled)
         .onChange(of: selection) { _, new in
             if let new { manager.selectedID = new.mac.uuidString }
         }

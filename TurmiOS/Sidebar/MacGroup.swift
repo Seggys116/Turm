@@ -1,6 +1,265 @@
 import SwiftUI
 import TurmCore
 
+struct MacSpaceGroup: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var symbol: String
+    var sessions: [SessionSummary]
+}
+
+enum MacSpaces {
+    static func groups(in sessions: [SessionSummary]) -> [MacSpaceGroup] {
+        let buckets = Dictionary(grouping: sessions) { session in
+            session.spaceID?.uuidString ?? session.spaceName ?? session.windowTitle ?? "Mac"
+        }
+        return buckets.map { key, list in
+            MacSpaceGroup(
+                id: key,
+                name: list.first?.spaceName ?? list.first?.windowTitle ?? "Space",
+                symbol: list.first?.spaceSymbol ?? "terminal",
+                sessions: list
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.name == SavedSpace.temporaryName { return true }
+            if rhs.name == SavedSpace.temporaryName { return false }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
+struct MacSpacesPage: View {
+    let workspace: Workspace
+    let macs: MacManager
+    let connection: MacConnection
+    let entry: MacEntry
+    @Binding var path: [HomeRoute]
+    @State private var forgetting = false
+
+    var body: some View {
+        List {
+            Section {
+                MacRow(mac: entry)
+            } footer: {
+                if let advice = connection.updateAdvice {
+                    Text(advice)
+                } else if let notice = connection.notice {
+                    Text(notice)
+                }
+            }
+            switch connection.state {
+            case .connected:
+                Section("Spaces") {
+                    let groups = MacSpaces.groups(in: connection.sessions)
+                    if groups.isEmpty {
+                        Text("No shells are open on this Mac.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(groups) { group in
+                        Button {
+                            path.append(.space(mac: entry.id, space: group.id))
+                        } label: {
+                            HStack(spacing: 8) {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(group.name)
+                                        Text(group.sessions.count == 1 ? "1 shell" : "\(group.sessions.count) shells")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: group.symbol)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            case .failed:
+                Section {
+                    Button("Try Again", systemImage: "arrow.clockwise") { connection.start() }
+                }
+            case .offline, .connecting, .retrying:
+                Section {
+                    Text(entry.detail)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                Button("Forget This Mac", systemImage: "trash", role: .destructive) { forgetting = true }
+            }
+        }
+        .navigationTitle(connection.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { connection.refreshSessions() }
+        .chromeDialog(isPresented: $forgetting) {
+            .confirmation(
+                title: "Forget \(connection.name)?",
+                message: "This device loses access to the Mac. Pair again to reconnect.",
+                confirm: "Forget"
+            ) { macs.forget(connection.id) }
+        }
+    }
+}
+
+struct MacSpaceShells: View {
+    let workspace: Workspace
+    let connection: MacConnection
+    let group: MacSpaceGroup
+    @State private var query = ""
+    @State private var draft = ""
+    @State private var composing = false
+    @State private var closing: UUID?
+    @FocusState private var draftFocused: Bool
+    @Environment(\.chromeOverlays) private var overlays
+    @State private var closeToken = UUID()
+
+    private var shells: [SessionSummary] {
+        let all = connection.sessions.filter { session in
+            let key = session.spaceID?.uuidString ?? session.spaceName ?? session.windowTitle ?? "Mac"
+            return key == group.id
+        }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return all }
+        return all.filter {
+            $0.title.localizedStandardContains(needle)
+                || $0.location.localizedStandardContains(needle)
+                || ($0.directory?.localizedStandardContains(needle) ?? false)
+        }
+    }
+
+    var body: some View {
+        List {
+            if shells.isEmpty {
+                Text(query.isEmpty ? "Nothing is open in this space." : "No shells match.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(shells) { summary in
+                Button {
+                    workspace.open(connection.session(for: summary.id))
+                } label: {
+                    MacSessionRow(summary: summary)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button("Close", role: .destructive) {
+                        closing = summary.id
+                    }
+                    .tint(Chrome.failure)
+                }
+            }
+        }
+        .navigationTitle(group.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(SpaceShellBar(query: $query, draft: $draft, composing: $composing, focused: $draftFocused, create: createShell))
+        .onChange(of: closing) { _, id in
+            guard let id else { return }
+            askToClose(id)
+        }
+        .confirmationDialog(
+            "Close this shell?",
+            isPresented: Binding(get: { closing != nil && overlays == nil }, set: { if !$0 { closing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                if let closing { connection.closeSession(closing, force: true) }
+                closing = nil
+            }
+            Button("Cancel", role: .cancel) { closing = nil }
+        } message: {
+            Text("This shell will close.")
+        }
+    }
+
+    private func askToClose(_ id: UUID) {
+        guard let overlays else { return }
+        overlays.present(
+            dialog: ChromeDialogSpec(
+                title: "Close this shell?",
+                message: "This shell will close.",
+                actions: [
+                    ChromeDialogSpec.Action(title: "Cancel", role: .cancel),
+                    ChromeDialogSpec.Action(title: "Close", role: .destructive) { _ in
+                        connection.closeSession(id, force: true)
+                    },
+                ]
+            ),
+            token: closeToken
+        ) {
+            closing = nil
+        }
+    }
+
+    private var spaceID: UUID? {
+        connection.sessions.first { session in
+            (session.spaceID?.uuidString ?? session.spaceName ?? session.windowTitle ?? "Mac") == group.id
+        }?.spaceID ?? UUID(uuidString: group.id)
+    }
+
+    private func createShell() {
+        let folder = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        composing = false
+        connection.createShell(directory: folder.isEmpty ? nil : folder, space: spaceID) { id in
+            workspace.open(connection.session(for: id))
+        }
+    }
+}
+
+private struct SpaceShellBar: ViewModifier {
+    @Binding var query: String
+    @Binding var draft: String
+    @Binding var composing: Bool
+    var focused: FocusState<Bool>.Binding
+    var create: () -> Void
+
+    func body(content: Content) -> some View {
+        if composing {
+            content.toolbar {
+                ToolbarItem(placement: .bottomBar) {
+                    TextField("New shell", text: $draft)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .focused(focused)
+                        .submitLabel(.go)
+                        .onSubmit(create)
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Cancel", systemImage: "xmark") {
+                        draft = ""
+                        composing = false
+                    }
+                    .labelStyle(.iconOnly)
+                }
+            }
+            .onAppear { focused.wrappedValue = true }
+        } else if #available(iOS 26, *) {
+            content
+                .searchable(text: $query, prompt: "Search shells")
+                .toolbar {
+                    DefaultToolbarItem(kind: .search, placement: .bottomBar)
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("New Shell", systemImage: "plus") { composing = true }
+                            .labelStyle(.iconOnly)
+                    }
+                }
+        } else {
+            content
+                .searchable(text: $query, prompt: "Search shells")
+                .toolbar {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("New Shell", systemImage: "plus") { composing = true }
+                            .labelStyle(.iconOnly)
+                    }
+                }
+        }
+    }
+}
+
 struct MacGroup: View {
     let workspace: Workspace
     let macs: MacManager
@@ -141,7 +400,7 @@ struct MacGroup: View {
     }
 }
 
-private struct MacSessionRow: View {
+struct MacSessionRow: View {
     let summary: SessionSummary
 
     var body: some View {

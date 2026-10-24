@@ -121,8 +121,9 @@ final class MacManager: MacSource {
     private static func detail(of connection: MacConnection) -> String {
         switch connection.state {
         case .connected:
-            let count = connection.sessions.count
-            return count == 1 ? "1 session" : "\(count) sessions"
+            let spaces = MacSpaces.groups(in: connection.sessions).count
+            if spaces == 0 { return "Connected" }
+            return spaces == 1 ? "1 space" : "\(spaces) spaces"
         case .connecting: return "Connecting"
         case .offline: return "Not connected"
         case .retrying(let reason), .failed(let reason): return reason

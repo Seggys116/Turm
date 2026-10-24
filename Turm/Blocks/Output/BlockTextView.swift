@@ -31,6 +31,8 @@ struct BlockTextView: NSViewRepresentable {
 }
 
 final class BlockTextNSView: NSTextView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
     private let layout: UnderlineLayoutManager
     private var chunk: TextChunk?
     private var isMaterialized = false

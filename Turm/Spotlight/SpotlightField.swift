@@ -38,6 +38,8 @@ struct SpotlightField: NSViewRepresentable {
         view.isAutomaticTextReplacementEnabled = false
         view.isAutomaticSpellingCorrectionEnabled = false
         view.isContinuousSpellCheckingEnabled = false
+        view.writingToolsBehavior = .none
+        view.inlinePredictionType = .no
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         view.textContainer?.widthTracksTextView = false

@@ -601,7 +601,7 @@ struct KittyGraphicsTests {
 struct ShellEnvironmentTests {
     @Test func identityVariablesOfOtherTerminalsAreDropped() {
         for key in ["VSCODE_GIT_IPC_HANDLE", "ITERM_SESSION_ID", "KITTY_WINDOW_ID", "WEZTERM_VERSION",
-                    "TERM_PROGRAM", "TERMINAL_EMULATOR", "TMUX", "TERM_SESSION_ID", "__CFBundleIdentifier"] {
+                    "TERM_PROGRAM", "TERM_FEATURES", "TERMINAL_EMULATOR", "TMUX", "TERM_SESSION_ID", "__CFBundleIdentifier"] {
             #expect(ShellIntegration.isTerminalIdentity(key), "\(key) should be dropped")
         }
     }

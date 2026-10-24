@@ -10,6 +10,7 @@ struct BranchSheet<Session: BlockSession>: View {
     @State private var switching: String?
 
     var body: some View {
+        NavigationStack {
         ChromeScroll {
             if let failure {
                 Text(failure)
@@ -38,7 +39,14 @@ struct BranchSheet<Session: BlockSession>: View {
                 }
             }
         }
-        .chromeBar(ChromeTopBar("Branches", leading: { ChromeBarButton(title: "Done", systemImage: "checkmark") { dismiss() } }))
+        .navigationTitle("Branches")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        }
         .task { await load() }
         .chromeSheet()
     }
