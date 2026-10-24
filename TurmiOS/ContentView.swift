@@ -45,7 +45,10 @@ struct ContentView: View {
                 SessionHub.shared.move(id, to: workspace)
             }
             #if targetEnvironment(simulator)
-            .task { await DemoContent.presentSheets(in: workspace) }
+            .task {
+                await DemoContent.presentSheets(in: workspace)
+                await DemoContent.markReady()
+            }
             #endif
     }
 }

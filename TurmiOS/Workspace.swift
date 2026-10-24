@@ -50,7 +50,10 @@ final class Workspace {
         sessions.first { $0.id == selectedID }
     }
 
-    init() {
+    private let restoresSaved: Bool
+
+    init(restoring saved: Bool = true) {
+        restoresSaved = saved
         let temporary = UUID()
         let id = UUID()
         spaceList = [
@@ -58,7 +61,7 @@ final class Workspace {
             PhoneSpaceInfo(id: id, name: "Space", symbol: "terminal"),
         ]
         activeSpaceID = id
-        loadPhoneWorkspace()
+        if saved { loadPhoneWorkspace() }
     }
 
     var activeSpaceName: String {
@@ -234,6 +237,7 @@ final class Workspace {
     }
 
     private func persistSessions() {
+        guard restoresSaved else { return }
         let encoded = spaceList.map { info in
             let tabs = info.isTemporary ? [] : (info.id == activeSpaceID ? sessions : (parked[info.id]?.sessions ?? []))
             return PhoneSpace(

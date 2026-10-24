@@ -65,7 +65,8 @@ enum DemoLayout {
     }
 
     private static func finish() async {
-        await until { window != nil }
+        await until { window != nil && SpaceLibrary.shared.records.contains { !$0.isTemporary } }
+        dressSpace()
         guard let window else { return }
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
@@ -73,6 +74,13 @@ enum DemoLayout {
         try? await Task.sleep(for: .seconds(1))
         mark("window-id", "\(window.windowNumber)")
         mark("ready", "")
+    }
+
+    // The transfer's title names the tiled shell. The space above it is the workspace those shells belong to.
+    private static func dressSpace() {
+        guard let id = SpaceLibrary.shared.records.first(where: { !$0.isTemporary })?.id else { return }
+        SpaceLibrary.shared.rename(id, to: "Projects")
+        SpaceLibrary.shared.setSymbol(id, to: "hammer")
     }
 
     private static func keepSimctlFromRefreshing(_ cache: DestinationCache) {

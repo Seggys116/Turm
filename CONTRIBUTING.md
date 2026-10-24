@@ -11,7 +11,7 @@ swift test --package-path Packages/TurmCore
 xcodebuild test -project Turm.xcodeproj -scheme Turm -destination 'platform=macOS' -only-testing:TurmTests
 ```
 
-`Scripts/demo.sh` rebuilds the README screenshot of the Mac app from mocked data in a Debug build.
+`Scripts/demo.sh` rebuilds the README screenshot of the Mac app from mocked data in a Debug build. `Scripts/ios-demo.sh` rebuilds the iPhone composite the same way.
 
 Code shared by the Mac and iOS apps lives in `Packages/TurmCore`. A feature that makes sense on both platforms should work on both.
 

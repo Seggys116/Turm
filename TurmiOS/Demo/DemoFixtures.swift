@@ -16,6 +16,8 @@ enum DemoFixtures {
     static let macAddresses = ["studio.local"]
     static let home = "/Users/dev"
     static let remoteHome = "/home/deploy"
+    /// The three shells share the space the Mac screenshot is sitting in.
+    static let projectsSpace = UUID(uuidString: "4E8A1C70-6B2D-4F19-A053-9D7C2E5B8A14")!
 
     static let prodWeb = SSHHost(key: "prod-web", hostname: "prod-web.internal", user: "deploy")
     static let pi = SSHHost(key: "pi", hostname: "raspberrypi.local", user: "pi")
@@ -80,7 +82,8 @@ enum DemoFixtures {
     ) -> SessionSummary {
         SessionSummary(
             id: UUID(), title: title, location: "~/" + folder, phase: phase, activity: activity,
-            branch: branch, directory: home + "/" + folder, program: command.flatMap { RunningProgram.resolve(command: $0) }
+            branch: branch, directory: home + "/" + folder, program: command.flatMap { RunningProgram.resolve(command: $0) },
+            spaceID: projectsSpace, spaceName: "Projects", spaceSymbol: "hammer"
         )
     }
 

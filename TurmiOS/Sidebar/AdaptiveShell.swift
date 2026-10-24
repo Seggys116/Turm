@@ -101,9 +101,7 @@ struct AdaptiveShell: View {
             }
         }
         .onChange(of: workspace.compactColumn) { _, column in
-            guard !layout.split else { return }
-            let next: NavigationSplitViewColumn = column == .sidebar ? .sidebar : .detail
-            if preferredColumn != next { preferredColumn = next }
+            show(column)
         }
         .onChange(of: workspace.selectedID) { _, id in
             let column: WorkspaceColumn = id == nil ? .sidebar : .detail
@@ -111,7 +109,7 @@ struct AdaptiveShell: View {
             if !layout.split { preferredColumn = column == .sidebar ? .sidebar : .detail }
             focus(for: column)
         }
-        .onAppear { if layout.split { revealColumns(workspace.sidebarHidden) } }
+        .onAppear { show(workspace.compactColumn) }
     }
 
     @ViewBuilder
@@ -132,6 +130,16 @@ struct AdaptiveShell: View {
                 ContentUnavailableView("Mac Unavailable", systemImage: "desktopcomputer", description: Text("This Mac is no longer paired."))
             }
         }
+    }
+
+    /// A column chosen before this view exists still has to be the one on screen.
+    private func show(_ column: WorkspaceColumn) {
+        guard !layout.split else {
+            revealColumns(workspace.sidebarHidden)
+            return
+        }
+        let next: NavigationSplitViewColumn = column == .sidebar ? .sidebar : .detail
+        if preferredColumn != next { preferredColumn = next }
     }
 
     /// Both columns stay up until the sidebar is hidden. `.automatic` would collapse them again

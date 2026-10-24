@@ -69,7 +69,8 @@ enum DemoContent {
 
     static func workspace() -> Workspace? {
         guard let screen, let prepared else { return nil }
-        let workspace = Workspace()
+        let workspace = Workspace(restoring: false)
+        workspace.renameSpace(workspace.activeSpaceID, to: "Projects")
         let tabs: [any TerminalTab] = [prepared.mac, prepared.ssh, prepared.running]
         for tab in tabs { workspace.open(tab) }
         switch screen {
@@ -94,6 +95,14 @@ enum DemoContent {
         } else {
             workspace.showsPairing = true
         }
+    }
+
+    // The screenshot script waits for this file in the app's Documents directory.
+    static func markReady() async {
+        try? await Task.sleep(for: .milliseconds(800))
+        guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("demo-ready") else { return }
+        try? Data("ready".utf8).write(to: url)
     }
 
     private static func makeHosts(_ list: [SSHHost]) -> SSHHostStore? {
