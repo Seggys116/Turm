@@ -6,8 +6,8 @@ import Foundation
 /// A registered external disk therefore shows the app icon. Register the folders on that disk instead:
 /// the menu still appears inside them, and the disk keeps its own icon.
 ///
-/// The Finder extension does not link TurmCore, so this is a copy of `FinderDirectories` in the package.
-/// The tests cover the package one. Keep the two copies the same.
+/// The Finder extension does not link the TurmCore product. `TurmFinder/FinderDirectories.swift`
+/// points at this file, so the extension and the tests compile the same source.
 nonisolated enum FinderDirectories {
     struct VolumeRoot: Equatable {
         var url: URL
