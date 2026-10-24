@@ -46,50 +46,10 @@ struct SessionsBackButton: View {
     }
 }
 
-/// System toolbar controls for the open session. The navigation bar draws them.
-struct SessionToolbar: View {
-    let workspace: Workspace
-    let tab: any TerminalTab
-
-    var body: some View {
-        if let surface = keyboardSurface {
-            Button("Keyboard", systemImage: "keyboard") {
-                _ = surface.becomeFirstResponder()
-            }
-        }
-        Menu("Session", systemImage: "ellipsis") {
-            sessionMenu
-        }
-    }
-
-    private var keyboardSurface: UIView? {
-        if let ssh = tab as? SSHTerminalSession, !ssh.usesBlocks { return ssh.surface.view }
-        if let blocks = tab as? any BlockSession { return blocks.fullScreen?.view }
-        return nil
-    }
-
-    @ViewBuilder
-    private var sessionMenu: some View {
-        Button("New Session", systemImage: "plus") { workspace.showsHostPicker = true }
-        if let mac = tab as? MacSession {
-            Divider()
-            Button(mac.fitsDevice ? "Use Mac Size" : "Fit to This Device") { mac.setFitsDevice(!mac.fitsDevice) }
-            if mac.macColumns > 0 {
-                Text("Mac size \(mac.macColumns) by \(mac.macRows)")
-            }
-        }
-        if !workspace.windowMenuItems(for: tab).isEmpty {
-            Divider()
-        }
-        ForEach(workspace.windowMenuItems(for: tab)) { item in
-            Button(item.title, systemImage: item.systemImage ?? "macwindow") { item.action() }
-        }
-        Divider()
-        Button("Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
-    }
-}
-
 /// The buttons that act on the open session: the software keyboard, and the session menu.
+///
+/// These sit in the session strip. The navigation bar is hidden while a session is open, so this
+/// menu is the one that offers fitting a Mac shell to the device or putting it back to the Mac's size.
 struct SessionButtons: View {
     let workspace: Workspace
     let tab: any TerminalTab
@@ -113,8 +73,10 @@ struct SessionButtons: View {
         var items = [ChromeMenuItem(title: "New Session", systemImage: "plus") { workspace.showsHostPicker = true }]
         if let mac = tab as? MacSession {
             items.append(
-                ChromeMenuItem(title: "Fit to This Device", isOn: mac.fitsDevice) { mac.setFitsDevice(!mac.fitsDevice) }
-                    .separatedFromPrevious()
+                ChromeMenuItem(title: mac.fitsDevice ? "Use Mac Size" : "Fit to This Device") {
+                    mac.setFitsDevice(!mac.fitsDevice)
+                }
+                .separatedFromPrevious()
             )
             if mac.macColumns > 0 { items.append(.note("Mac size \(mac.macColumns) by \(mac.macRows)")) }
         }

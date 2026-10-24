@@ -18,16 +18,15 @@ struct TerminalDetail: View {
                 EmptyDetail(workspace: workspace)
             }
         }
-        .navigationTitle(workspace.selected?.title ?? "Turm")
+        .navigationTitle(workspace.selected == nil ? "Turm" : "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let tab = workspace.selected {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    SessionToolbar(workspace: workspace, tab: tab)
-                }
-            }
-        }
+        // The session strip is the header: back, tabs, keyboard and menu. The system bar would sit
+        // above it as a second header. On a phone that bar was also the way back to the session list,
+        // so the strip draws that button once the bar is hidden.
+        .toolbarVisibility(workspace.selected == nil ? .automatic : .hidden, for: .navigationBar)
         .background(Chrome.terminalBackground.ignoresSafeArea())
+        .toolbarBackground(Chrome.terminalBackground, for: .navigationBar)
+        .containerBackground(Chrome.terminalBackground, for: .navigation)
         .sessionDrop(into: workspace)
     }
 
@@ -157,6 +156,11 @@ private struct TabStrip: View {
         let leadingCorner = atTop && rail == .trailing && (!splitLayout || workspace.sidebarHidden)
         let trailingCorner = atTop && rail == .leading
         return HStack(spacing: 0) {
+            if !splitLayout {
+                SessionsBackButton(workspace: workspace)
+            } else if workspace.sidebarHidden {
+                SidebarToggleButton(workspace: workspace)
+            }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
@@ -171,6 +175,9 @@ private struct TabStrip: View {
                     guard let id else { return }
                     withAnimation(.snappy) { proxy.scrollTo(id) }
                 }
+            }
+            if let tab = workspace.selected {
+                SessionButtons(workspace: workspace, tab: tab)
             }
             Button {
                 Haptics.tap()
@@ -212,10 +219,12 @@ private struct SessionTab: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Chrome.text)
                     .frame(width: 28, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .tint(Chrome.text)
             .accessibilityLabel("Close \(tab.title)")
         }
         .foregroundStyle(selected ? Chrome.text : Chrome.secondaryText)

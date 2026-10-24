@@ -105,7 +105,11 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
             return Color(red: UInt16(c.red) * 257, green: UInt16(c.green) * 257, blue: UInt16(c.blue) * 257)
         }
         view.installColors(ansi)
-        view.nativeBackgroundColor = color(TerminalPalette.background)
+        let background = color(TerminalPalette.background)
+        // The cell fill and the view fill are separate. The view is what shows in the margin
+        // before the first frame, and beside the grid when the page is wider than the columns.
+        view.nativeBackgroundColor = background
+        view.backgroundColor = background
         view.nativeForegroundColor = color(TerminalPalette.foreground)
         view.caretColor = color(TerminalPalette.cursor)
         view.selectedTextBackgroundColor = color(TerminalPalette.selection)

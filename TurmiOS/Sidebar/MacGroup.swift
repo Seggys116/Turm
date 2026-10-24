@@ -41,6 +41,7 @@ struct MacSpacesPage: View {
         List {
             Section {
                 MacRow(mac: entry)
+                    .chromeListRow()
             } footer: {
                 if let advice = connection.updateAdvice {
                     Text(advice)
@@ -54,7 +55,8 @@ struct MacSpacesPage: View {
                     let groups = MacSpaces.groups(in: connection.sessions)
                     if groups.isEmpty {
                         Text("No shells are open on this Mac.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Chrome.secondaryText)
+                            .chromeListRow()
                     }
                     ForEach(groups) { group in
                         Button {
@@ -64,35 +66,46 @@ struct MacSpacesPage: View {
                                 Label {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(group.name)
+                                            .foregroundStyle(Chrome.text)
                                         Text(group.sessions.count == 1 ? "1 shell" : "\(group.sessions.count) shells")
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Chrome.secondaryText)
                                     }
                                 } icon: {
                                     Image(systemName: group.symbol)
+                                        .foregroundStyle(Chrome.secondaryText)
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Chrome.secondaryText)
                             }
                         }
+                        .buttonStyle(.plain)
+                        .chromeListRow()
                     }
                 }
             case .failed:
                 Section {
                     Button("Try Again", systemImage: "arrow.clockwise") { connection.start() }
+                        .buttonStyle(.plain)
+                        .chromeListRow()
                 }
             case .offline, .connecting, .retrying:
                 Section {
                     Text(entry.detail)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Chrome.secondaryText)
+                        .chromeListRow()
                 }
             }
             Section {
                 Button("Forget This Mac", systemImage: "trash", role: .destructive) { forgetting = true }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Chrome.failure)
+                    .chromeListRow()
             }
         }
+        .chromeList()
         .navigationTitle(connection.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { connection.refreshSessions() }
@@ -136,7 +149,8 @@ struct MacSpaceShells: View {
         List {
             if shells.isEmpty {
                 Text(query.isEmpty ? "Nothing is open in this space." : "No shells match.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Chrome.secondaryText)
+                    .chromeListRow()
             }
             ForEach(shells) { summary in
                 Button {
@@ -144,6 +158,8 @@ struct MacSpaceShells: View {
                 } label: {
                     MacSessionRow(summary: summary)
                 }
+                .buttonStyle(.plain)
+                .chromeListRow(selected: workspace.selectedID == summary.id)
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button("Close", role: .destructive) {
                         closing = summary.id
@@ -152,6 +168,7 @@ struct MacSpaceShells: View {
                 }
             }
         }
+        .chromeList()
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
         .modifier(SpaceShellBar(query: $query, draft: $draft, composing: $composing, focused: $draftFocused, create: createShell))

@@ -408,6 +408,25 @@ private extension View {
 }
 
 extension View {
+    /// One list chrome for the phone stack and the iPad sidebar column. The split view otherwise
+    /// paints its own lighter sidebar material behind pushed pages and selected rows.
+    func chromeList() -> some View {
+        self
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Chrome.sidebar.ignoresSafeArea())
+            .toolbarBackground(Chrome.sidebar, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .containerBackground(Chrome.sidebar, for: .navigation)
+    }
+
+    /// The row fills itself. A selected `List` row and the split view's sidebar material are a
+    /// different grey from this chrome, and that grey shows through on the pushed Mac pages.
+    func chromeListRow(selected: Bool = false) -> some View {
+        listRowBackground(selected ? Chrome.listSelection : Chrome.listRow)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     func chromeHover(cornerRadius: CGFloat = Chrome.Radius.chip) -> some View {
         modifier(ChromeHover(cornerRadius: cornerRadius))
     }

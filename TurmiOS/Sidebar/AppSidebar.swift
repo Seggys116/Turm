@@ -18,18 +18,17 @@ struct AppSidebar: View {
     @State private var query = ""
 
     var body: some View {
-        List(selection: $workspace.selectedID) {
+        List {
             sessionsSection
             hostsSection
             macsSection
         }
-        .listStyle(.insetGrouped)
+        .chromeList()
         .navigationTitle("Turm")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, prompt: "Search hosts and devices")
         .modifier(BottomSearch())
         .toolbar { sidebarToolbar }
-        .background(Chrome.sidebar.ignoresSafeArea())
         .sessionDrop(into: workspace)
         .animation(.snappy(duration: 0.25), value: workspace.sessions.count)
     }
@@ -52,15 +51,21 @@ struct AppSidebar: View {
         if !shown.isEmpty {
             Section("Open Sessions") {
                 ForEach(shown, id: \.id) { tab in
-                    SessionRow(tab: tab)
-                        .tag(tab.id as UUID?)
-                        .sessionDrag(tab)
-                        .swipeActions(edge: .trailing) {
-                            Button("Close", role: .destructive) { workspace.close(tab) }
-                        }
-                        .contextMenu {
-                            Button("Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
-                        }
+                    Button {
+                        workspace.select(tab)
+                    } label: {
+                        SessionRow(tab: tab)
+                    }
+                    .buttonStyle(.plain)
+                    .chromeListRow(selected: workspace.selectedID == tab.id)
+                    .sessionDrag(tab)
+                    .swipeActions(edge: .trailing) {
+                        Button("Close", role: .destructive) { workspace.close(tab) }
+                            .tint(Chrome.failure)
+                    }
+                    .contextMenu {
+                        Button("Close Session", systemImage: "xmark", role: .destructive) { workspace.close(tab) }
+                    }
                 }
             }
         }
@@ -78,6 +83,8 @@ struct AppSidebar: View {
         Section {
             if visibleMacs.isEmpty {
                 Button("Pair a Mac", systemImage: "link") { workspace.showsPairing = true }
+                    .buttonStyle(.plain)
+                    .chromeListRow()
             } else {
                 ForEach(visibleMacs) { entry in
                     if let connection = macs.connection(for: entry.id) {
@@ -91,12 +98,16 @@ struct AppSidebar: View {
                                     .foregroundStyle(.tertiary)
                             }
                         }
+                        .buttonStyle(.plain)
+                        .chromeListRow()
                     } else {
                         Button {
                             workspace.showsPairing = true
                         } label: {
                             MacRow(mac: entry)
                         }
+                        .buttonStyle(.plain)
+                        .chromeListRow()
                     }
                 }
             }
@@ -124,6 +135,8 @@ struct AppSidebar: View {
         Section {
             if visibleHosts.isEmpty {
                 Button("Add an SSH Host", systemImage: "plus") { addHost() }
+                    .buttonStyle(.plain)
+                    .chromeListRow()
             } else {
                 ForEach(visibleHosts) { host in
                     Button {
@@ -131,8 +144,11 @@ struct AppSidebar: View {
                     } label: {
                         HostRow(host: host, connected: isConnected(host))
                     }
+                    .buttonStyle(.plain)
+                    .chromeListRow()
                     .swipeActions(edge: .trailing) {
                         Button("Delete", role: .destructive) { hosts.remove(host.id) }
+                            .tint(Chrome.failure)
                     }
                     .swipeActions(edge: .leading) {
                         Button("Edit") { workspace.editingHost = host }
