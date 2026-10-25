@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0
+
+- Saved spaces are shared across windows, and a space is shown in one window at a time.
+- The sidebar slides over the card.
+- Images a program sends to the shell are drawn. A full-screen terminal GUI is one picture, sized to the pane, and clicks land where they are drawn.
+- Tmp keeps a fresh shell when its last one exits.
+- Finder registers the folders on an external disk so the disk keeps its own icon.
+- On iPhone and iPad, the session list sits in the app chrome, with back, the keyboard and the session menu in the strip.
+- The pairing code closes from Done.
+
 ## 1.5.0
 
 - Turm remembers your windows, tiles and shells and brings them back after a quit or a crash, along with recent blocks and each pane's working directory.
