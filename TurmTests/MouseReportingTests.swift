@@ -153,6 +153,14 @@ struct MouseReportingTests {
         #expect(MouseEncoding(privateMode: 1000) == nil)
     }
 
+    @Test func pixelMouseMatchesTheFrame() {
+        let report = Array("\u{1B}[<0;10;20M\u{1B}[<0;10;20m".utf8)
+        let scaled = PixelMouse.scale(report[...], reportingPixels: true, view: CGSize(width: 100, height: 50), frame: CGSize(width: 200, height: 100))
+        #expect(String(decoding: scaled, as: UTF8.self) == "\u{1B}[<0;21;41M\u{1B}[<0;21;41m")
+        let kept = PixelMouse.scale(report[...], reportingPixels: false, view: CGSize(width: 100, height: 50), frame: CGSize(width: 200, height: 100))
+        #expect(kept == report)
+    }
+
     @Test func trackingMapsFromTerminalModes() {
         #expect(MouseTracking(.off) == .off)
         #expect(MouseTracking(.x10) == .x10)

@@ -91,6 +91,12 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var isDark = true
     @ObservationIgnored private var reportsColorScheme = false
     @ObservationIgnored private var reportsFocus = false
+    @ObservationIgnored private var reportsInBandResize = false
+    @ObservationIgnored private var pointers = PointerStack()
+    @ObservationIgnored private var controlHold: [UInt8] = []
+    @ObservationIgnored private var emulatorGraphicsHold: [UInt8] = []
+    @ObservationIgnored private var publishedWindow: WindowPixels?
+    @ObservationIgnored private var publishedInBand: WindowPixels?
     @ObservationIgnored private var paneFocused = false
     private(set) var showsFocusedCursor = false
     @ObservationIgnored private(set) var liveEnvironment: [String: String]?
@@ -583,10 +589,22 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func applyWindowSize() {
+        publishWindowSize()
+    }
+
+    private func publishWindowSize() {
         current?.emulator.resize(cols: cols, rows: rows)
         guard process.childfd >= 0 else { return }
-        var size = getWindowSize()
-        _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: process.childfd, windowSize: &size)
+        let pixels = gridPixels
+        let size = WindowPixels(rows: rows, cols: cols, height: pixels.height, width: pixels.width)
+        if publishedWindow != WindowPixels?(size) {
+            publishedWindow = size
+            var window = getWindowSize()
+            _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: process.childfd, windowSize: &window)
+        }
+        guard reportsInBandResize, publishedInBand != WindowPixels?(size) else { return }
+        publishedInBand = size
+        write(TerminalReply.inBandResize(rows: rows, columns: cols, height: pixels.height, width: pixels.width))
     }
 
     private func write(_ bytes: [UInt8]) {
@@ -621,7 +639,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         emulator.apply(dark: isDark)
         // once a full-screen view owns the screen it answers terminal queries itself
         emulator.onResponse = { [weak self] data in
-            guard let self, self.altScreen == nil else { return }
+            guard let self else { return }
+            if self.altScreen != nil, !Self.graphicsReply(data) { return }
             self.write(Array(data))
         }
         emulator.onBufferSwitch = { [weak self] in self?.bufferSwitched() }
@@ -776,6 +795,12 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private func resetProgramState() {
         reportsColorScheme = false
         reportsFocus = false
+        reportsInBandResize = false
+        pointers.resetAll()
+        controlHold = []
+        emulatorGraphicsHold = []
+        publishedWindow = nil
+        publishedInBand = nil
         mouseEncoding = .x10
         lastMotion = nil
         progress = nil
@@ -819,6 +844,31 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         guard phase == .running, let block = current else { return }
         if isRemote { watchSudo(bytes) }
+        let extracted = takeControls(bytes)
+        var cursor = 0
+        for mark in extracted.controls {
+            let end = min(max(mark.at, cursor), extracted.bytes.count)
+            if cursor < end { present(Array(extracted.bytes[cursor..<end]), to: block) }
+            apply(mark.kind)
+            cursor = end
+        }
+        if cursor < extracted.bytes.count { present(Array(extracted.bytes[cursor...]), to: block) }
+        scheduleRender()
+    }
+
+    private func takeControls(_ bytes: [UInt8]) -> TerminalControlFilter.Extraction {
+        let extracted: TerminalControlFilter.Extraction
+        if controlHold.isEmpty {
+            extracted = TerminalControlFilter.extract(bytes)
+        } else {
+            controlHold.append(contentsOf: bytes)
+            extracted = TerminalControlFilter.extract(controlHold)
+        }
+        controlHold = extracted.held
+        return extracted
+    }
+
+    private func present(_ bytes: [UInt8], to block: Block) {
         answer(TerminalRequestScanner.scan(bytes[...]))
         var rest = bytes[...]
         while !rest.isEmpty {
@@ -832,18 +882,100 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             if entering {
                 enterAltScreen(for: block)
             } else {
-                altScreen = nil
+                closeAltScreen()
             }
         }
-        scheduleRender()
+    }
+
+    private func apply(_ kind: TerminalControlFilter.Control.Kind) {
+        switch kind {
+        case .inBandResize(let enabled):
+            reportsInBandResize = enabled
+            if enabled { publishWindowSize() }
+        case .inBandResizeQuery:
+            write(TerminalReply.inBandResizeMode(enabled: reportsInBandResize))
+        case .pointer(let command):
+            applyPointer(command)
+        case .reset:
+            reportsInBandResize = false
+            pointers.resetAll()
+            showPointer()
+        }
+    }
+
+    private func applyPointer(_ command: PointerCommand) {
+        switch command {
+        case .set(let name):
+            if name.isEmpty { pointers.clear() } else { pointers.set(name) }
+            showPointer()
+        case .push(let names):
+            pointers.push(names)
+            showPointer()
+        case .pop:
+            pointers.pop()
+            showPointer()
+        case .query(let names):
+            write(TerminalReply.pointerShape(pointers.answer(names)))
+        }
+    }
+
+    private func showPointer() {
+        altScreen?.setPointer(pointers.current)
+    }
+
+    private var gridPixels: (width: Int, height: Int) {
+        let cell = altScreen?.cellPixels ?? TerminalGrid.cell(
+            width: Double(TerminalMetrics.cellWidth), height: Double(TerminalMetrics.lineHeight), scale: Double(BlockEmulator.backingScale)
+        )
+        return TerminalGrid.pixels(columns: cols, rows: rows, cellWidth: cell.width, cellHeight: cell.height)
+    }
+
+    private func closeAltScreen() {
+        if let emulator = current?.emulator {
+            for store in [emulator.normalStore, emulator.altStore] {
+                let placed = Set(store.images.compactMap { $0.fromKitty ? $0.kittyID : nil })
+                store.images.removeAll { $0.fromKitty }
+                for id in placed { store.sources[id] = nil }
+            }
+        }
+        altScreen = nil
+        pointers.isAlternate = false
+        emulatorGraphicsHold = []
     }
 
     private func deliver(_ bytes: [UInt8], to block: Block) {
         companionTap?(.output(blockID: block.id, bytes: Data(bytes)))
-        block.append(bytes)
         if let altScreen {
-            altScreen.feed(bytes)
+            // The text grid never sees a full-screen frame, so the picture cannot scroll away.
+            var pending = emulatorGraphicsHold
+            pending.append(contentsOf: bytes)
+            let split = KittyGraphicsScanner.split(pending)
+            emulatorGraphicsHold = Array(split.remainder)
+            var plain: [UInt8] = []
+            var fallback: [UInt8] = []
+            for piece in split.pieces {
+                if case .graphics(let command) = piece.kind {
+                    if !altScreen.present(command, apc: Array(piece.bytes)) {
+                        fallback.append(contentsOf: piece.bytes)
+                    }
+                } else {
+                    plain.append(contentsOf: piece.bytes)
+                }
+            }
+            if !plain.isEmpty {
+                for request in TerminalRequestScanner.scan(plain[...]) {
+                    if case .privateMode(1016, let enabled) = request { altScreen.reportsPixels = enabled }
+                }
+                altScreen.feed(plain)
+                block.append(plain)
+            }
+            if !fallback.isEmpty {
+                block.append(fallback)
+                altScreen.showFrame(block.emulator.images.last { $0.fromKitty }?.image)
+            }
         } else {
+            emulatorGraphicsHold = []
+            block.append(bytes)
             outputProgress.feed(bytes)
             if textProgress != outputProgress.percent { textProgress = outputProgress.percent }
         }
@@ -854,7 +986,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         if block.emulator.isAlternate {
             enterAltScreen(for: block)
         } else {
-            altScreen = nil
+            closeAltScreen()
         }
     }
 
@@ -871,20 +1003,26 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
         host.onDragTarget = { [weak self] targeted in self?.isDropTargeted = targeted }
         host.onResize = { [weak self] newCols, newRows in
-            guard let self else { return }
-            self.cols = newCols
-            self.rows = newRows
-            self.applyWindowSize()
+            guard let self, newCols > 1, newRows > 1, newCols != self.cols || newRows != self.rows else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, newCols != self.cols || newRows != self.rows else { return }
+                self.cols = newCols
+                self.rows = newRows
+                self.publishWindowSize()
+            }
         }
+        host.onWindow = { [weak self] in self?.publishWindowSize() }
         host.apply(dark: isDark)
         host.replay(block.rawBytes)
+        pointers.isAlternate = true
         altScreen = host
+        host.setPointer(pointers.current)
     }
 
     private func finishCommand(exitCode: Int32?) {
         sudoOffer = nil
         sudoWatch = nil
-        altScreen = nil
+        closeAltScreen()
         runningOutputFrame = nil
         resetProgramState()
         guard let block = current else { return }
@@ -896,8 +1034,13 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         if block.command == "clear" { clearBlocks() }
     }
 
+    private static func graphicsReply(_ data: ArraySlice<UInt8>) -> Bool {
+        let start = data.startIndex
+        return data.count >= 3 && data[start] == 0x1B && data[start + 1] == 0x5F && data[start + 2] == 0x47
+    }
+
     private func scheduleRender() {
-        guard !renderPending else { return }
+        guard altScreen == nil, !renderPending else { return }
         renderPending = true
         Task {
             try? await Task.sleep(for: .milliseconds(60))
@@ -1048,7 +1191,18 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
     }
 
+    private struct WindowPixels: Equatable {
+        var rows: Int
+        var cols: Int
+        var height: Int
+        var width: Int
+    }
+
     func getWindowSize() -> winsize {
-        winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
+        let pixels = gridPixels
+        return winsize(
+            ws_row: UInt16(clamping: rows), ws_col: UInt16(clamping: cols),
+            ws_xpixel: UInt16(clamping: pixels.width), ws_ypixel: UInt16(clamping: pixels.height)
+        )
     }
 }

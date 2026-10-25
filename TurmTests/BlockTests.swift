@@ -501,6 +501,100 @@ struct TerminalRequestTests {
     }
 }
 
+struct KittyTerminalControlTests {
+    private func text(_ bytes: [UInt8]) -> String {
+        String(decoding: bytes, as: UTF8.self).replacingOccurrences(of: "\u{1B}", with: "ESC")
+    }
+
+    @Test func inBandResizeIsTakenOutAndReported() {
+        let enter = "\u{1B}[?1049h\u{1B}[?25l\u{1B}[?1003h\u{1B}[?1006h\u{1B}[?1016h\u{1B}[?1004h\u{1B}[?2004h\u{1B}[?2048h\u{1B}[>31u"
+        let extracted = TerminalControlFilter.extract(bytes(enter))
+        #expect(extracted.held.isEmpty)
+        #expect(extracted.controls.map(\.kind) == [.inBandResize(true)])
+        #expect(text(extracted.bytes) == "ESC[?1049hESC[?25lESC[?1003hESC[?1006hESC[?1016hESC[?1004hESC[?2004hESC[>31u")
+        #expect(extracted.controls[0].at == extracted.bytes.count - Array("\u{1B}[>31u".utf8).count)
+    }
+
+    @Test func mixedPrivateModeKeepsTheOtherModes() {
+        let extracted = TerminalControlFilter.extract(bytes("\u{1B}[?1004;2048h\u{1B}[?2048l"))
+        #expect(text(extracted.bytes) == "ESC[?1004h")
+        #expect(extracted.controls.map(\.kind) == [.inBandResize(true), .inBandResize(false)])
+    }
+
+    @Test func resizeQueryAndReportUseTheKittyForm() {
+        let extracted = TerminalControlFilter.extract(bytes("\u{1B}[?2048$p"))
+        #expect(extracted.bytes.isEmpty)
+        #expect(extracted.controls.map(\.kind) == [.inBandResizeQuery])
+        #expect(text(TerminalReply.inBandResize(rows: 30, columns: 100, height: 630, width: 1000)) == "ESC[48;30;100;630;1000t")
+        #expect(text(TerminalReply.inBandResizeMode(enabled: true)) == "ESC[?2048;1$y")
+        #expect(TerminalGrid.pixels(columns: 100, rows: 30, cellWidth: 10, cellHeight: 21) == (width: 1000, height: 630))
+    }
+
+    @Test func anUnfinishedResizeWaitsForTheNextChunk() {
+        let first = TerminalControlFilter.extract(bytes("hi\u{1B}[?204"))
+        #expect(text(first.bytes) == "hi")
+        #expect(first.controls.isEmpty)
+        let second = TerminalControlFilter.extract(first.held + bytes("8hX"))
+        #expect(text(second.bytes) == "X")
+        #expect(second.controls.map(\.kind) == [.inBandResize(true)])
+    }
+
+    @Test func pointerShapesAreRemovedAndGraphicsStay() {
+        let stream = "A\u{1B}]22;pointer\u{1B}\\\u{1B}_Ga=T,i=1\u{1B}\\B\u{1B}]22;>text,crosshair\u{07}\u{1B}]22;<\u{1B}\\\u{1B}]22;?pointer,nope\u{1B}\\"
+        let extracted = TerminalControlFilter.extract(bytes(stream))
+        #expect(text(extracted.bytes) == "AESC_Ga=T,i=1ESC\\B")
+        #expect(extracted.controls.map(\.kind) == [
+            .pointer(.set("pointer")),
+            .pointer(.push(["text", "crosshair"])),
+            .pointer(.pop),
+            .pointer(.query(["pointer", "nope"])),
+        ])
+    }
+
+    @Test func otherOscAndAResetPassThrough() {
+        let stream = "\u{1B}]2;title\u{1B}\\\u{1B}c\u{1B}[!p"
+        let extracted = TerminalControlFilter.extract(bytes(stream))
+        #expect(text(extracted.bytes) == "ESC]2;titleESC\\ESCcESC[!p")
+        #expect(extracted.controls.map(\.kind) == [.reset, .reset])
+    }
+
+    @Test func graphicsStayOutOfTheHiddenEmulator() {
+        var pending: [UInt8] = []
+        let first = KittyGraphicsScanner.withoutGraphics(bytes("ab\u{1B}_Ga=T,t=s;AAAA"), pending: &pending)
+        #expect(String(decoding: first, as: UTF8.self) == "ab")
+        #expect(!pending.isEmpty)
+        let second = KittyGraphicsScanner.withoutGraphics(bytes("\u{1B}\\cd\u{1B}[?1049l"), pending: &pending)
+        #expect(String(decoding: second, as: UTF8.self) == "cd\u{1B}[?1049l")
+        #expect(pending.isEmpty)
+    }
+
+    @Test func pointerStackIsPerScreen() {
+        var stack = PointerStack()
+        stack.set("pointer")
+        stack.push(["text", "crosshair"])
+        #expect(stack.current == "crosshair")
+        stack.pop()
+        #expect(stack.current == "text")
+        stack.isAlternate = true
+        #expect(stack.current == nil)
+        stack.set("grab")
+        stack.isAlternate = false
+        #expect(stack.current == "text")
+        #expect(stack.answer(["__current__"]) == "text")
+        stack.clear()
+        #expect(stack.answer(["__current__"]) == "0")
+        #expect(stack.answer(["pointer", "nope"]) == "1,0")
+        stack.push((1...20).map { _ in "wait" })
+        #expect(stack.current == "wait")
+        var depth = 0
+        while stack.current != nil {
+            stack.pop()
+            depth += 1
+        }
+        #expect(depth == PointerStack.capacity)
+    }
+}
+
 struct KeyEncoderTests {
     private func key(_ code: UInt16, _ chars: String = "", _ plain: String? = nil,
                      shift: Bool = false, control: Bool = false, option: Bool = false) -> KeyInput {

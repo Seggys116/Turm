@@ -286,6 +286,9 @@ final class AltContainer: NSView {
         host.view.frame = bounds
         host.view.autoresizingMask = [.width, .height]
         addSubview(host.view)
+        host.frameOverlay.frame = bounds
+        host.frameOverlay.autoresizingMask = [.width, .height]
+        addSubview(host.frameOverlay)
     }
 
     @available(*, unavailable)

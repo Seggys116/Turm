@@ -84,6 +84,20 @@ enum KittyGraphicsScanner {
 
     private static let escape: UInt8 = 0x1B
 
+    /// Removes kitty graphics commands and keeps an unfinished one in `pending`.
+    static func withoutGraphics(_ bytes: [UInt8], pending: inout [UInt8]) -> [UInt8] {
+        guard !pending.isEmpty || bytes.contains(escape) else { return bytes }
+        pending.append(contentsOf: bytes)
+        let split = split(pending)
+        pending = Array(split.remainder)
+        var kept: [UInt8] = []
+        for piece in split.pieces {
+            if case .graphics = piece.kind { continue }
+            kept.append(contentsOf: piece.bytes)
+        }
+        return kept
+    }
+
     static func split(_ bytes: [UInt8]) -> (pieces: [Piece], remainder: ArraySlice<UInt8>) {
         var pieces: [Piece] = []
         var start = 0

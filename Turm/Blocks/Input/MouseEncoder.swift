@@ -42,6 +42,64 @@ enum MouseEncoding: Equatable {
     }
 }
 
+enum PixelMouse {
+    /// Scales SwiftTerm's point-based SGR positions into the frame's device pixels, which the app reads as 1-based.
+    static func scale(_ bytes: ArraySlice<UInt8>, reportingPixels: Bool, view: CGSize, frame: CGSize) -> [UInt8] {
+        guard reportingPixels, view.width > 1, view.height > 1, frame.width > 1, frame.height > 1 else {
+            return Array(bytes)
+        }
+        var output: [UInt8] = []
+        output.reserveCapacity(bytes.count + 8)
+        var index = bytes.startIndex
+        while index < bytes.endIndex {
+            if let report = report(in: bytes, at: index) {
+                let x = placed(report.x, across: view.width, into: frame.width)
+                let y = placed(report.y, across: view.height, into: frame.height)
+                output.append(contentsOf: "\u{1B}[<\(report.button);\(x);\(y)\(report.release ? "m" : "M")".utf8)
+                index = report.next
+            } else {
+                output.append(bytes[index])
+                index += 1
+            }
+        }
+        return output
+    }
+
+    private static func placed(_ point: Int, across view: CGFloat, into frame: CGFloat) -> Int {
+        let pixel = Int((CGFloat(point) / view * frame).rounded()) + 1
+        return min(max(pixel, 1), max(Int(frame.rounded()), 1))
+    }
+
+    private static func report(in bytes: ArraySlice<UInt8>, at index: Int) -> (button: Int, x: Int, y: Int, release: Bool, next: Int)? {
+        guard index + 4 < bytes.endIndex, bytes[index] == 0x1B, bytes[index + 1] == 0x5B, bytes[index + 2] == 0x3C else {
+            return nil
+        }
+        var cursor = index + 3
+        var numbers: [Int] = []
+        var value = 0
+        var digits = false
+        while cursor < bytes.endIndex {
+            let byte = bytes[cursor]
+            if byte >= 0x30, byte <= 0x39 {
+                digits = true
+                value = value * 10 + Int(byte - 0x30)
+                cursor += 1
+            } else if byte == 0x3B, numbers.count < 2 {
+                numbers.append(digits ? value : 0)
+                value = 0
+                digits = false
+                cursor += 1
+            } else if byte == 0x4D || byte == 0x6D, numbers.count == 2, digits {
+                numbers.append(value)
+                return (numbers[0], numbers[1], numbers[2], byte == 0x6D, cursor + 1)
+            } else {
+                return nil
+            }
+        }
+        return nil
+    }
+}
+
 enum MouseButton: Int {
     case left = 0
     case middle = 1
