@@ -1,6 +1,8 @@
 .DS_Store
 DerivedData/
 DerivedData-iOS/
+build/
+Packages/*/build/
 xcuserdata/
 *.xcuserstate
 Packages/*/.build/
