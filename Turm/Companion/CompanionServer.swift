@@ -239,6 +239,8 @@ final class CompanionServer {
         pairingTimer?.cancel()
         pairingTimer = nil
         pairingPeer = nil
+        // Done and the sheet disappearing both call this. Once the code is already gone,
+        // the finished result stays so the sheet can still show that the device paired.
         guard pairing != nil else { return }
         pairing = nil
         outcome = result

@@ -236,14 +236,17 @@ private struct CompanionPairingSheet: View {
             }
             HStack {
                 Spacer(minLength: 0)
-                Button("Done") { dismiss() }
-                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                Button("Done") {
+                    server.endPairing()
+                    dismiss()
+                }
+                .buttonStyle(SettingsButtonStyle(prominent: true))
             }
         }
         .padding(20)
         .frame(width: 340)
         .background(Theme.inputBackground.color)
-        .onAppear { server.beginPairing() }
+        .task { server.beginPairing() }
         .onDisappear {
             server.endPairing()
             clearCopiedLink()

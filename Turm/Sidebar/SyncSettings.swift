@@ -108,13 +108,15 @@ struct SyncSettings: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.failure.color)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 4)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
             }
             Text("A key you switch on is copied into Turm's keychain, so your iPhone can sign in with it when iCloud sync is on. The file on this Mac is never changed or deleted. Switching it off removes it from Turm and from your other devices.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
         }
     }
 
