@@ -8,7 +8,7 @@
     "postinstall": "node build.mjs --inputs"
   },
   "devDependencies": {
-    "@lobehub/icons-static-svg": "1.95.1",
-    "simple-icons": "16.33.0"
+    "@lobehub/icons-static-svg": "1.98.0",
+    "simple-icons": "16.35.0"
   }
 }
