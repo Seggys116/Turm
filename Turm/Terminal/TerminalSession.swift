@@ -82,6 +82,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var outputProgress = OutputProgress()
     @ObservationIgnored private var didExit = false
     @ObservationIgnored private var cols = 100
+    @ObservationIgnored private var paneGrid: (cols: Int, rows: Int)?
     @ObservationIgnored private var sudoWatch: (block: UUID, tail: String, filled: Bool)?
     @ObservationIgnored private var rows = 30
     @ObservationIgnored private var startedAt: ContinuousClock.Instant?
@@ -582,7 +583,9 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     func resize(cols newCols: Int, rows newRows: Int) {
-        guard newCols > 1, newRows > 1, newCols != cols || newRows != rows else { return }
+        guard newCols > 1, newRows > 1 else { return }
+        paneGrid = (newCols, newRows)
+        guard altScreen == nil, newCols != cols || newRows != rows else { return }
         cols = newCols
         rows = newRows
         applyWindowSize()
@@ -941,6 +944,11 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         altScreen = nil
         pointers.isAlternate = false
         emulatorGraphicsHold = []
+        if let grid = paneGrid, grid.cols != cols || grid.rows != rows {
+            cols = grid.cols
+            rows = grid.rows
+            publishWindowSize()
+        }
     }
 
     private func deliver(_ bytes: [UInt8], to block: Block) {
