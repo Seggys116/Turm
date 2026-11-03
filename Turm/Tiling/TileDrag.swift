@@ -12,6 +12,7 @@ final class TileDrag {
     private(set) var drop: PaneDrop?
     private(set) var breaksOut = false
     private(set) var tearsOff = false
+    private(set) var spaceTarget: UUID?
     private var home: CGRect?
     private var restoring: UUID?
     private(set) var hovered: Set<PaneID> = []
@@ -19,8 +20,22 @@ final class TileDrag {
     var sidebarFrame: CGRect = .zero
     var windowBounds: CGRect = .zero
     var tearOff: (TileItem) -> Bool = { _ in false }
+    var homeSpace: () -> UUID? = { nil }
+    var canMoveToSpace: (TileItem) -> Bool = { _ in false }
+    var moveToSpace: (TileItem, UUID) -> Bool = { _, _ in false }
+    private(set) var spaceFrames: [UUID: CGRect] = [:]
+    var spaceBarFrame: CGRect = .zero
 
     var isActive: Bool { item != nil }
+
+    func setSpaceFrame(_ id: UUID, _ frame: CGRect?) {
+        if let frame { spaceFrames[id] = frame } else { spaceFrames.removeValue(forKey: id) }
+    }
+
+    func space(at point: CGPoint) -> UUID? {
+        guard spaceBarFrame.contains(point), let id = spaceFrames.first(where: { $0.value.contains(point) })?.key else { return nil }
+        return id == homeSpace() ? nil : id
+    }
 
     func hover(_ panes: Set<PaneID>, _ inside: Bool) {
         if inside {
@@ -46,7 +61,10 @@ final class TileDrag {
         drop = nil
         breaksOut = false
         tearsOff = false
-        if !windowBounds.contains(point) {
+        spaceTarget = nil
+        if let target = space(at: point), canMoveToSpace(item) {
+            spaceTarget = target
+        } else if !windowBounds.contains(point) {
             tearsOff = true
         } else if gridFrame.contains(point) {
             let local = CGPoint(x: point.x - gridFrame.minX, y: point.y - gridFrame.minY)
@@ -62,6 +80,10 @@ final class TileDrag {
     func end(in workspace: Workspace) -> Bool {
         defer { cancel(in: workspace) }
         guard let item else { return false }
+        if let spaceTarget {
+            restoring = nil
+            return moveToSpace(item, spaceTarget)
+        }
         if let drop {
             restoring = nil
             workspace.drop(item, on: drop)
@@ -91,6 +113,7 @@ final class TileDrag {
         tearsOff = false
         drop = nil
         breaksOut = false
+        spaceTarget = nil
     }
 
     func previewFrame(in workspace: Workspace) -> CGRect? {

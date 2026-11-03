@@ -126,12 +126,23 @@ enum WorkspacePersistence {
     static var allowsDiskOverride: Bool?
     static var allowsDisk: Bool {
         if let allowsDiskOverride { return allowsDiskOverride }
-        let environment = ProcessInfo.processInfo.environment
-        return environment["XCTestConfigurationFilePath"] == nil && environment["XCTestSessionIdentifier"] == nil
+        return !isRunningTests
     }
+
+    static let isRunningTests: Bool = {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestSessionIdentifier"] != nil || environment["XCTestBundlePath"] != nil { return true }
+        let name = ProcessInfo.processInfo.processName.lowercased()
+        return name.contains("xctest") || name.contains("swiftpm-testing-helper")
+            || NSClassFromString("XCTestCase") != nil
+    }()
+
+    private static let testStoreRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("turm-tests-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
 
     static func store() -> WorkspaceStore {
         if let storeOverride { return storeOverride }
+        if isRunningTests { return WorkspaceStore(root: testStoreRoot) }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         return WorkspaceStore(root: support.appendingPathComponent("Turm/Workspace", isDirectory: true))

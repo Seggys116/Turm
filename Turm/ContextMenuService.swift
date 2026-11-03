@@ -118,6 +118,10 @@ final class ContextMenuService: NSObject {
         workspaces.object(forKey: window)
     }
 
+    func window(showing workspace: Workspace) -> NSWindow? {
+        NSApp.orderedWindows.first { workspaces.object(forKey: $0) === workspace }
+    }
+
     func register(_ workspace: Workspace, in window: NSWindow) {
         workspaces.setObject(workspace, forKey: window)
         if window.isKeyWindow || lastKeyWindow == nil { lastKeyWindow = window }

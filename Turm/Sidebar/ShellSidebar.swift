@@ -6,8 +6,6 @@ struct ShellSidebar: View {
     static let width: CGFloat = ChromeMetrics.sidebarDefaultWidth
     private static let gap: CGFloat = 4
     static let corner: CGFloat = ChromeMetrics.rowCornerRadius
-    private static let rowHeight: CGFloat = ChromeMetrics.rowHeight
-    private static let paneIndent: CGFloat = 18
     private static let space = "shellTabs"
     private static let slide = Animation.spring(duration: 0.24, bounce: 0.1)
 
@@ -19,6 +17,7 @@ struct ShellSidebar: View {
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var collapsed: Set<UUID> = []
     @State private var listOrigin: CGPoint = .zero
+    @State private var hoverGroup = HoverGroup()
 
     var body: some View {
         column
@@ -111,138 +110,30 @@ struct ShellSidebar: View {
         }
     }
 
-    @ViewBuilder
-    private func row(for tab: ShellTab, tracksPointer: Bool) -> some View {
-        let height = Self.rowHeight
-        if tab.isSettings {
-            SettingsRow(
-                height: height,
-                isSelected: workspace.activeTabID == tab.id,
-                select: { workspace.selectTab(tab.id) },
-                close: { workspace.closeTab(tab.id) },
-                tracksPointer: tracksPointer,
-                onWindowDrag: { updateShellDrag(tab, windowPoint: $0) },
-                onWindowDragEnd: { endShellDrag(tab) }
-            )
-        } else if let session = workspace.representative(of: tab) {
-            let title = title(of: tab, representative: session)
-            let isGroup = tab.layout.leaves.count > 1
-            let sessions = workspace.sessions(in: tab)
-            let activity = ShellActivity.combined(sessions.map(\.activity))
-            let isActive = workspace.activeTabID == tab.id
-            let activeIsShell = !(workspace.tabs.first { $0.id == workspace.activeTabID }?.isSettings ?? true)
-            ShellRow(
-                session: session,
-                title: title,
-                customName: isGroup ? tab.title : session.userTitle,
-                rename: { text in
-                    if isGroup { workspace.renameTab(tab.id, to: text) } else { session.rename(text) }
-                },
-                height: height,
-                paneCount: tab.layout.leaves.count,
-                disclosure: disclosure(for: tab),
-                activity: activity,
-                program: (sessions.first(where: { $0.activity.isBusy }) ?? session).displayedProgram,
-                actionActivity: ShellActivity.combined(sessions.map(\.runner.activity)),
-                isSelected: workspace.activeTabID == tab.id,
-                acknowledge: { sessions.forEach { $0.acknowledgeOutcome() } },
-                select: { workspace.selectTab(tab.id) },
-                close: { workspace.closeTab(tab.id) },
-                split: { axis in
-                    workspace.selectTab(tab.id)
-                    workspace.split(axis)
-                },
-                tile: isActive || !activeIsShell ? nil : { edge in
-                    withAnimation(.easeOut(duration: 0.18)) { workspace.tileBesideActive(tab.id, edge: edge) }
-                },
-                evenOut: tab.layout.leaves.count > 2 ? {
-                    workspace.selectTab(tab.id)
-                    workspace.equalizePanes()
-                } : nil,
-                tracksPointer: tracksPointer,
-                onWindowDrag: { updateShellDrag(tab, windowPoint: $0) },
-                onWindowDragEnd: { endShellDrag(tab) },
-                hover: { tileDrag.hover(Set(tab.layout.leaves), $0) }
-            )
-        }
+    private func group(for tab: ShellTab, interactive: Bool) -> some View {
+        ShellGroup(
+            workspace: workspace,
+            tab: tab,
+            interactive: interactive,
+            isCollapsed: collapsed.contains(tab.id),
+            tileDrag: tileDrag,
+            hoverGroup: hoverGroup,
+            toggleCollapsed: {
+                withAnimation(Self.slide) {
+                    if collapsed.contains(tab.id) { collapsed.remove(tab.id) } else { collapsed.insert(tab.id) }
+                }
+            },
+            dragShell: { updateShellDrag(tab, windowPoint: $0) },
+            endShellDrag: { endShellDrag(tab) },
+            dragPane: { pane, title, point in updatePaneDrag(pane, in: tab, title: title, windowPoint: point) },
+            endPaneDrag: { endPaneDrag($0) }
+        )
     }
 
     private func title(of tab: ShellTab, representative: TerminalSession) -> String {
         guard tab.layout.leaves.count > 1 else { return representative.customTitle ?? representative.location }
         if let title = tab.title { return title }
         return workspace.sessions(in: tab).map { $0.customTitle ?? $0.location }.joined(separator: " · ")
-    }
-
-    private func disclosure(for tab: ShellTab) -> PaneDisclosure? {
-        guard !tab.isSettings, tab.layout.leaves.count > 1 else { return nil }
-        let panes = tab.layout.leaves.compactMap { pane -> PaneEntry? in
-            if let session = workspace.session(for: pane) {
-                return PaneEntry(
-                    id: pane,
-                    title: session.customTitle ?? session.location,
-                    isFocused: tab.focusedPane == pane,
-                    program: session.activity == .inactive ? nil : session.displayedProgram
-                )
-            }
-            if let viewer = workspace.viewers[pane] {
-                return PaneEntry(id: pane, title: viewer.title, isFocused: tab.focusedPane == pane, program: nil, symbol: viewer.symbol)
-            }
-            return nil
-        }
-        return PaneDisclosure(
-            isExpanded: isHorizontal ? nil : !collapsed.contains(tab.id),
-            panes: panes,
-            toggle: {
-                withAnimation(Self.slide) {
-                    if collapsed.contains(tab.id) { collapsed.remove(tab.id) } else { collapsed.insert(tab.id) }
-                }
-            },
-            focus: { workspace.focus($0) },
-            breakOut: { workspace.breakOut($0) }
-        )
-    }
-
-    @ViewBuilder
-    private func group(for tab: ShellTab, interactive: Bool) -> some View {
-        let header = row(for: tab, tracksPointer: interactive)
-        let showsPanes = !isHorizontal && !tab.isSettings && tab.layout.leaves.count > 1 && !collapsed.contains(tab.id)
-        VStack(spacing: 2) {
-            header
-            if showsPanes {
-                ForEach(tab.layout.leaves, id: \.self) { pane in
-                    if let session = workspace.session(for: pane) {
-                        PaneRow(
-                            session: session,
-                            isSelected: workspace.activeTabID == tab.id && tab.focusedPane == pane,
-                            select: { workspace.focus(pane) },
-                            close: { workspace.close(pane) },
-                            breakOut: { workspace.breakOut(pane) },
-                            tracksPointer: interactive,
-                            onWindowDrag: { updatePaneDrag(pane, in: tab, title: session.customTitle ?? session.location, windowPoint: $0) },
-                            onWindowDragEnd: { endPaneDrag(pane) },
-                            hover: { tileDrag.hover([pane], $0) }
-                        )
-                        .padding(.leading, Self.paneIndent)
-                        .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
-                    } else if let viewer = workspace.viewers[pane] {
-                        ViewerPaneRow(
-                            title: viewer.title,
-                            symbol: viewer.symbol,
-                            isSelected: workspace.activeTabID == tab.id && tab.focusedPane == pane,
-                            select: { workspace.focus(pane) },
-                            close: { workspace.close(pane) },
-                            breakOut: { workspace.breakOut(pane) },
-                            tracksPointer: interactive,
-                            onWindowDrag: { updatePaneDrag(pane, in: tab, title: viewer.title, windowPoint: $0) },
-                            onWindowDragEnd: { endPaneDrag(pane) },
-                            hover: { tileDrag.hover([pane], $0) }
-                        )
-                        .padding(.leading, Self.paneIndent)
-                        .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
-                    }
-                }
-            }
-        }
     }
 
     private func updatePaneDrag(_ pane: PaneID, in tab: ShellTab, title: String, windowPoint: CGPoint) {
@@ -343,7 +234,7 @@ struct ShellSidebar: View {
 
     private func track(_ tab: ShellTab, at point: CGPoint) {
         guard !tab.isSettings else { return }
-        if tileDrag.sidebarFrame.contains(point) {
+        if tileDrag.sidebarFrame.contains(point), tileDrag.space(at: point) == nil {
             if tileDrag.item == .tab(tab.id) { tileDrag.cancel(in: workspace) }
             return
         }
@@ -387,6 +278,179 @@ private struct RowFrames: PreferenceKey {
     }
 }
 
+@MainActor
+final class HoverGroup {
+    private var owner: AnyHashable?
+    private var release: (() -> Void)?
+
+    func update(_ key: AnyHashable, inside: Bool, release: @escaping () -> Void) {
+        if inside {
+            if owner != key { self.release?() }
+            owner = key
+            self.release = release
+        } else if owner == key {
+            owner = nil
+            self.release = nil
+        }
+    }
+}
+
+private struct ShellGroup: View {
+    private static let rowHeight: CGFloat = ChromeMetrics.rowHeight
+    private static let paneIndent: CGFloat = 18
+
+    let workspace: Workspace
+    let tab: ShellTab
+    let interactive: Bool
+    let isCollapsed: Bool
+    let tileDrag: TileDrag
+    let hoverGroup: HoverGroup
+    let toggleCollapsed: () -> Void
+    let dragShell: (CGPoint) -> Void
+    let endShellDrag: () -> Void
+    let dragPane: (PaneID, String, CGPoint) -> Void
+    let endPaneDrag: (PaneID) -> Void
+
+    var body: some View {
+        let showsPanes = !tab.isSettings && tab.layout.leaves.count > 1 && !isCollapsed
+        VStack(spacing: 2) {
+            header
+            if showsPanes {
+                ForEach(tab.layout.leaves, id: \.self) { pane in
+                    paneRow(pane)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paneRow(_ pane: PaneID) -> some View {
+        if let session = workspace.session(for: pane) {
+            PaneRow(
+                session: session,
+                isSelected: workspace.activeTabID == tab.id && tab.focusedPane == pane,
+                select: { workspace.focus(pane) },
+                close: { workspace.close(pane) },
+                breakOut: { workspace.breakOut(pane) },
+                tracksPointer: interactive,
+                hoverGroup: hoverGroup,
+                hoverKey: pane,
+                onWindowDrag: { dragPane(pane, session.customTitle ?? session.location, $0) },
+                onWindowDragEnd: { endPaneDrag(pane) },
+                hover: { tileDrag.hover([pane], $0) }
+            )
+            .padding(.leading, Self.paneIndent)
+            .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
+        } else if let viewer = workspace.viewers[pane] {
+            ViewerPaneRow(
+                title: viewer.title,
+                symbol: viewer.symbol,
+                isSelected: workspace.activeTabID == tab.id && tab.focusedPane == pane,
+                select: { workspace.focus(pane) },
+                close: { workspace.close(pane) },
+                breakOut: { workspace.breakOut(pane) },
+                tracksPointer: interactive,
+                hoverGroup: hoverGroup,
+                hoverKey: pane,
+                onWindowDrag: { dragPane(pane, viewer.title, $0) },
+                onWindowDragEnd: { endPaneDrag(pane) },
+                hover: { tileDrag.hover([pane], $0) }
+            )
+            .padding(.leading, Self.paneIndent)
+            .opacity(tileDrag.item == .pane(pane) ? 0.45 : 1)
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        let height = Self.rowHeight
+        if tab.isSettings {
+            SettingsRow(
+                height: height,
+                isSelected: workspace.activeTabID == tab.id,
+                select: { workspace.selectTab(tab.id) },
+                close: { workspace.closeTab(tab.id) },
+                tracksPointer: interactive,
+                hoverGroup: hoverGroup,
+                hoverKey: tab.id,
+                onWindowDrag: dragShell,
+                onWindowDragEnd: endShellDrag
+            )
+        } else if let session = workspace.representative(of: tab) {
+            let isGroup = tab.layout.leaves.count > 1
+            let sessions = workspace.sessions(in: tab)
+            let isActive = workspace.activeTabID == tab.id
+            let activeIsShell = !(workspace.tabs.first { $0.id == workspace.activeTabID }?.isSettings ?? true)
+            ShellRow(
+                session: session,
+                title: title(representative: session),
+                customName: isGroup ? tab.title : session.userTitle,
+                rename: { text in
+                    if isGroup { workspace.renameTab(tab.id, to: text) } else { session.rename(text) }
+                },
+                height: height,
+                paneCount: tab.layout.leaves.count,
+                disclosure: disclosure,
+                activity: ShellActivity.combined(sessions.map(\.activity)),
+                program: (sessions.first(where: { $0.activity.isBusy }) ?? session).displayedProgram,
+                actionActivity: ShellActivity.combined(sessions.map(\.runner.activity)),
+                isSelected: isActive,
+                acknowledge: { sessions.forEach { $0.acknowledgeOutcome() } },
+                select: { workspace.selectTab(tab.id) },
+                close: { workspace.closeTab(tab.id) },
+                split: { axis in
+                    workspace.selectTab(tab.id)
+                    workspace.split(axis)
+                },
+                tile: isActive || !activeIsShell ? nil : { edge in
+                    withAnimation(.easeOut(duration: 0.18)) { workspace.tileBesideActive(tab.id, edge: edge) }
+                },
+                evenOut: tab.layout.leaves.count > 2 ? {
+                    workspace.selectTab(tab.id)
+                    workspace.equalizePanes()
+                } : nil,
+                tracksPointer: interactive,
+                hoverGroup: hoverGroup,
+                hoverKey: tab.id,
+                onWindowDrag: dragShell,
+                onWindowDragEnd: endShellDrag,
+                hover: { tileDrag.hover(Set(tab.layout.leaves), $0) }
+            )
+        }
+    }
+
+    private func title(representative: TerminalSession) -> String {
+        guard tab.layout.leaves.count > 1 else { return representative.customTitle ?? representative.location }
+        if let title = tab.title { return title }
+        return workspace.sessions(in: tab).map { $0.customTitle ?? $0.location }.joined(separator: " · ")
+    }
+
+    private var disclosure: PaneDisclosure? {
+        guard !tab.isSettings, tab.layout.leaves.count > 1 else { return nil }
+        let panes = tab.layout.leaves.compactMap { pane -> PaneEntry? in
+            if let session = workspace.session(for: pane) {
+                return PaneEntry(
+                    id: pane,
+                    title: session.customTitle ?? session.location,
+                    isFocused: tab.focusedPane == pane,
+                    program: session.activity == .inactive ? nil : session.displayedProgram
+                )
+            }
+            if let viewer = workspace.viewers[pane] {
+                return PaneEntry(id: pane, title: viewer.title, isFocused: tab.focusedPane == pane, program: nil, symbol: viewer.symbol)
+            }
+            return nil
+        }
+        return PaneDisclosure(
+            isExpanded: !isCollapsed,
+            panes: panes,
+            toggle: toggleCollapsed,
+            focus: { workspace.focus($0) },
+            breakOut: { workspace.breakOut($0) }
+        )
+    }
+}
+
 private struct PaneEntry: Identifiable {
     let id: PaneID
     let title: String
@@ -422,6 +486,8 @@ private struct ShellRow: View {
     let tile: ((PaneEdge) -> Void)?
     let evenOut: (() -> Void)?
     var tracksPointer = true
+    let hoverGroup: HoverGroup
+    let hoverKey: AnyHashable
     var onWindowDrag: (CGPoint) -> Void = { _ in }
     var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
@@ -487,20 +553,16 @@ private struct ShellRow: View {
         .onOutsideFieldClick(isActive: isRenaming, perform: commitRename)
         .onHover { inside in
             guard !tracksPointer else { return }
-            isHovered = inside
-            hover(inside)
+            setHover(inside)
         }
-        .onDisappear { hover(false) }
+        .onDisappear { setHover(false) }
         .overlay {
             if tracksPointer, !isRenaming {
                 GeometryReader { geo in
                     RowDragSurface(
                         origin: geo.frame(in: .named(TileDrag.space)).origin,
                         leadingPassthrough: disclosure == nil ? 0 : 22,
-                        onHover: { inside in
-                            isHovered = inside
-                            hover(inside)
-                        },
+                        onHover: setHover,
                         onClick: { count in
                             if count >= 2 { beginRename() } else { select() }
                         },
@@ -620,6 +682,13 @@ private struct ShellRow: View {
         }
     }
 
+    private func setHover(_ inside: Bool) {
+        isHovered = inside
+        let state = $isHovered
+        hoverGroup.update(hoverKey, inside: inside) { state.wrappedValue = false }
+        hover(inside)
+    }
+
     private func beginRename() {
         draft = customName ?? ""
         isRenaming = true
@@ -640,11 +709,20 @@ private struct PaneRow: View {
     let close: () -> Void
     let breakOut: () -> Void
     var tracksPointer = true
+    let hoverGroup: HoverGroup
+    let hoverKey: AnyHashable
     var onWindowDrag: (CGPoint) -> Void = { _ in }
     var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
     @State private var isHovered = false
     @State private var menuOpen = false
+
+    private func setHover(_ inside: Bool) {
+        isHovered = inside
+        let state = $isHovered
+        hoverGroup.update(hoverKey, inside: inside) { state.wrappedValue = false }
+        hover(inside)
+    }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -664,19 +742,15 @@ private struct PaneRow: View {
         .onTapGesture { if !tracksPointer { select() } }
         .onHover { inside in
             guard !tracksPointer else { return }
-            isHovered = inside
-            hover(inside)
+            setHover(inside)
         }
-        .onDisappear { hover(false) }
+        .onDisappear { setHover(false) }
         .overlay {
             if tracksPointer {
                 GeometryReader { geo in
                     RowDragSurface(
                         origin: geo.frame(in: .named(TileDrag.space)).origin,
-                        onHover: { inside in
-                            isHovered = inside
-                            hover(inside)
-                        },
+                        onHover: setHover,
                         onClick: { _ in select() },
                         onDrag: onWindowDrag,
                         onDragEnd: onWindowDragEnd
@@ -711,11 +785,20 @@ private struct ViewerPaneRow: View {
     let close: () -> Void
     let breakOut: () -> Void
     var tracksPointer = true
+    let hoverGroup: HoverGroup
+    let hoverKey: AnyHashable
     var onWindowDrag: (CGPoint) -> Void = { _ in }
     var onWindowDragEnd: () -> Void = {}
     let hover: (Bool) -> Void
     @State private var isHovered = false
     @State private var menuOpen = false
+
+    private func setHover(_ inside: Bool) {
+        isHovered = inside
+        let state = $isHovered
+        hoverGroup.update(hoverKey, inside: inside) { state.wrappedValue = false }
+        hover(inside)
+    }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -738,19 +821,15 @@ private struct ViewerPaneRow: View {
         .onTapGesture { if !tracksPointer { select() } }
         .onHover { inside in
             guard !tracksPointer else { return }
-            isHovered = inside
-            hover(inside)
+            setHover(inside)
         }
-        .onDisappear { hover(false) }
+        .onDisappear { setHover(false) }
         .overlay {
             if tracksPointer {
                 GeometryReader { geo in
                     RowDragSurface(
                         origin: geo.frame(in: .named(TileDrag.space)).origin,
-                        onHover: { inside in
-                            isHovered = inside
-                            hover(inside)
-                        },
+                        onHover: setHover,
                         onClick: { _ in select() },
                         onDrag: onWindowDrag,
                         onDragEnd: onWindowDragEnd
@@ -816,6 +895,8 @@ private struct RowDragSurface: NSViewRepresentable {
         private var press: CGPoint?
         private var startWindow: NSPoint?
         private var armed = false
+        private var pointerInside = false
+        private var syncPending = false
 
         override var isFlipped: Bool { true }
         override var mouseDownCanMoveWindow: Bool { false }
@@ -838,10 +919,40 @@ private struct RowDragSurface: NSViewRepresentable {
             )
             addTrackingArea(area)
             tracking = area
+            syncPointer()
         }
 
-        override func mouseEntered(with event: NSEvent) { onHover(true) }
-        override func mouseExited(with event: NSEvent) { onHover(false) }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            syncPointer()
+        }
+
+        override func layout() {
+            super.layout()
+            syncPointer()
+        }
+
+        override func mouseEntered(with event: NSEvent) { setInside(true) }
+        override func mouseExited(with event: NSEvent) { setInside(false) }
+
+        private func setInside(_ inside: Bool) {
+            guard inside != pointerInside else { return }
+            pointerInside = inside
+            onHover(inside)
+        }
+
+        /// A row that scrolls or reorders under a still pointer is never sent an exit, so the pointer is checked directly.
+        private func syncPointer() {
+            guard !syncPending else { return }
+            syncPending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                syncPending = false
+                guard let window else { return setInside(false) }
+                let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                setInside(window.isKeyWindow && bounds.contains(point))
+            }
+        }
 
         override func mouseDown(with event: NSEvent) {
             press = pointer(for: event)
@@ -1025,11 +1136,7 @@ private struct StatusGlyph: View {
     }
 
     private func programGlyph(_ program: RunningProgram) -> some View {
-        TimelineView(.animation) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
-            programImage(program, tint: Theme.text.color)
-                .opacity(0.65 + 0.35 * (0.5 + 0.5 * sin(phase * 2 * .pi)))
-        }
+        BreathingGlyph { programImage(program, tint: Theme.text.color) }
     }
 
     @ViewBuilder
@@ -1042,14 +1149,7 @@ private struct StatusGlyph: View {
     }
 
     private var spinner: some View {
-        TimelineView(.animation) { timeline in
-            let turn = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9
-            Circle()
-                .trim(from: 0, to: 0.7)
-                .stroke(Theme.secondaryText.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(turn * 360))
-                .padding(lineWidth / 2)
-        }
+        SpinningArc(lineWidth: lineWidth)
     }
 
     private func pulsing(_ pulse: OutcomePulse) -> some View {
@@ -1085,15 +1185,52 @@ private struct StatusGlyph: View {
     }
 }
 
+private struct BreathingGlyph<Content: View>: View {
+    @ViewBuilder let content: Content
+    @State private var dimmed = false
+
+    var body: some View {
+        content
+            .opacity(dimmed ? 0.65 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dimmed = true }
+            }
+    }
+}
+
+private struct SpinningArc: View {
+    let lineWidth: CGFloat
+    @State private var turned = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.7)
+            .stroke(Theme.secondaryText.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .rotationEffect(.degrees(turned ? 360 : 0))
+            .padding(lineWidth / 2)
+            .onAppear {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { turned = true }
+            }
+    }
+}
+
 private struct SettingsRow: View {
     let height: CGFloat
     let isSelected: Bool
     let select: () -> Void
     let close: () -> Void
     var tracksPointer = false
+    let hoverGroup: HoverGroup
+    let hoverKey: AnyHashable
     var onWindowDrag: (CGPoint) -> Void = { _ in }
     var onWindowDragEnd: () -> Void = {}
     @State private var isHovered = false
+
+    private func setHover(_ inside: Bool) {
+        isHovered = inside
+        let state = $isHovered
+        hoverGroup.update(hoverKey, inside: inside) { state.wrappedValue = false }
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1119,14 +1256,14 @@ private struct SettingsRow: View {
             guard !tracksPointer else { return }
             select()
         }
-        .onHover { isHovered = $0 }
+        .onHover { setHover($0) }
         .overlay {
             if tracksPointer {
                 GeometryReader { geo in
                     RowDragSurface(
                         origin: geo.frame(in: .named(TileDrag.space)).origin,
                         leadingPassthrough: 0,
-                        onHover: { isHovered = $0 },
+                        onHover: setHover,
                         onClick: { _ in select() },
                         onDrag: onWindowDrag,
                         onDragEnd: onWindowDragEnd

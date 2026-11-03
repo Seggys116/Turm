@@ -5,8 +5,9 @@ enum ChromeMetrics {
     static let sidebarMinWidth: CGFloat = 180
     static let sidebarMaxWidth: CGFloat = 560
     static let sidebarResizeHandleWidth: CGFloat = 4
-    static let sidebarHoverEdgeWidth: CGFloat = 8
+    static var sidebarHoverEdgeWidth: CGFloat { cardInset }
     static let sidebarAutoHideDelay: Double = 0.12
+    static let sidebarRevealDelay: Double = 0.25
     static let sidebarHide = Animation.easeOut(duration: 0.16)
 
     static let topRowHeight: CGFloat = 36

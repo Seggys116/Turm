@@ -18,8 +18,8 @@ final class WindowTransfer {
         queue.append(Pending(shell: shell, spaceID: nil, frame: frame))
     }
 
-    func enqueue(space spaceID: UUID) {
-        queue.append(Pending(shell: nil, spaceID: spaceID, frame: .zero))
+    func enqueue(space spaceID: UUID, frame: NSRect = .zero) {
+        queue.append(Pending(shell: nil, spaceID: spaceID, frame: frame))
     }
 
     func take() -> Pending? {

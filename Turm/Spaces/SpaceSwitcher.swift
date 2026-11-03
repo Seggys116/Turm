@@ -16,7 +16,6 @@ struct SpaceTitleRow: View {
             spaceIcon
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.secondaryText.color)
-                .frame(width: 16)
             if isRenaming {
                 TextField("Space name", text: $draft)
                     .textFieldStyle(.plain)
@@ -54,13 +53,16 @@ struct SpaceTitleRow: View {
                 SpaceIconChoices(selected: record.symbol) { library.setSymbol(record.id, to: $0) }
             } label: {
                 Image(systemName: record.symbol)
+                    .frame(width: 16, height: 16)
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
             .help("Change icon")
         } else {
             Image(systemName: record?.symbol ?? "terminal")
+                .frame(width: 16, height: 16)
         }
     }
 
@@ -90,6 +92,7 @@ struct SpaceSwitcher: View {
     @Binding var searchPresented: Bool
     var sidebarDocked: Bool
     var beginRename: () -> Void = {}
+    var tileDrag: TileDrag?
 
     @State private var creating = false
     @State private var deleting: UUID?
@@ -122,6 +125,7 @@ struct SpaceSwitcher: View {
             }
             .scrollIndicators(.never)
             .squareScrollbar(axis: .horizontal)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TileDrag.space)) } action: { tileDrag?.spaceBarFrame = $0 }
             utilityButton("sidebar.left", help: sidebarDocked ? "Hide Sidebar" : "Show Sidebar") { hide?() }
         }
         .padding(.horizontal, ChromeMetrics.spotlightInset)
@@ -185,6 +189,7 @@ struct SpaceSwitcher: View {
 
     private func spaceButton(_ record: SpaceLibrary.Record) -> some View {
         let selected = record.id == host.spaceID
+        let receiving = tileDrag?.spaceTarget == record.id
         return Button {
             library.activate(record.id, in: host)
         } label: {
@@ -194,11 +199,13 @@ struct SpaceSwitcher: View {
                 .foregroundStyle(Theme.text.color.opacity(selected ? 1 : 0.72))
                 .background(
                     RoundedRectangle(cornerRadius: ChromeMetrics.rowCornerRadius, style: .continuous)
-                        .fill(selected ? Theme.chipFill.color : Color.clear)
+                        .fill(receiving ? Color.accentColor.opacity(0.35) : (selected ? Theme.chipFill.color : Color.clear))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TileDrag.space)) } action: { tileDrag?.setSpaceFrame(record.id, $0) }
+        .onDisappear { tileDrag?.setSpaceFrame(record.id, nil) }
         .help(record.name)
         .accessibilityLabel(record.name)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -318,6 +325,7 @@ struct SidebarColumn<Content: View>: View {
     var sidebarDocked: Bool
     var onSettings: () -> Void
     var onToggleSidebar: () -> Void
+    var tileDrag: TileDrag?
     @State private var renamingTitle = false
     @ViewBuilder var shells: () -> Content
 
@@ -332,7 +340,7 @@ struct SidebarColumn<Content: View>: View {
             shells()
             SpaceSwitcher(
                 library: library, host: host, searchPresented: $searchPresented, sidebarDocked: sidebarDocked,
-                beginRename: beginTitleRename, settings: onSettings, hide: onToggleSidebar
+                beginRename: beginTitleRename, tileDrag: tileDrag, settings: onSettings, hide: onToggleSidebar
             )
         }
         .background(WindowDragSurface())

@@ -56,6 +56,9 @@ struct ContentView: View {
         .onAppear {
             bindEmptySpace()
             tileDrag.tearOff = tearOff
+            tileDrag.homeSpace = { host.spaceID }
+            tileDrag.canMoveToSpace = { workspace.canTearOff($0) }
+            tileDrag.moveToSpace = moveToSpace
             NewWindowAction.open = { openWindow(id: WindowTransfer.windowID) }
         }
         .onChange(of: host.spaceID) { _, _ in
@@ -73,7 +76,8 @@ struct ContentView: View {
             searchPresented: $isSpotlightOpen,
             sidebarDocked: isSidebarVisible,
             onSettings: { workspace.openSettings() },
-            onToggleSidebar: { withAnimation(ChromeMetrics.motion) { isSidebarVisible.toggle() } }
+            onToggleSidebar: { withAnimation(ChromeMetrics.motion) { isSidebarVisible.toggle() } },
+            tileDrag: tileDrag
         ) {
             ShellSidebar(workspace: workspace, tileDrag: tileDrag)
         }
@@ -168,10 +172,22 @@ extension ContentView {
             target.window.makeKeyAndOrderFront(nil)
             return true
         }
-        guard workspace.canTearOff(item), let shell = workspace.release(item) else { return false }
+        guard !workspace.isTemporarySpace, workspace.canTearOff(item), let shell = workspace.release(item) else { return false }
         let size = NSApp.keyWindow?.frame.size ?? CGSize(width: 900, height: 600)
-        WindowTransfer.shared.enqueue(shell, frame: WindowTransfer.frame(size: size, at: point))
-        openWindow(id: WindowTransfer.windowID)
+        if library.park(shell, frame: WindowTransfer.frame(size: size, at: point)) {
+            if let tmp = library.temporaryWorkspace, let window = ContextMenuService.shared.window(showing: tmp) {
+                NSApp.activate()
+                window.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            openWindow(id: WindowTransfer.windowID)
+        }
+        return true
+    }
+
+    private func moveToSpace(_ item: TileItem, _ id: UUID) -> Bool {
+        guard library.canReceive(in: id), workspace.canTearOff(item), let shell = workspace.release(item) else { return false }
+        library.receive(shell, in: id)
         return true
     }
 }

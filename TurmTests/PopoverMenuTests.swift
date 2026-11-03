@@ -186,3 +186,92 @@ private func rightClick(_ point: NSPoint, in window: NSWindow) -> NSEvent {
         pressure: 1
     )!
 }
+
+private struct MenuHarness: View {
+    @State private var open = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: 200, height: 100)
+            .contentShape(Rectangle())
+            .pointerMenu(isOpen: $open) {
+                MenuSurface(width: 120) {
+                    MenuRow(title: "Copy") { open = false }
+                }
+            }
+            .frame(width: 320, height: 200, alignment: .topLeading)
+    }
+}
+
+extension PopoverMenuTests {
+    private func settle(_ window: NSWindow) async {
+        for _ in 0..<8 {
+            try? await Task.sleep(for: .milliseconds(40))
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+    }
+
+    private func menuCount(_ window: NSWindow) -> Int {
+        window.childWindows?.filter { $0.ignoresMouseEvents == false }.count ?? 0
+    }
+
+    @Test func rightClickMenuReopensAfterEachWayOfClosingIt() async {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+        window.orderFrontRegardless()
+        let host = NSHostingView(rootView: MenuHarness())
+        host.frame = window.contentView?.bounds ?? .zero
+        window.contentView?.addSubview(host)
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        await settle(window)
+        defer { window.close() }
+
+        let inside = NSPoint(x: 60, y: 120)
+        let outside = NSPoint(x: 300, y: 10)
+
+        NSApp.sendEvent(rightClick(inside, in: window))
+        await settle(window)
+        #expect(menuCount(window) == 1)
+
+        NSApp.sendEvent(leftClick(outside, in: window))
+        await settle(window)
+        #expect(menuCount(window) == 0)
+
+        NSApp.sendEvent(rightClick(inside, in: window))
+        await settle(window)
+        #expect(menuCount(window) == 1)
+
+        NSApp.sendEvent(rightClick(NSPoint(x: 100, y: 150), in: window))
+        await settle(window)
+        #expect(menuCount(window) == 1)
+
+        NSApp.sendEvent(leftClick(outside, in: window))
+        await settle(window)
+        #expect(menuCount(window) == 0)
+
+        NSApp.sendEvent(rightClick(inside, in: window))
+        await settle(window)
+        #expect(menuCount(window) == 1)
+    }
+}
+
+private func leftClick(_ point: NSPoint, in window: NSWindow) -> NSEvent {
+    NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: point,
+        modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 1,
+        pressure: 1
+    )!
+}

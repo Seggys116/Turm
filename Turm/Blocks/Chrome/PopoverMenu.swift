@@ -26,6 +26,7 @@ private struct PopoverMenuModifier: ViewModifier {
             .onChange(of: isOpen) { _, open in
                 if open {
                     controller.onDismiss = { isOpen = false }
+                    guard !controller.isPresented else { return }
                     controller.present(menu(), placement: opensOnRightClick ? .pointer(controller.pointer) : .anchored)
                 } else {
                     controller.dismiss()
@@ -34,8 +35,11 @@ private struct PopoverMenuModifier: ViewModifier {
             .onAppear {
                 guard opensOnRightClick else { return }
                 controller.installTrigger {
-                    isOpen = false
-                    DispatchQueue.main.async { isOpen = true }
+                    DispatchQueue.main.async {
+                        controller.onDismiss = { isOpen = false }
+                        controller.present(menu(), placement: .pointer(controller.pointer))
+                        isOpen = true
+                    }
                 }
             }
             .onDisappear {
@@ -91,6 +95,7 @@ final class MenuController {
     fileprivate let chip = ViewBox()
     var onDismiss: () -> Void = {}
     var isShowingMenu: Bool { panel != nil }
+    private(set) var isPresented = false
     var rightClickInstalled: Bool { trigger != nil }
     private let presentation = MenuPresentation()
     private var panel: MenuPanel?
@@ -131,8 +136,13 @@ final class MenuController {
     }
 
     func present(_ content: AnyView, placement: MenuPlacement) {
-        guard let window = chip.view?.window else { return }
+        guard let window = chip.view?.window else {
+            isPresented = false
+            onDismiss()
+            return
+        }
         retirePresented()
+        isPresented = true
         self.placement = placement
         generation += 1
         presentation.shown = false
@@ -161,6 +171,7 @@ final class MenuController {
     }
 
     func dismiss() {
+        isPresented = false
         guard let panel else { return }
         removeMonitors()
         panel.ignoresMouseEvents = true
@@ -174,6 +185,7 @@ final class MenuController {
     }
 
     func teardown() {
+        isPresented = false
         chip.tracksPointer = false
         PointerTargets.shared.untrack(chip)
         if let trigger { NSEvent.removeMonitor(trigger) }
@@ -296,6 +308,13 @@ private final class PointerTargets {
             candidates.append((box, view))
         }
         stale.forEach { boxes.removeValue(forKey: $0) }
+        if candidates.isEmpty {
+            candidates = boxes.values.compactMap { entry in
+                guard let box = entry.box, let view = box.view, view.window === window, Self.isShown(view),
+                      view.convert(view.bounds, to: nil).contains(point) else { return nil }
+                return (box, view)
+            }
+        }
         guard !candidates.isEmpty else { return nil }
         return frontmost(narrowed(candidates, at: point, in: window))
     }
@@ -315,7 +334,28 @@ private final class PointerTargets {
     private func narrowed(_ candidates: [(ViewBox, NSView)], at point: NSPoint, in window: NSWindow) -> [(ViewBox, NSView)] {
         guard let hit = window.contentView?.hitTest(point) else { return candidates }
         let owners = candidates.filter { hit === $0.1 || hit.isDescendant(of: $0.1) }
-        return owners.isEmpty ? candidates : owners
+        if !owners.isEmpty { return owners }
+        let depths = candidates.map { Self.sharedDepth($0.1, hit) }
+        guard let deepest = depths.max() else { return candidates }
+        return zip(candidates, depths).filter { $0.1 == deepest }.map(\.0)
+    }
+
+    private static func sharedDepth(_ a: NSView, _ b: NSView) -> Int {
+        func chain(_ view: NSView) -> [NSView] {
+            var path: [NSView] = []
+            var node: NSView? = view
+            while let current = node {
+                path.append(current)
+                node = current.superview
+            }
+            return path.reversed()
+        }
+        var depth = 0
+        for (left, right) in zip(chain(a), chain(b)) {
+            guard left === right else { break }
+            depth += 1
+        }
+        return depth
     }
 
     private static func covers(_ view: NSView, _ point: NSPoint) -> Bool {

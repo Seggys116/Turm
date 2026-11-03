@@ -81,7 +81,7 @@ final class SpaceLibrary {
                 ensureLoaded()
                 if records.contains(where: { $0.id == spaceID }) {
                     materialize(spaceID)
-                    return bind(host, to: spaceID, frame: nil)
+                    return bind(host, to: spaceID, frame: pending.frame == .zero ? nil : pending.frame)
                 }
             }
         }
@@ -107,6 +107,31 @@ final class SpaceLibrary {
         if let workspace = record(id)?.workspace, let window = NSApp.keyWindow {
             ContextMenuService.shared.register(workspace, in: window)
         }
+    }
+
+    func canReceive(in id: UUID) -> Bool {
+        records.contains { $0.id == id }
+    }
+
+    func receive(_ shell: ShellTransfer, in id: UUID) {
+        guard canReceive(in: id) else { return }
+        materialize(id)
+        record(id)?.workspace?.receive(shell)
+    }
+
+    /// True when a window already shows Tmp, otherwise a window for it is queued.
+    func park(_ shell: ShellTransfer, frame: NSRect) -> Bool {
+        ensureLoaded()
+        ensureTemporary()
+        guard let id = records.first(where: \.isTemporary)?.id else { return false }
+        receive(shell, in: id)
+        if hosts.values.contains(where: { $0.spaceID == id }) { return true }
+        WindowTransfer.shared.enqueue(space: id, frame: frame)
+        return false
+    }
+
+    var temporaryWorkspace: Workspace? {
+        records.first(where: \.isTemporary)?.workspace
     }
 
     func create(in host: WindowHost, name: String? = nil, symbol: String? = nil) {

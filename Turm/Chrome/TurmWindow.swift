@@ -70,13 +70,13 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
     /// and moving into the panel keeps it up; leaving both, or clicking the card, puts it away.
     private var hoverLayer: some View {
         ZStack(alignment: .leading) {
-            SidebarEdgeCatcher(hotZoneWidth: 14) { hovering in
+            SidebarEdgeCatcher(hotZoneWidth: ChromeMetrics.sidebarHoverEdgeWidth) { hovering in
                 pointerInEdge = hovering
                 updateHover()
             } onClick: {
                 withAnimation(ChromeMetrics.motion) { isSidebarVisible = true }
             }
-            .frame(width: 14)
+            .frame(width: ChromeMetrics.sidebarHoverEdgeWidth)
             .frame(maxHeight: .infinity, alignment: .leading)
             .zIndex(hoverPhase.showsPanel ? 0 : 1)
 
@@ -124,10 +124,22 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
             hoverHideTask?.cancel()
             hoverHideTask = nil
             guard hoverPhase != .revealed else { return }
+            if hoverPhase == .hidden {
+                hoverHideTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(ChromeMetrics.sidebarRevealDelay))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(ChromeMetrics.motion) { hoverPhase = .revealed }
+                }
+                return
+            }
             withAnimation(ChromeMetrics.motion) { hoverPhase = .revealed }
             return
         }
-        guard hoverPhase == .revealed || hoverPhase == .peeking else { return }
+        guard hoverPhase == .revealed || hoverPhase == .peeking else {
+            hoverHideTask?.cancel()
+            hoverHideTask = nil
+            return
+        }
         hoverPhase = .hiding
         hoverHideTask?.cancel()
         hoverHideTask = Task { @MainActor in
