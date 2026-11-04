@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+
+- The search popup opened with Cmd+T stays on screen when the sidebar is collapsed.
+
 ## 2.0.0
 
 - Saved spaces are shared across windows, and a space is shown in one window at a time.

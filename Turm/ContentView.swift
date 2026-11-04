@@ -121,7 +121,7 @@ struct ContentView: View {
 extension ContentView {
     private var searchLayer: some View {
         GeometryReader { geo in
-            let hasAnchor = searchAnchor.width > 0
+            let hasAnchor = searchAnchor.width > 0 && searchAnchor.minX >= 0 && searchAnchor.maxX <= geo.size.width
             let leading = hasAnchor ? searchAnchor.minX : ChromeMetrics.spotlightInset
             let bottom = hasAnchor ? max(0, geo.size.height - searchAnchor.maxY) : ChromeMetrics.spotlightInset
             let width = min(SpotlightPresenter.width, max(280, geo.size.width - leading - leading))
