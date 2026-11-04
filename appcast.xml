@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Turm</title><item>
+            <title>2.0.1</title>
+            <pubDate>Wed, 04 Nov 2026 11:31:27 +0000</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Seggys116/Turm/releases/download/v2.0.1/Turm-2.0.1-arm64.dmg" length="9721590" type="application/octet-stream" sparkle:edSignature="La6E7tYgZreXnRdYlk/RhVDUrQk89MVuZZC2PyNpPUjaEGXvM34nRgrXATd07eFuMQpQnRpOZl1jjNmz7ItsCQ=="></enclosure>
+        </item>
+    <item>
             <title>2.0.0</title>
             <pubDate>Sun, 25 Oct 2026 11:14:39 +0000</pubDate>
             <sparkle:version>11</sparkle:version>
@@ -82,6 +91,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/Seggys116/Turm/releases/download/v1.0.0/Turm-1.0.0-arm64.dmg" length="4501793" type="application/octet-stream" sparkle:edSignature="/osRJGiHr4InwmQ89R1I+L2YYYGU1vPWvfgDioxSo1rq2R2rZaKEqQCigkQcW3NRAvI308LyaDejnH66/StbDg=="></enclosure>
         </item>
     </channel></rss><!-- sparkle-signatures:
-edSignature: QCuHKpq2bHRyzQAJLWoZ6BbnGidAYYDuc9ZlwZU6fbYCDqYe15O91/Udy863LUrbusZYoid9pZJnkEklEcYQBw==
-length: 6580
+edSignature: WpD+BI5uxghhgp7JlQTnPWU8Xo1b4GK/i8rNMXSLStDDMXHRk/IKv2xFPTCtH/3u11H+S6oaK024ZKMzyX8ADA==
+length: 7265
 -->
