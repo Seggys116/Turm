@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2
+
+- A full-screen program such as Claude Code no longer opens as a black pane that only fills in after the pane is resized. The program is told the size the pane really ends up at, even when the pane changes size several times while it opens, and the pane is redrawn once it has its final size.
+
 ## 2.0.1
 
 - The search popup opened with Cmd+T stays on screen when the sidebar is collapsed.

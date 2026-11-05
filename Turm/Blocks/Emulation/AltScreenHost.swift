@@ -159,6 +159,16 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         onInput(Array("\u{1B}_G\(control);\(message)\u{1B}\\".utf8))
     }
 
+    var grid: (cols: Int, rows: Int) {
+        let terminal = view.getTerminal()
+        return (terminal.cols, terminal.rows)
+    }
+
+    func repaint() {
+        view.getTerminal().updateFullScreen()
+        view.needsDisplay = true
+    }
+
     var cellPixels: (width: Int, height: Int) {
         let measured = view.cellSizeInPixels(source: view.getTerminal()) ?? (width: 1, height: 1)
         let screenScale = view.window?.screen?.backingScaleFactor

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftTerm
 import Testing
@@ -366,6 +367,39 @@ struct TerminalSessionTests {
         #expect(await wait { session.altScreen != nil })
         #expect(await wait { session.altScreen == nil && session.blocks.first?.isRunning == false })
         #expect(session.blocks.first?.plainOutput.contains("after") == true)
+    }
+
+    @Test func fullScreenProgramFollowsTheViewWhenItReturnsToAnEarlierSize() async throws {
+        let session = TerminalSession()
+        defer { session.terminate() }
+        #expect(await wait { session.phase == .ready })
+        session.resize(cols: 120, rows: 40)
+        let script = FileManager.default.temporaryDirectory.appendingPathComponent("turm-redraw-\(UUID().uuidString).sh")
+        defer { try? FileManager.default.removeItem(at: script) }
+        let body = """
+        draw() { printf '\\033[?2026h\\033[2J\\033[HSIZE %s\\033[?2026l' "$(stty size)"; }
+        printf '\\033[?1049h'
+        trap draw WINCH
+        draw
+        i=0
+        while [ $i -lt 80 ]; do sleep 0.1; i=$((i+1)); done
+        printf '\\033[?1049l'
+        """
+        try body.write(to: script, atomically: true, encoding: .utf8)
+        session.submit("sh '\(script.path)'")
+        #expect(await wait { session.altScreen != nil })
+        let host = try #require(session.altScreen)
+        let container = AltContainer(host: host)
+        container.setFrameSize(NSSize(width: 1000, height: 700))
+        try await Task.sleep(for: .milliseconds(1200))
+        container.setFrameSize(NSSize(width: 700, height: 500))
+        container.setFrameSize(NSSize(width: 1000, height: 700))
+        let terminal = host.view.getTerminal()
+        let expected = "SIZE \(terminal.rows) \(terminal.cols)"
+        let followed = await wait(timeout: .seconds(5)) {
+            (0..<terminal.rows).contains { terminal.getLine(row: $0)?.translateToString(trimRight: true).contains(expected) == true }
+        }
+        #expect(followed)
     }
 }
 

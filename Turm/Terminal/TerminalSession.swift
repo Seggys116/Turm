@@ -951,6 +951,14 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
     }
 
+    private func followFullScreenGrid(_ host: AltScreenHost) {
+        let grid = host.grid
+        guard grid.cols > 1, grid.rows > 1, grid.cols != cols || grid.rows != rows else { return }
+        cols = grid.cols
+        rows = grid.rows
+        publishWindowSize()
+    }
+
     private func deliver(_ bytes: [UInt8], to block: Block) {
         companionTap?(.output(blockID: block.id, bytes: Data(bytes)))
         if let altScreen {
@@ -1010,16 +1018,17 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             self?.reportTitle()
         }
         host.onDragTarget = { [weak self] targeted in self?.isDropTargeted = targeted }
-        host.onResize = { [weak self] newCols, newRows in
-            guard let self, newCols > 1, newRows > 1, newCols != self.cols || newRows != self.rows else { return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self, newCols != self.cols || newRows != self.rows else { return }
-                self.cols = newCols
-                self.rows = newRows
-                self.publishWindowSize()
+        host.onResize = { [weak self, weak host] _, _ in
+            DispatchQueue.main.async { [weak self, weak host] in
+                guard let self, let host, self.altScreen === host else { return }
+                self.followFullScreenGrid(host)
             }
         }
-        host.onWindow = { [weak self] in self?.publishWindowSize() }
+        host.onWindow = { [weak self, weak host] in
+            guard let self, let host, self.altScreen === host else { return }
+            self.followFullScreenGrid(host)
+            self.publishWindowSize()
+        }
         host.apply(dark: isDark)
         host.replay(block.rawBytes)
         pointers.isAlternate = true

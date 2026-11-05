@@ -298,7 +298,13 @@ final class AltContainer: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        host.repaint()
         focusIfWanted()
+    }
+
+    override func layout() {
+        super.layout()
+        host.repaint()
     }
 
     func focusIfWanted() {
