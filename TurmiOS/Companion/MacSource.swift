@@ -90,17 +90,23 @@ final class MacManager: MacSource {
         })
     }
 
-    func addPaired(macID: UUID, name: String, key: Data, hosts: [String], port: UInt16) {
-        if let existing = connections.first(where: { $0.id == macID }) {
-            existing.stop()
-            connections.removeAll { $0.id == macID }
-        }
+    static let duplicateMessage = "This Mac is already paired. Forget it in the Macs list first, then pair again."
+
+    func refusal(for macID: UUID) -> String? {
+        connections.contains { $0.id == macID } ? Self.duplicateMessage : nil
+    }
+
+    // returns a message for the user when the pairing was refused
+    @discardableResult
+    func addPaired(macID: UUID, name: String, key: Data, hosts: [String], port: UInt16) -> String? {
+        guard !connections.contains(where: { $0.id == macID }) else { return Self.duplicateMessage }
         let record = CompanionPeerRecord(id: macID, name: name, key: key, hosts: hosts, port: port)
         try? keychain.save(record)
         let connection = MacConnection(record: record, keychain: keychain)
         connection.discovered = discovered.first { $0.macID == macID }?.endpoint
         connections.append(connection)
         connection.start()
+        return nil
     }
 
     func forget(_ id: UUID) {

@@ -1,23 +1,57 @@
 import SwiftUI
+import TurmCore
 
-struct TurmWindow<Sidebar: View, Content: View>: View {
+struct TurmWindow<Sidebar: View, Content: View, TopBar: View>: View {
     @Binding var isSidebarVisible: Bool
     var sidebarWidth: CGFloat
     var onSidebarWidth: (CGFloat) -> Void
     @ViewBuilder var sidebar: () -> Sidebar
+    @ViewBuilder var topBar: () -> TopBar
     @ViewBuilder var content: () -> Content
 
+    @AppStorage(CollapsedSidebarMode.topBarKey) private var topBarEnabled = true
+    @AppStorage(CollapsedSidebarMode.popOutKey) private var popOutEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The column is laid out docked. It follows `isSidebarVisible`, a beat late when the sidebar is shown, so the top bar can leave first.
+    @State private var isDocked: Bool
+    @State private var topBarShown: Bool
+    @State private var dockTask: Task<Void, Never>?
     @State private var hoverPhase: SidebarHoverPhase = .hidden
     @State private var hoverHideTask: Task<Void, Never>?
     @State private var pointerInEdge = false
     @State private var pointerInPanel = false
+
+    init(
+        isSidebarVisible: Binding<Bool>,
+        sidebarWidth: CGFloat,
+        onSidebarWidth: @escaping (CGFloat) -> Void,
+        @ViewBuilder sidebar: @escaping () -> Sidebar,
+        @ViewBuilder topBar: @escaping () -> TopBar,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        _isSidebarVisible = isSidebarVisible
+        self.sidebarWidth = sidebarWidth
+        self.onSidebarWidth = onSidebarWidth
+        self.sidebar = sidebar
+        self.topBar = topBar
+        self.content = content
+        let mode = CollapsedSidebarMode(defaults: .standard)
+        _isDocked = State(initialValue: isSidebarVisible.wrappedValue)
+        _topBarShown = State(initialValue: !isSidebarVisible.wrappedValue && mode.topBar)
+    }
+
+    private var mode: CollapsedSidebarMode { CollapsedSidebarMode(topBar: topBarEnabled, popOut: popOutEnabled) }
+
+    private var reservesTopBand: Bool { !isDocked && mode.topBar }
+
+    private var showsWindowControls: Bool { isDocked || mode.topBar }
 
     private var dockedColumnWidth: CGFloat {
         sidebarWidth + ChromeMetrics.sidebarResizeHandleWidth
     }
 
     private var leadingInset: CGFloat {
-        isSidebarVisible ? ChromeMetrics.contentCardLeadingSeam : ChromeMetrics.cardInset
+        isDocked ? ChromeMetrics.contentCardLeadingSeam : ChromeMetrics.cardInset
     }
 
     var body: some View {
@@ -25,7 +59,7 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
             Theme.windowBackground.color
 
             HStack(spacing: 0) {
-                if isSidebarVisible {
+                if isDocked {
                     HStack(spacing: 0) {
                         sidebar()
                             .frame(width: sidebarWidth)
@@ -33,13 +67,12 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
                         SidebarResizeHandle(width: sidebarWidth, onWidth: onSidebarWidth)
                     }
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .overlay(alignment: .topLeading) { WindowControls() }
                     .transition(.sidebarCollapse(width: dockedColumnWidth))
                 }
 
                 content()
                     .padding(EdgeInsets(
-                        top: ChromeMetrics.cardInset,
+                        top: reservesTopBand ? ChromeMetrics.topRowHeight : ChromeMetrics.cardInset,
                         leading: leadingInset,
                         bottom: ChromeMetrics.cardInset,
                         trailing: ChromeMetrics.cardInset
@@ -48,7 +81,22 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if !isSidebarVisible {
+            if !isDocked && mode.topBar {
+                topBar()
+                    .opacity(topBarShown ? 1 : 0)
+                    .allowsHitTesting(topBarShown && !isSidebarVisible)
+                    .accessibilityHidden(!topBarShown)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .zIndex(1)
+            }
+
+            WindowControls()
+                .opacity(showsWindowControls ? 1 : 0)
+                .allowsHitTesting(showsWindowControls)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .zIndex(1.5)
+
+            if !isSidebarVisible && mode.popOut {
                 hoverLayer
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .zIndex(2)
@@ -56,13 +104,43 @@ struct TurmWindow<Sidebar: View, Content: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
-        .animation(ChromeMetrics.motion, value: isSidebarVisible)
-        .onChange(of: isSidebarVisible) { _, _ in
+        .animation(ChromeMetrics.motion, value: isDocked)
+        .animation(ChromeMetrics.motion, value: mode.topBar)
+        .onChange(of: isSidebarVisible) { _, visible in
             hoverHideTask?.cancel()
             hoverHideTask = nil
             pointerInEdge = false
             pointerInPanel = false
             hoverPhase = .hidden
+            applyDocking(visible)
+        }
+        .onChange(of: mode.topBar) { _, enabled in
+            withAnimation(.easeOut(duration: 0.18)) { topBarShown = enabled && !isSidebarVisible }
+        }
+    }
+
+    /// Hiding closes the column first and fades the top bar in once it is gone. Showing fades the top bar out first, then opens the column.
+    private func applyDocking(_ visible: Bool) {
+        dockTask?.cancel()
+        if reduceMotion {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isDocked = visible
+                topBarShown = !visible && mode.topBar
+            }
+            return
+        }
+        dockTask = Task { @MainActor in
+            if visible {
+                withAnimation(.easeOut(duration: 0.1)) { topBarShown = false }
+                if mode.topBar { try? await Task.sleep(for: .milliseconds(100)) }
+                guard !Task.isCancelled else { return }
+                withAnimation(ChromeMetrics.motion) { isDocked = true }
+            } else {
+                withAnimation(ChromeMetrics.motion) { isDocked = false }
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.18)) { topBarShown = mode.topBar }
+            }
         }
     }
 

@@ -223,17 +223,18 @@ struct RemoteMacManagerTests {
         #expect(manager.selectedID == kept.uuidString)
     }
 
-    @Test func pairingAgainReplacesTheExistingRecord() throws {
+    @Test func pairingAgainWithTheSameIDIsRefusedAndKeepsTheExistingRecord() throws {
         let keychain = isolatedKeychain()
         let manager = RemoteMacManager(keychain: keychain)
         let id = UUID()
-        manager.addPaired(macID: id, name: "Old", key: CompanionCrypto.generateSecret(), hosts: [], port: 7337)
+        let oldKey = CompanionCrypto.generateSecret()
+        #expect(manager.addPaired(macID: id, name: "Old", key: oldKey, hosts: [], port: 7337) == nil)
         defer { manager.forget(id) }
-        let newKey = CompanionCrypto.generateSecret()
-        manager.addPaired(macID: id, name: "New", key: newKey, hosts: [], port: 7337)
+        let refusal = manager.addPaired(macID: id, name: "New", key: CompanionCrypto.generateSecret(), hosts: [], port: 7337)
+        #expect(refusal == RemoteMacManager.duplicateMessage)
         #expect(manager.connections.count == 1)
-        #expect(manager.connections.first?.name == "New")
-        #expect(try #require(keychain.record(for: id)).key == newKey)
+        #expect(manager.connections.first?.name == "Old")
+        #expect(try #require(keychain.record(for: id)).key == oldKey)
     }
 
     @Test func managerLoadsConnectionsFromTheKeychain() {

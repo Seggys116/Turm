@@ -2,8 +2,9 @@ import Foundation
 
 public nonisolated enum CompanionFileLimits {
     public static let maxListing = 5_000
-    public static let maxRead = 8 * 1024 * 1024
-    public static let maxWrite = 32 * 1024 * 1024
+    // file bytes travel as base64 inside a JSON frame, so 3/4 of the frame limit less headroom for the envelope
+    public static let maxRead = Companion.maxFrame / 4 * 3 - 64 * 1024
+    public static let maxWrite = maxRead
     public static let maxDiff = 1 * 1024 * 1024
 
     public static func cappedText(_ text: String, limit: Int) -> (text: String, truncated: Bool) {

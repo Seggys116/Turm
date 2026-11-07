@@ -34,10 +34,14 @@ struct SGRRewriter {
                 }
                 break
             }
-            let params = Array(bytes[(index + 2)..<end])
-            if bytes[end] == 0x6D, params.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x3B || $0 == 0x3A }) {
+            let range = (index + 2)..<end
+            if bytes[end] == 0x6D, let sixPossible = Self.scan(bytes, range) {
                 output.append(contentsOf: [0x1B, 0x5B])
-                output.append(contentsOf: Self.rewriteParameters(params))
+                if sixPossible {
+                    output.append(contentsOf: Self.rewriteParameters(Array(bytes[range])))
+                } else {
+                    output.append(contentsOf: bytes[range])
+                }
                 output.append(0x6D)
             } else {
                 output.append(contentsOf: bytes[index...end])
@@ -47,7 +51,28 @@ struct SGRRewriter {
         return output
     }
 
-    private static func rewriteParameters(_ params: [UInt8]) -> [UInt8] {
+    /// Nil when the bytes are not plain SGR parameters; otherwise whether a parameter equal to 6 appears, the only case rewriteParameters can change.
+    static func scan(_ bytes: [UInt8], _ range: Range<Int>) -> Bool? {
+        var sixPossible = false
+        var value = 0
+        var plain = true
+        for position in range {
+            let byte = bytes[position]
+            switch byte {
+            case 0x30...0x39:
+                value = min(value * 10 + Int(byte - 0x30), 100_001)
+            case 0x3B, 0x3A:
+                if plain && value == 6 { sixPossible = true }
+                plain = byte == 0x3B
+                value = 0
+            default:
+                return nil
+            }
+        }
+        return sixPossible || (plain && value == 6)
+    }
+
+    static func rewriteParameters(_ params: [UInt8]) -> [UInt8] {
         var groups = params.split(separator: 0x3B, omittingEmptySubsequences: false).map { Array($0) }
         var position = 0
         while position < groups.count {

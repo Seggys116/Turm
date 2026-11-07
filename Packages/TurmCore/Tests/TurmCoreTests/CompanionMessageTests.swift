@@ -32,7 +32,10 @@ struct CompanionMessageTests {
             .pairBegin(deviceID: id, name: "Phone", commitment: Data(repeating: 1, count: 32)),
             .pairKey(macID: id, macName: "Mac", publicKey: Data(repeating: 2, count: 32)),
             .pairReveal(publicKey: Data(repeating: 5, count: 32), nonce: Data(repeating: 6, count: 32), confirmation: Data(repeating: 7, count: 32)),
+            .pairBegin(deviceID: id, name: "Phone", commitment: Data(repeating: 1, count: 32), confirms: true),
+            .pairKey(macID: id, macName: "Mac", publicKey: Data(repeating: 2, count: 32), awaitsConfirm: true),
             .pairDone(confirmation: Data(repeating: 3, count: 32)),
+            .pairConfirm,
             .hello(version: .current, deviceID: id, name: "Phone", proof: Data(repeating: 4, count: 32)),
             .ping,
             .listSessions,
@@ -111,6 +114,32 @@ struct CompanionMessageTests {
             let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any]
             #expect(object.map { Array($0.keys) } == [message.kind.rawValue])
         }
+    }
+
+    @Test func pairingMessagesWithoutTheConfirmFieldsDecodeAndStayUnchanged() throws {
+        let commitment = Data(repeating: 1, count: 32).base64EncodedString()
+        let begin = #"{"pairBegin":{"deviceID":"\#(id.uuidString)","name":"Phone","commitment":"\#(commitment)"}}"#
+        let key = #"{"pairKey":{"macID":"\#(id.uuidString)","macName":"Mac","publicKey":"\#(commitment)"}}"#
+        let oldBegin = try JSONDecoder().decode(CompanionMessage.self, from: Data(begin.utf8))
+        let oldKey = try JSONDecoder().decode(CompanionMessage.self, from: Data(key.utf8))
+        #expect(oldBegin == .pairBegin(deviceID: id, name: "Phone", commitment: Data(repeating: 1, count: 32), confirms: nil))
+        #expect(oldKey == .pairKey(macID: id, macName: "Mac", publicKey: Data(repeating: 1, count: 32), awaitsConfirm: nil))
+        for message in [oldBegin, oldKey] {
+            let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any])
+            let fields = try #require(object[message.kind.rawValue] as? [String: Any])
+            #expect(fields["confirms"] == nil && fields["awaitsConfirm"] == nil)
+        }
+    }
+
+    @Test func pairingMessagesIgnoreFieldsTheyDoNotKnow() throws {
+        let commitment = Data(repeating: 1, count: 32).base64EncodedString()
+        let raw = #"{"pairBegin":{"deviceID":"\#(id.uuidString)","name":"Phone","commitment":"\#(commitment)","confirms":true,"future":7}}"#
+        let decoded = try JSONDecoder().decode(CompanionMessage.self, from: Data(raw.utf8))
+        #expect(decoded == .pairBegin(deviceID: id, name: "Phone", commitment: Data(repeating: 1, count: 32), confirms: true))
+    }
+
+    @Test func pairConfirmIsNotEssential() {
+        #expect(!CompanionMessage.Kind.pairConfirm.isEssential)
     }
 
     @Test func everyMessageSurvivesFraming() throws {

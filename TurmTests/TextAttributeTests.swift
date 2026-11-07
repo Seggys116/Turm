@@ -218,6 +218,25 @@ struct SGRRewriterTests {
         #expect(String(decoding: output, as: UTF8.self) == "ab\u{1B}[5mcd")
     }
 
+    @Test func fastPathMatchesTheFullRewriteOnRandomParameters() {
+        let alphabet = Array("0123456789;:".utf8)
+        var state: UInt64 = 0x9E37_79B9_7F4A_7C15
+        func next() -> Int {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int(state >> 33)
+        }
+        for _ in 0..<5000 {
+            let pool = next() % 2 == 0 ? alphabet : Array("0568;;:".utf8)
+            let params = (0..<(next() % 14)).map { _ in pool[next() % pool.count] }
+            let expected = [0x1B, 0x5B] + SGRRewriter.rewriteParameters(params) + [0x6D]
+            var rewriter = SGRRewriter()
+            #expect(rewriter.rewrite([0x1B, 0x5B] + params + [0x6D]) == expected)
+            if SGRRewriter.scan(params, 0..<params.count) == false {
+                #expect(SGRRewriter.rewriteParameters(params) == params)
+            }
+        }
+    }
+
     @Test func splitExtendedColourIsStillProtected() {
         var rewriter = SGRRewriter()
         var output = rewriter.rewrite(Array("\u{1B}[38;5;".utf8))

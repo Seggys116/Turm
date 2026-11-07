@@ -177,47 +177,60 @@ enum WorkspacePersistence {
         isQuitting = false
     }
 
+    private static var activeWriter: WorkspaceWriter?
+    private static var ledger = BlockWriteLedger()
+
+    private static func writer() -> WorkspaceWriter {
+        let current = store()
+        if let activeWriter, activeWriter.store.root == current.root { return activeWriter }
+        activeWriter?.drain()
+        ledger.reset()
+        let next = WorkspaceWriter(store: current)
+        activeWriter = next
+        return next
+    }
+
     static func save(_ workspace: Workspace, force: Bool = false) {
+        workspace.cancelPendingSave()
+        write(workspace, force: force, layout: true, wait: true)
+    }
+
+    static func flush(_ workspace: Workspace, _ batch: SaveTracker.Batch) {
+        write(workspace, force: false, layout: batch.layout, wait: false)
+    }
+
+    private static func write(_ workspace: Workspace, force: Bool, layout: Bool, wait: Bool) {
         guard !workspace.didTerminate else { return }
         guard force || (allowsDisk && workspace.persistsToDisk) else { return }
+        let writer = writer()
         if workspace.isTemporarySpace {
-            purgeTemporary(windowID: workspace.windowID, spaceID: workspace.spaceID)
+            guard layout, allowsDisk else { return }
+            let ids = Set([workspace.windowID, workspace.spaceID].compactMap { $0 })
+            writer.update(wait: wait) { $0.purgeScratch(ids: ids) }
+            return
+        }
+        let changed = ledger.claim(workspace.blockSignatures())
+        var blocks: [UUID: [SavedBlock]] = [:]
+        if !changed.isEmpty {
+            for session in workspace.archivedSessions(blocksFor: changed) where changed.contains(session.pane.raw) {
+                blocks[session.pane.raw] = session.blocks
+            }
+        }
+        guard layout else {
+            writer.update(wait: wait, blocks: blocks)
             return
         }
         let captured = workspace.captureWindow()
-        var document = (try? store().load()) ?? WorkspaceDocument(windows: [], keyWindowID: nil)
-        if let index = document.windows.firstIndex(where: { $0.id == captured.id }) {
-            document.windows[index] = captured
-        } else {
-            document.windows.append(captured)
-        }
-        if workspace.savedIsKey || document.keyWindowID == nil {
-            document.keyWindowID = captured.id
-        }
-        if workspace.spaceID != nil, document.spaces.isEmpty, !document.windows.isEmpty {
-            document.spaces = document.spaceCatalog
-        }
-        if let spaceID = workspace.spaceID {
-            let space = SavedSpace(
-                id: spaceID, name: workspace.spaceName, symbol: workspace.spaceSymbol, session: captured,
+        let isKey = workspace.savedIsKey
+        let space = workspace.spaceID.map { id in
+            SavedSpace(
+                id: id, name: workspace.spaceName, symbol: workspace.spaceSymbol, session: captured,
                 isTemporary: workspace.isTemporarySpace
             )
-            if let index = document.spaces.firstIndex(where: { $0.id == spaceID }) {
-                document.spaces[index] = space
-            } else {
-                document.spaces.append(space)
-            }
         }
-        try? store().save(document)
-        for session in workspace.archivedSessions() {
-            try? store().save(session.blocks, for: session.pane.raw)
-        }
-    }
-
-    static func saveBlocks(of workspace: Workspace) {
-        guard allowsDisk, workspace.persistsToDisk, !workspace.isTemporarySpace else { return }
-        for session in workspace.archivedSessions() {
-            try? store().save(session.blocks, for: session.pane.raw)
+        writer.update(wait: wait, createIfMissing: true, blocks: blocks) { document in
+            document.record(captured, isKey: isKey, space: space)
+            return true
         }
     }
 
@@ -227,48 +240,39 @@ enum WorkspacePersistence {
 
     static func remove(_ workspace: Workspace) {
         guard allowsDisk, workspace.persistsToDisk else { return }
-        try? store().removeWindow(workspace.windowID)
-    }
-
-    /// Drops a scratch space, including one that was written before it was marked temporary.
-    private static func purgeTemporary(windowID: UUID, spaceID: UUID?) {
-        guard allowsDisk, var document = try? store().load() else { return }
-        let ids = Set([windowID, spaceID].compactMap { $0 })
-        let purged = document.discardingTemporarySpaces()
-        let windows = purged.windows.filter { !ids.contains($0.id) }
-        let spaces = purged.spaces.filter { !ids.contains($0.id) && !ids.contains($0.session.id) }
-        var key = purged.keyWindowID
-        if let current = key, ids.contains(current) {
-            key = spaces.first?.id ?? windows.first?.id
+        let id = workspace.windowID
+        writer().update(wait: true) { document in
+            document = document.removingWindow(id)
+            return true
         }
-        let next = WorkspaceDocument(windows: windows, keyWindowID: key, spaces: spaces)
-        guard next != document else { return }
-        document = next
-        try? store().save(document)
     }
 
     static func removeSpace(_ id: UUID) {
-        guard allowsDisk, var document = try? store().load() else { return }
-        document = document.removingWindow(id)
-        document.spaces.removeAll { $0.id == id || $0.session.id == id }
-        if document.keyWindowID == id { document.keyWindowID = document.spaces.first?.id ?? document.windows.first?.id }
-        try? store().save(document)
+        guard allowsDisk else { return }
+        writer().update(wait: true) { document in
+            document = document.removingWindow(id)
+            document.spaces.removeAll { $0.id == id || $0.session.id == id }
+            if document.keyWindowID == id { document.keyWindowID = document.spaces.first?.id ?? document.windows.first?.id }
+            return true
+        }
     }
 
     static func renameSpace(_ id: UUID, to name: String) {
-        guard allowsDisk, var document = try? store().load(),
-              let index = document.spaces.firstIndex(where: { $0.id == id })
-        else { return }
-        document.spaces[index].name = name
-        try? store().save(document)
+        guard allowsDisk else { return }
+        writer().update(wait: true) { document in
+            guard let index = document.spaces.firstIndex(where: { $0.id == id }) else { return false }
+            document.spaces[index].name = name
+            return true
+        }
     }
 
     static func setSpaceSymbol(_ id: UUID, to symbol: String) {
-        guard allowsDisk, var document = try? store().load(),
-              let index = document.spaces.firstIndex(where: { $0.id == id })
-        else { return }
-        document.spaces[index].symbol = symbol
-        try? store().save(document)
+        guard allowsDisk else { return }
+        writer().update(wait: true) { document in
+            guard let index = document.spaces.firstIndex(where: { $0.id == id }) else { return false }
+            document.spaces[index].symbol = symbol
+            return true
+        }
     }
 
     static func consumeLaunchDocument() -> WorkspaceDocument? {
@@ -281,7 +285,9 @@ enum WorkspacePersistence {
 
     static func clear() {
         guard allowsDisk else { return }
-        try? store().clear()
+        CloseCoordinator.shared.registeredWorkspaces.forEach { $0.cancelPendingSave() }
+        ledger.reset()
+        writer().clear()
     }
 
     static func takeLaunchWindow() -> SavedWindow? {
@@ -300,5 +306,8 @@ enum WorkspacePersistence {
         isQuitting = false
         storeOverride = nil
         allowsDiskOverride = nil
+        activeWriter?.drain()
+        activeWriter = nil
+        ledger.reset()
     }
 }

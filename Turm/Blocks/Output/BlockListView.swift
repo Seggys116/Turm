@@ -384,10 +384,12 @@ struct KittyImageContent: View {
         if let animation = image.animation, animation.frames.count > 1 {
             AnimatedKittyFrame(image: image, animation: animation)
         } else {
-            Image(nsImage: image.image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
+            let picture = Image(nsImage: image.image).resizable().interpolation(.high)
+            if image.preserveAspectRatio {
+                picture.scaledToFit()
+            } else {
+                picture
+            }
         }
     }
 }
@@ -401,10 +403,14 @@ struct AnimatedKittyFrame: View {
     var body: some View {
         let paused = !visible || activeState == .inactive || !animation.isRunning
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { context in
-            Image(decorative: animation.frame(at: context.date, cropping: image.crop), scale: image.scale)
+            let frame = Image(decorative: animation.frame(at: context.date, cropping: image.crop), scale: image.scale)
                 .resizable()
                 .interpolation(.high)
-                .scaledToFit()
+            if image.preserveAspectRatio {
+                frame.scaledToFit()
+            } else {
+                frame
+            }
         }
         .onScrollVisibilityChange { visible = $0 }
     }

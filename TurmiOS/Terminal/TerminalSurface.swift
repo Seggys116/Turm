@@ -58,15 +58,17 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
             case .bytes(let raw):
                 view.feed(byteArray: raw)
             case .sixel(let image):
-                guard image.count <= TerminalGraphics.byteLimit else { continue }
-                view.feed(byteArray: image)
+                guard image.count <= TerminalGraphics.byteLimit, SixelPrescan.admits(image) else { continue }
+                drawSixel(image)
+            case .query(let reply):
+                if !replays, !reply.isEmpty { onInput?(ArraySlice(reply)) }
             case .osc(let payload):
                 switch inlineGraphics.receive(payload, cell: cell) {
                 case .reply(let reply):
                     guard !replays else { continue }
                     onInput?(ArraySlice(reply))
                 case .image(let placement):
-                    guard placement.data.count <= TerminalGraphics.byteLimit else { continue }
+                    guard placement.data.count <= TerminalGraphics.byteLimit, GraphicsBounds.admits(imageData: placement.data) else { continue }
                     view.feed(byteArray: Self.inlineImage(placement)[...])
                 case nil:
                     break
@@ -74,6 +76,12 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
             }
         }
         graphicHold.hold(split.remainder)
+    }
+
+    private func drawSixel(_ sequence: ArraySlice<UInt8>) {
+        guard let sixel = SixelDecoder.decode(sequence: sequence), GraphicsBounds.admits(width: sixel.width, height: sixel.height) else { return }
+        var pixels = sixel.premultipliedRGBA
+        view.createImageFromBitmap(source: view.getTerminal(), bytes: &pixels, width: sixel.width, height: sixel.height)
     }
 
     private var cell: InlineGraphics.Cell {
@@ -171,6 +179,7 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
         keys += argument("width", placement.width)
         keys += argument("height", placement.height)
         if !placement.preserveAspectRatio { keys += ";preserveAspectRatio=0" }
+        if !placement.moveCursor { keys += ";doNotMoveCursor=1" }
         let encoded = placement.data.base64EncodedString()
         return Array("\u{1B}]1337;\(keys):\(encoded)\u{1B}\\".utf8)
     }

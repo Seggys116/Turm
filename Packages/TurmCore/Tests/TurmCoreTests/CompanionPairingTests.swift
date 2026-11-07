@@ -125,10 +125,206 @@ struct CompanionPairingTests {
         #expect(phoneCode.count == 6)
         #expect(paired == device)
         #expect(name == "Phone")
-        guard case .finished(_, _, let macKey, let reply) = responder.approve(),
-              case .finished(_, _, let phoneKey) = client.receive(reply)
+        guard case .awaitConfirm(_, let reply) = responder.approve(),
+              case .waiting = client.receive(reply),
+              case .finishing(let confirm, _, _, let phoneKey) = client.approve(),
+              case .confirmed(_, _, let macKey) = responder.receive(confirm)
         else { return fail("approval did not finish pairing") }
         #expect(macKey == phoneKey)
+    }
+
+    private func reachApproval(
+        client: inout CompanionPairingClient, responder: inout CompanionPairingResponder, begin: CompanionMessage? = nil
+    ) -> Bool {
+        guard case .send(let key) = responder.receive(begin ?? client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal)
+        else { return false }
+        return true
+    }
+
+    private func oldBegin(_ message: CompanionMessage) -> CompanionMessage {
+        guard case .pairBegin(let id, let name, let commitment, _) = message else { return message }
+        return .pairBegin(deviceID: id, name: name, commitment: commitment)
+    }
+
+    @Test func theMacStoresNothingUntilTheClientConfirms() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard reachApproval(client: &client, responder: &responder) else { return fail("did not reach approval") }
+        guard case .awaitConfirm = responder.approve() else { return fail("approve finished before the client confirmed") }
+        guard case .rejected = responder.receive(.ping) else { return fail("Mac accepted a message other than the confirmation") }
+    }
+
+    @Test func aClientThatRejectsAfterPairDoneLeavesNothingToStore() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard reachApproval(client: &client, responder: &responder),
+              case .awaitConfirm(_, let reply) = responder.approve(),
+              case .waiting = client.receive(reply)
+        else { return fail("pairing did not reach the confirmation wait") }
+        guard case .failed = client.reject() else { return fail("reject did not fail the pairing") }
+        guard case .failed = client.approve() else { return fail("client confirmed after rejecting") }
+        guard case .rejected = responder.receive(.error(code: CompanionErrorCode.failed, text: "closed")) else {
+            return fail("Mac produced a stored device without a confirmation")
+        }
+    }
+
+    @Test func aConfirmBeforeApprovalIsRefused() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard reachApproval(client: &client, responder: &responder) else { return fail("did not reach approval") }
+        guard case .rejected = responder.receive(.pairConfirm) else { return fail("Mac stored a device the user had not approved") }
+    }
+
+    @Test func aClientThatApprovedEarlyConfirmsWhenPairDoneArrives() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard reachApproval(client: &client, responder: &responder),
+              case .waiting = client.approve(),
+              case .awaitConfirm(_, let reply) = responder.approve(),
+              case .finishing(let confirm, _, _, let phoneKey) = client.receive(reply),
+              case .confirmed(_, _, let macKey) = responder.receive(confirm)
+        else { return fail("early approval did not complete") }
+        #expect(confirm == .pairConfirm)
+        #expect(macKey == phoneKey)
+    }
+
+    @Test func aNewMacStoresOnApprovalForAnOldClient() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(oldBegin(client.begin())) else { return fail("no key reply") }
+        guard case .pairKey(_, _, _, let echo) = key else { return fail("no key") }
+        #expect(echo == nil)
+        guard case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal),
+              case .finished(_, _, let macKey, let reply) = responder.approve()
+        else { return fail("Mac did not store on approval") }
+        guard case .waiting = client.receive(reply),
+              case .finished(_, _, let phoneKey) = client.approve()
+        else { return fail("old-style client did not finish") }
+        #expect(macKey == phoneKey)
+    }
+
+    @Test func aNewClientWorksWithAnOldMac() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        let begin = client.begin()
+        guard case .pairBegin(_, _, _, let confirms) = begin else { return fail("no begin") }
+        #expect(confirms == true)
+        guard case .send(.pairKey(let macID, let macName, let publicKey, let echo)) = responder.receive(oldBegin(begin)) else {
+            return fail("no key reply")
+        }
+        #expect(echo == nil)
+        let oldKey = CompanionMessage.pairKey(macID: macID, macName: macName, publicKey: publicKey)
+        guard case .confirm(_, let reveal) = client.receive(oldKey),
+              case .approval = responder.receive(reveal),
+              case .finished(_, _, _, let reply) = responder.approve(),
+              case .waiting = client.receive(reply)
+        else { return fail("exchange with an old Mac did not run") }
+        guard case .finished = client.approve() else { return fail("client waited for a confirmation the Mac never asked for") }
+    }
+
+    @Test func qrPairingNeverDeclaresOrEchoesConfirmation() {
+        let secret = CompanionCrypto.generateSecret()
+        var client = CompanionPairingClient(bootstrap: .qr(secret: secret), deviceID: device, deviceName: "Phone")
+        guard case .pairBegin(_, _, _, let confirms) = client.begin() else { return fail("no begin") }
+        #expect(confirms == nil)
+        var responder = CompanionPairingResponder(candidates: [.qr(secret: secret)], macID: UUID(), macName: "Mac")
+        let claimed = CompanionMessage.pairBegin(deviceID: device, name: "Phone", commitment: Data(repeating: 1, count: 32), confirms: true)
+        guard case .send(.pairKey(_, _, _, let echo)) = responder.receive(claimed) else { return fail("no key reply") }
+        #expect(echo == nil)
+    }
+
+    @Test func theClientHoldsTheKeyUntilTheUserApproves() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal),
+              case .awaitConfirm(_, let reply) = responder.approve()
+        else { return fail("pairing did not reach the Mac's approval") }
+        guard case .waiting = client.receive(reply) else { return fail("client released the key before approval") }
+        guard case .finishing = client.approve() else { return fail("approval did not release the key") }
+    }
+
+    @Test func approvingBeforeTheMacFinishesStillWaitsForTheMac() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal)
+        else { return fail("pairing did not reach the Mac's approval") }
+        guard case .waiting = client.approve() else { return fail("approval released a key the Mac had not sent") }
+        guard case .awaitConfirm(_, let reply) = responder.approve(),
+              case .finishing(let confirm, _, _, let phoneKey) = client.receive(reply),
+              case .confirmed(_, _, let macKey) = responder.receive(confirm)
+        else { return fail("pairing did not finish") }
+        #expect(macKey == phoneKey)
+    }
+
+    @Test func theClientKeepsTheKeyOnlyOnceTheMacAcknowledgesStoringIt() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal),
+              case .awaitConfirm(_, let reply) = responder.approve(),
+              case .waiting = client.receive(reply),
+              case .finishing(_, _, _, let phoneKey) = client.approve()
+        else { return fail("pairing did not reach the confirmation") }
+        guard case .finished(_, _, let kept) = client.receive(.pairConfirm) else { return fail("the acknowledgement did not finish pairing") }
+        #expect(kept == phoneKey)
+    }
+
+    @Test func aMacErrorAfterTheConfirmationStopsThePhoneKeepingTheKey() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal),
+              case .awaitConfirm(_, let reply) = responder.approve(),
+              case .waiting = client.receive(reply),
+              case .finishing = client.approve()
+        else { return fail("pairing did not reach the confirmation") }
+        guard case .failed = client.receive(.error(code: "pairing", text: "Pairing expired")) else { return fail("the phone kept a key the Mac refused") }
+    }
+
+    @Test func aRejectedCodeYieldsNoKey() {
+        var client = CompanionPairingClient(bootstrap: .code("12345678"), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.code("12345678")], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .approval = responder.receive(reveal),
+              case .awaitConfirm(_, let reply) = responder.approve()
+        else { return fail("pairing did not reach the Mac's approval") }
+        guard case .failed = client.reject() else { return fail("reject did not fail the pairing") }
+        guard case .failed = client.receive(reply) else { return fail("client accepted a key after rejecting") }
+        guard case .failed = client.approve() else { return fail("client approved after rejecting") }
+    }
+
+    @Test func anImpostorThatKnowsTheCodeCannotStoreAKeyWithoutApproval() {
+        let code = CompanionBootstrap.code("12345678")
+        var phone = CompanionPairingClient(bootstrap: code, deviceID: device, deviceName: "Phone")
+        var impostor = CompanionPairingResponder(candidates: [code], macID: UUID(), macName: "Mac")
+        guard case .send(let fakeKey) = impostor.receive(phone.begin()),
+              case .confirm(_, let reveal) = phone.receive(fakeKey),
+              case .approval = impostor.receive(reveal),
+              case .awaitConfirm(_, let done) = impostor.approve()
+        else { return fail("impostor did not complete its side") }
+        guard case .waiting = phone.receive(done) else { return fail("phone released the impostor's key") }
+        guard case .failed = phone.reject() else { return fail("reject did not fail the pairing") }
+    }
+
+    @Test func qrPairingNeedsNoConfirmationOnTheStartingSide() {
+        let secret = CompanionCrypto.generateSecret()
+        var client = CompanionPairingClient(bootstrap: .qr(secret: secret), deviceID: device, deviceName: "Phone")
+        var responder = CompanionPairingResponder(candidates: [.qr(secret: secret)], macID: UUID(), macName: "Mac")
+        guard case .send(let key) = responder.receive(client.begin()),
+              case .confirm(_, let reveal) = client.receive(key),
+              case .finished(_, _, _, let reply) = responder.receive(reveal)
+        else { return fail("QR pairing did not reach the Mac's finish") }
+        guard case .finished = client.receive(reply) else { return fail("QR pairing waited for a confirmation") }
     }
 
     @Test func approvalIsOnlyPossibleOnce() {

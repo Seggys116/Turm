@@ -205,10 +205,11 @@ public nonisolated enum CompanionSessionEvent: Sendable, Equatable {
 }
 
 public nonisolated enum CompanionMessage: Codable, Sendable, Equatable {
-    case pairBegin(deviceID: UUID, name: String, commitment: Data)
-    case pairKey(macID: UUID, macName: String, publicKey: Data)
+    case pairBegin(deviceID: UUID, name: String, commitment: Data, confirms: Bool? = nil)
+    case pairKey(macID: UUID, macName: String, publicKey: Data, awaitsConfirm: Bool? = nil)
     case pairReveal(publicKey: Data, nonce: Data, confirmation: Data)
     case pairDone(confirmation: Data)
+    case pairConfirm
 
     case hello(version: CompanionVersion, deviceID: UUID, name: String, proof: Data)
     case ping
@@ -268,6 +269,7 @@ extension CompanionMessage {
         case pairKey
         case pairReveal
         case pairDone
+        case pairConfirm
         case hello
         case ping
         case listSessions
@@ -321,7 +323,7 @@ extension CompanionMessage {
         public var isEssential: Bool {
             switch self {
             case .hello, .ping, .listSessions, .attach, .detach, .submit, .input, .interrupt, .welcome, .incompatible, .pong, .sessions, .sessionChanged, .sessionClosed, .snapshot, .blockStarted, .output, .blockFinished, .phase, .ok, .error: true
-            case .pairBegin, .pairKey, .pairReveal, .pairDone, .resize, .create, .close, .directoryShortcut, .commandShortcut, .listShortcuts, .saveShortcut, .removeShortcut, .listBranches, .switchBranch, .revealInFinder, .diff, .diffResult, .listDirectory, .directoryListing, .readFile, .fileContents, .writeFile, .cancelTransfer, .title, .confirmClose, .directoryShortcutInfo, .commandShortcutInfo, .shortcuts, .branches, .branchSwitched, .addresses: false
+            case .pairBegin, .pairKey, .pairReveal, .pairDone, .pairConfirm, .resize, .create, .close, .directoryShortcut, .commandShortcut, .listShortcuts, .saveShortcut, .removeShortcut, .listBranches, .switchBranch, .revealInFinder, .diff, .diffResult, .listDirectory, .directoryListing, .readFile, .fileContents, .writeFile, .cancelTransfer, .title, .confirmClose, .directoryShortcutInfo, .commandShortcutInfo, .shortcuts, .branches, .branchSwitched, .addresses: false
             }
         }
     }
@@ -332,6 +334,7 @@ extension CompanionMessage {
         case .pairKey: .pairKey
         case .pairReveal: .pairReveal
         case .pairDone: .pairDone
+        case .pairConfirm: .pairConfirm
         case .hello: .hello
         case .ping: .ping
         case .listSessions: .listSessions

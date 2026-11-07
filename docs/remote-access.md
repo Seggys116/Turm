@@ -19,9 +19,9 @@ Settings > Remote Access, then switch on **Allow remote control**. The status li
 Click **Pair a Device...** in Settings > Remote Access. A sheet shows a QR code and an 8-digit code. To pair another Mac instead, see [Controlling another Mac](#controlling-another-mac). In the app, open Settings > Remote Access > **Pair a Mac** and either:
 
 - **Scan QR Code:** point the camera at the sheet. The Mac pairs without further approval.
-- **Enter Code:** pick the Mac from the nearby list or choose **Other Address** and give an address and port, then type the 8-digit code. Both screens then show a 6-digit check code. Compare them. If they match, click **Approve** on the Mac. If they differ, or you did not start pairing, click **Reject**. The Mac waits 60 seconds for an answer.
+- **Enter Code:** pick the Mac from the nearby list or choose **Other Address** and give an address and port, then type the 8-digit code. Both screens then show a 6-digit check code. Compare them. If they match, tap **Codes match** on the phone and click **Approve** on the Mac. If they differ, tap **They differ** on the phone, and click **Reject** on the Mac if you did not start pairing. The Mac waits 60 seconds for an answer. When both devices are up to date, the Mac saves the device only after the phone has confirmed too, so tapping **They differ** after you approve leaves nothing paired on the Mac.
 
-The QR code needs no approval because its secret is only on the Mac's screen. A typed code is short enough to be guessed, so it is not trusted until you compare the check codes.
+The QR code needs no approval because its secret is only on the Mac's screen. A typed code is short enough to be guessed, so neither side trusts the other until you compare the check codes. The phone keeps the new key out of its keychain until you tap **Codes match**, so a device that merely guessed the code cannot make the phone trust it. The Mac stores the phone as soon as you click **Approve**, so approve only after the codes match on both screens. Pairing messages are unchanged, so an older Turm on either side still pairs.
 
 The QR code and code work for two minutes, for one device at a time. The window closes early after 3 failed attempts, or when you close the sheet. **New Code** opens a new window. A pairing already in progress is allowed to finish after the two minutes.
 
@@ -39,7 +39,7 @@ On the Mac to be controlled, switch on **Allow remote control** and click **Pair
 - **Other Address:** give a host or IP address and port, then type the 8-digit code. Use this over Tailscale.
 - **Pairing Link:** on the controlled Mac, click **Copy Pairing Link** in the Pair a Device sheet, then paste the link here. The link carries the secret from the QR code, so it is not compared or approved.
 
-With a typed code, both Macs show a 6-digit check code. Compare them and click **Approve** on the controlled Mac, as in [Pairing](#pairing). The link expires with the pairing window, after two minutes. A Mac cannot pair with itself.
+With a typed code, both Macs show a 6-digit check code. Compare them, click **Codes Match** on the controlling Mac and **Approve** on the controlled Mac, as in [Pairing](#pairing). The link expires with the pairing window, after two minutes. A Mac cannot pair with itself.
 
 ### Two-way pairing
 
@@ -95,11 +95,15 @@ Each time a phone or Mac connects, and whenever the controlled Mac's network or 
 
 ## Security
 
-- The connection is TLS 1.2 with a pre-shared key that is unique to each paired device. The forward-secret cipher suite (ECDHE-PSK with ChaCha20-Poly1305) is offered first, so a recorded session cannot be decrypted later even if a key leaks. The only other suite offered is PSK with AES-128-GCM. Outside an open pairing window, a device that does not hold a paired key cannot complete the handshake.
+- The connection is TLS 1.2 with a pre-shared key that is unique to each paired device. The only cipher suite offered is the forward-secret one (ECDHE-PSK with ChaCha20-Poly1305), so a recorded session cannot be decrypted later even if a key leaks, and there is no plain PSK suite to fall back to. Outside an open pairing window, a device that does not hold a paired key cannot complete the handshake.
 - Pairing derives the device key on both sides from a key exchange that is tied to the QR secret or the typed code, so the key itself is not sent over the network.
 - Each side keeps the key in its own keychain, readable only while the device is unlocked, and marked so that it is never synced to iCloud or restored to another device. iCloud sync does not carry Remote Access pairings. See [iCloud sync](icloud-sync.md).
-- Connections are limited. A connection that does not authenticate within 10 seconds is dropped. An address that fails 5 handshakes within 30 seconds is blocked for 30 seconds, and the Mac accepts at most 4 unfinished connections per address, 32 in total, and 16 authenticated phones and Macs.
+- Connections are limited. A connection that does not authenticate within 10 seconds is dropped. An address that fails 5 handshakes within 30 seconds is blocked for 30 seconds, and a connection that stays silent until the 10 second limit counts as a failed handshake. Addresses are counted per client: an IPv6 address counts as its /64 network, and an IPv4-mapped IPv6 address counts as the IPv4 address. The Mac accepts at most 4 unfinished connections per address, 32 in total, and 16 authenticated phones and Macs.
 
 A paired phone or Mac can run commands in your shells as you. Pair only devices you control and revoke ones you no longer use.
 
-Uploads from a paired device are off by default. Turn them on under Settings > Remote Access > Allow file uploads, and choose one folder. A path outside that folder is refused, including one that uses `..` to climb out. An existing file is not replaced unless the upload explicitly requests it. The files stay on the Mac. Revoking the device removes its access.
+Uploads from a paired device are off by default. While they are off, every upload is refused. Turn them on under Settings > Remote Access > Allow file uploads, and choose one folder; uploads stay refused until a folder is chosen. Once on, a paired device can write only inside that folder or inside the current folder of one of your shells, which is where the iPhone uploads to. A path outside those folders is refused, including one that uses `..` or a symlink to climb out. An existing file is not replaced unless the upload explicitly requests it. The files stay on the Mac. Revoking the device removes its access.
+
+Reading a file for a phone opens only regular files inside a shell's folder, reads them off the main thread, and refuses anything larger than about 3 MB with an error, since a file travels inside a 4 MB message. The same limit applies to uploads.
+
+A device ID that is already paired cannot be paired again. To pair that device or Mac again, revoke it in Remote Access settings on the Mac, or forget it on the other side, and pair afresh. A Mac that is controlling another Mac clamps the terminal size the other Mac reports to 2 to 500 columns and 2 to 300 rows, the same range the Mac accepts for a resize.

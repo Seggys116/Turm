@@ -4,6 +4,7 @@ struct SpaceTitleRow: View {
     let library: SpaceLibrary
     let host: WindowHost
     @Binding var isRenaming: Bool
+    var hide: () -> Void = {}
     @State private var draft = ""
     @FocusState private var focused: Bool
 
@@ -30,6 +31,16 @@ struct SpaceTitleRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            Button(action: hide) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.secondaryText.color)
+            .help("Hide Sidebar")
+            .accessibilityLabel("Hide Sidebar")
         }
         .padding(.leading, ChromeMetrics.trafficLightLeadingInset + ChromeMetrics.trafficLightClusterWidth + 10)
         .padding(.trailing, ChromeMetrics.sidebarHorizontalPadding)
@@ -257,7 +268,7 @@ private enum SpaceIcon {
     }
 }
 
-private struct NewSpacePopover: View {
+struct NewSpacePopover: View {
     let library: SpaceLibrary
     let host: WindowHost
     var dismiss: () -> Void
@@ -336,7 +347,7 @@ struct SidebarColumn<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SpaceTitleRow(library: library, host: host, isRenaming: $renamingTitle)
+            SpaceTitleRow(library: library, host: host, isRenaming: $renamingTitle, hide: onToggleSidebar)
             shells()
             SpaceSwitcher(
                 library: library, host: host, searchPresented: $searchPresented, sidebarDocked: sidebarDocked,

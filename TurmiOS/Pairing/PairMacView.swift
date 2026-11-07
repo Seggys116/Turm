@@ -197,7 +197,7 @@ struct PairMacView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-        case .checking(let code, let name):
+        case .checking(let code, let name, let needsConfirm):
             VStack(spacing: 16) {
                 Text("CHECK CODE")
                     .font(Chrome.Typeface.section)
@@ -210,22 +210,33 @@ struct PairMacView: View {
                     .lineLimit(1)
                     .foregroundStyle(Chrome.text)
                     .textSelection(.enabled)
-                Text("Check that \(name) shows this same code, then approve it there.")
-                    .font(Chrome.Typeface.label)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Chrome.secondaryText)
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Waiting for the Mac")
-                        .font(Chrome.Typeface.caption)
+                if needsConfirm {
+                    Text("Check that \(name) shows this same code. Only continue if the codes are identical.")
+                        .font(Chrome.Typeface.label)
+                        .multilineTextAlignment(.center)
                         .foregroundStyle(Chrome.secondaryText)
+                    Button("Codes match") { pairing.confirmCodes() }
+                        .buttonStyle(ChromeButtonStyle(kind: .prominent))
+                    Button("They differ") { pairing.codesDiffer() }
+                        .buttonStyle(ChromeButtonStyle(kind: .destructive))
+                    Text("If the codes differ, someone may be intercepting the connection.")
+                        .font(Chrome.Typeface.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Chrome.warning)
+                } else {
+                    Text("Check that \(name) shows this same code, then approve it there.")
+                        .font(Chrome.Typeface.label)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Chrome.secondaryText)
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for the Mac")
+                            .font(Chrome.Typeface.caption)
+                            .foregroundStyle(Chrome.secondaryText)
+                    }
+                    Button("Cancel Pairing") { pairing.cancel() }
+                        .buttonStyle(ChromeButtonStyle(kind: .destructive))
                 }
-                Text("If the codes differ, cancel. Someone may be intercepting the connection.")
-                    .font(Chrome.Typeface.caption)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Chrome.warning)
-                Button("Cancel Pairing") { pairing.cancel() }
-                    .buttonStyle(ChromeButtonStyle(kind: .destructive))
             }
             .padding(20)
             .frame(maxWidth: .infinity)

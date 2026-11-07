@@ -14,7 +14,7 @@ public nonisolated enum CompanionTLS {
     }
 
     public static let forwardSecretSuite: UInt16 = 0xCCAC
-    private static let preferredSuites: [UInt16] = [forwardSecretSuite, 0x00A8]
+    static let preferredSuites: [UInt16] = [forwardSecretSuite]
 
     private static func dispatchData(_ data: Data) -> DispatchData {
         data.withUnsafeBytes { DispatchData(bytes: $0) }

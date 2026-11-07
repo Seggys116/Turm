@@ -239,11 +239,13 @@ enum TerminalControlFilter {
 
     static func extract(_ bytes: [UInt8]) -> Extraction {
         var result = Extraction()
+        result.bytes.reserveCapacity(bytes.count)
         var index = 0
         while index < bytes.count {
             guard bytes[index] == 0x1B else {
-                result.bytes.append(bytes[index])
-                index += 1
+                let stop = bytes[index...].firstIndex(of: 0x1B) ?? bytes.count
+                result.bytes.append(contentsOf: bytes[index..<stop])
+                index = stop
                 continue
             }
             if index + 1 == bytes.count {

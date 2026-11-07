@@ -272,7 +272,8 @@ nonisolated enum KittyInflate {
         return nil
     }
 
-    static func inflate(_ input: Data, capacity: Int) -> Result<Data, KittyFailure> {
+    /// `exact` is false when the output size is not known up front, as for a compressed PNG, so the stream decides where it ends.
+    static func inflate(_ input: Data, capacity: Int, exact: Bool = true) -> Result<Data, KittyFailure> {
         func failed(_ name: String) -> Result<Data, KittyFailure> {
             .failure(KittyFailure(code: "EINVAL", message: "Failed to inflate image data with error: \(name)"))
         }
@@ -281,7 +282,7 @@ nonisolated enum KittyInflate {
         guard header(bytes) == nil else { return failed("Z_DATA_ERROR") }
         guard bytes[1] & 0x20 == 0 else { return failed("Unknown error: 2") }
         if KittyDeflate.prefersFast(bytes[2...]), let output = KittyDeflate.fast(bytes[2...], capacity: capacity),
-           output.count == capacity, KittyDeflate.trailerMatches(bytes, output) {
+           !exact || output.count == capacity, KittyDeflate.trailerMatches(bytes, output) {
             return .success(Data(output))
         }
         let result = KittyDeflate.inflate(bytes, from: 2, capacity: capacity)
@@ -293,7 +294,7 @@ nonisolated enum KittyInflate {
         guard bytes.count - result.end >= 4 else { return failed("Z_BUF_ERROR") }
         let trailer = bytes[result.end..<(result.end + 4)].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
         guard trailer == adler32(result.output) else { return failed("Z_DATA_ERROR") }
-        guard result.output.count == capacity else {
+        guard !exact || result.output.count == capacity else {
             return .failure(KittyFailure(code: "EINVAL", message: "Image data size post inflation does not match expected size"))
         }
         return .success(Data(result.output))

@@ -22,10 +22,14 @@ final class PairedDevices {
         devices.map { CompanionTLS.Credential(identity: $0.id.uuidString, key: $0.key) }
     }
 
+    enum AddError: Error {
+        case duplicate
+    }
+
     func add(id: UUID, name: String, key: Data) throws {
+        guard device(id) == nil else { throw AddError.duplicate }
         let record = CompanionPeerRecord(id: id, name: Self.clean(name), key: key)
         try keychain.save(record)
-        devices.removeAll { $0.id == id }
         devices.append(record)
     }
 

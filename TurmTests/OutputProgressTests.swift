@@ -46,6 +46,26 @@ struct OutputProgressTests {
         #expect(percent(after: "x86%") == nil)
     }
 
+    @Test func longLinesKeepOnlyTheLastFiveHundredTwelveBytes() {
+        for tail in [0, 1, 100, 400, 507, 508, 509, 600, 1023, 1024, 1025, 5000] {
+            let input = Array("a 12% ".utf8) + Array(repeating: UInt8(ascii: "b"), count: tail)
+            var tracker = OutputProgress()
+            for start in stride(from: 0, to: input.count, by: 97) {
+                tracker.feed(input[start..<min(start + 97, input.count)])
+            }
+            #expect(tracker.percent == OutputProgress.percent(in: Array(input.suffix(512))))
+        }
+    }
+
+    @Test func aLongLineStillEndsWithTheLatestPercent() {
+        let input = Array(repeating: UInt8(ascii: "x"), count: 4000) + Array(" 73%".utf8)
+        var tracker = OutputProgress()
+        tracker.feed(input)
+        #expect(tracker.percent == 73)
+        tracker.feed(Array("\n".utf8))
+        #expect(tracker.percent == 73)
+    }
+
     @Test func combinesPanesWithLiveWorkFirst() {
         #expect(ShellActivity.combined([.succeeded, .progress(70), .progress(20)]) == .progress(20))
         #expect(ShellActivity.combined([.failed, .working]) == .working)

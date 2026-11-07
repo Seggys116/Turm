@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TurmCore
 
 @_silgen_name("shm_open")
 private func sharedMemoryOpen(_ name: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32
@@ -89,6 +90,7 @@ enum KittyLoadCheck {
             guard name.hasPrefix("/") else { return fileFailure }
             descriptor = name.withCString { sharedMemoryOpen($0, O_RDONLY, 0) }
         } else {
+            guard KittyFilePolicy.mayRead(name) else { return fileFailure }
             descriptor = name.withCString { Darwin.open($0, O_RDONLY | O_NONBLOCK) }
         }
         guard descriptor >= 0 else { return fileFailure }
@@ -118,7 +120,9 @@ enum KittyLoadCheck {
         }
         var used = state.received
         if command.compression == "z" {
-            switch KittyInflate.inflate(isFile(command) ? state.fileData : state.compressed, capacity: dataSize(command)) {
+            let png = format(command) == 100
+            let source = isFile(command) ? state.fileData : state.compressed
+            switch KittyInflate.inflate(source, capacity: png ? maxData : dataSize(command), exact: !png) {
             case .success(let data):
                 state.inflated = data
                 used = data.count
@@ -139,7 +143,7 @@ enum KittyLoadCheck {
 
     static func discardTransient(_ state: KittyLoadState, _ command: KittyCommand) {
         guard let path = state.openedPath else { return }
-        if command.medium == "t", path.contains("tty-graphics-protocol") {
+        if command.medium == "t", KittyFilePolicy.mayDelete(path) {
             unlink(path)
         } else if command.medium == "s" {
             shm_unlink(path)

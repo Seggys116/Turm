@@ -28,6 +28,7 @@ private final class PairingAttempt {
     private var reachedMac = false
     private var confirmed = false
     var onCode: ((String) -> Void)?
+    var refusal: ((UUID) -> String?)?
 
     init(endpoint: NWEndpoint, bootstrap: CompanionBootstrap) {
         client = CompanionPairingClient(bootstrap: bootstrap, deviceID: RemoteMacIdentity.id, deviceName: RemoteMacIdentity.name)
@@ -66,15 +67,49 @@ private final class PairingAttempt {
                     confirmed = true
                     startTimeout(Self.approvalDeadline)
                     onCode?(code)
+                case .waiting:
+                    break
                 case .finished(let macID, let macName, let key):
                     let address = Self.address(of: connection.remoteEndpoint)
                     finish(.success(PairedMac(macID: macID, macName: macName, key: key, host: address?.host, port: address?.port)))
+                case .finishing(let confirmation, let macID, let macName, let key):
+                    confirmAndFinish(confirmation, macID: macID, macName: macName, key: key)
                 case .failed(let text):
                     finish(.failure(.rejected(text)))
                 }
             }
             startTimeout(Self.connectDeadline)
             connection.start()
+        }
+    }
+
+    func approve() {
+        switch client.approve() {
+        case .finished(let macID, let macName, let key):
+            let address = Self.address(of: connection.remoteEndpoint)
+            finish(.success(PairedMac(macID: macID, macName: macName, key: key, host: address?.host, port: address?.port)))
+        case .finishing(let confirmation, let macID, let macName, let key):
+            confirmAndFinish(confirmation, macID: macID, macName: macName, key: key)
+        case .failed(let text):
+            finish(.failure(.rejected(text)))
+        case .waiting, .confirm:
+            break
+        }
+    }
+
+    // the other Mac stores the device only after this message, so it goes out before the key is kept
+    private func confirmAndFinish(_ confirmation: CompanionMessage, macID: UUID, macName: String, key: Data) {
+        if let text = refusal?(macID) {
+            finish(.failure(.rejected(text)))
+            return
+        }
+        connection.send(confirmation)
+        startTimeout(Self.approvalDeadline)
+    }
+
+    func reject() {
+        if case .failed(let text) = client.reject() {
+            finish(.failure(.rejected(text)))
         }
     }
 
@@ -121,7 +156,7 @@ final class RemoteMacPairing {
     enum State: Equatable {
         case idle
         case working(String)
-        case checking(code: String, macName: String)
+        case checking(code: String, macName: String, needsConfirm: Bool)
         case done(String)
         case failed(String)
     }
@@ -207,6 +242,17 @@ final class RemoteMacPairing {
         state = .idle
     }
 
+    func confirmCodes() {
+        guard case .checking(let code, let name, true) = state else { return }
+        state = .checking(code: code, macName: name, needsConfirm: false)
+        current?.approve()
+    }
+
+    func codesDiffer() {
+        guard case .checking = state else { return }
+        current?.reject()
+    }
+
     func reject(_ text: String) {
         if !isWorking { state = .failed(text) }
     }
@@ -223,6 +269,10 @@ final class RemoteMacPairing {
             state = .failed("No address to connect to.")
             return
         }
+        if let expectedID, let text = manager.refusal(for: expectedID) {
+            state = .failed(text)
+            return
+        }
         state = .working("Pairing with \(name)")
         task = Task { [weak self] in
             var last = PairingFailure.unreachable
@@ -230,8 +280,9 @@ final class RemoteMacPairing {
                 guard !Task.isCancelled, let self else { return }
                 let attempt = PairingAttempt(endpoint: endpoint, bootstrap: bootstrap)
                 current = attempt
+                attempt.refusal = { manager.refusal(for: $0) }
                 attempt.onCode = { [weak self] code in
-                    self?.state = .checking(code: Self.grouped(code), macName: name)
+                    self?.state = .checking(code: Self.grouped(code), macName: name, needsConfirm: bootstrap.requiresApproval)
                 }
                 switch await attempt.run() {
                 case .success(let paired):
@@ -251,7 +302,10 @@ final class RemoteMacPairing {
                         storedHosts = [host]
                         storedPort = resolvedPort
                     }
-                    manager.addPaired(macID: paired.macID, name: paired.macName, key: paired.key, hosts: storedHosts, port: storedPort)
+                    if let refusal = manager.addPaired(macID: paired.macID, name: paired.macName, key: paired.key, hosts: storedHosts, port: storedPort) {
+                        state = .failed(refusal)
+                        return
+                    }
                     state = .done(paired.macName)
                     return
                 case .failure(let failure):

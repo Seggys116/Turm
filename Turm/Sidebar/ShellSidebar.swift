@@ -420,9 +420,7 @@ private struct ShellGroup: View {
     }
 
     private func title(representative: TerminalSession) -> String {
-        guard tab.layout.leaves.count > 1 else { return representative.customTitle ?? representative.location }
-        if let title = tab.title { return title }
-        return workspace.sessions(in: tab).map { $0.customTitle ?? $0.location }.joined(separator: " · ")
+        workspace.title(of: tab)
     }
 
     private var disclosure: PaneDisclosure? {
@@ -997,7 +995,7 @@ private struct RowDragSurface: NSViewRepresentable {
     }
 }
 
-private struct OutcomePulse: Equatable {
+struct OutcomePulse: Equatable {
     static let duration: TimeInterval = 1.6
 
     let failed: Bool
@@ -1074,7 +1072,7 @@ private struct ActivityIndicator: View {
     }
 }
 
-private struct StatusGlyph: View {
+struct StatusGlyph: View {
     let activity: ShellActivity
     let pulse: OutcomePulse?
     let diameter: CGFloat

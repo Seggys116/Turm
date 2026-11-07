@@ -44,14 +44,16 @@ final class BlockEmulator: TerminalDelegate {
         let text: AttributedString
         let wrapped: Bool
         let extent: Int
+        let units: Int
         let serial: Int
 
-        init(row: Int, line: BufferLine?, text: AttributedString, wrapped: Bool, extent: Int, serial: Int) {
+        init(row: Int, line: BufferLine?, text: AttributedString, wrapped: Bool, extent: Int, units: Int, serial: Int) {
             self.row = row
             self.line = line
             self.text = text
             self.wrapped = wrapped
             self.extent = extent
+            self.units = units
             self.serial = serial
         }
     }
@@ -116,7 +118,10 @@ final class BlockEmulator: TerminalDelegate {
     var onProgress: (Terminal.ProgressReport?) -> Void = { _ in }
     var onTitle: (String) -> Void = { _ in }
 
-    init(cols: Int, rows: Int, scrollback: Int = BlockEmulator.scrollback) {
+    let remoteName: String?
+
+    init(cols: Int, rows: Int, scrollback: Int = BlockEmulator.scrollback, remoteName: String? = nil) {
+        self.remoteName = remoteName
         var options = TerminalOptions.default
         options.cols = max(cols, 2)
         options.rows = max(rows, 2)
@@ -154,7 +159,7 @@ final class BlockEmulator: TerminalDelegate {
         for piece in split.pieces {
             switch piece.kind {
             case .text:
-                feedTerminal(Array(piece.bytes))
+                feedTerminal(piece.bytes.count == bytes.count ? bytes : Array(piece.bytes))
                 settleBufferSwitch()
             case .clear(let scope):
                 feedTerminal(Array(piece.bytes))
@@ -178,12 +183,14 @@ final class BlockEmulator: TerminalDelegate {
                 showInlineCommand(payload)
                 movePastImages()
             case .sixel(let image):
-                guard image.count <= TerminalGraphics.byteLimit else { continue }
-                terminal.feed(byteArray: Array(image))
+                guard image.count <= TerminalGraphics.byteLimit, SixelPrescan.admits(image) else { continue }
+                showSixel(image)
                 movePastImages()
+            case .query(let reply):
+                if !reply.isEmpty { onResponse(reply[...]) }
             case .bytes(let raw):
                 guard !raw.isEmpty else { continue }
-                terminal.feed(byteArray: Array(raw))
+                terminal.feed(buffer: raw)
                 movePastImages()
             }
         }
@@ -199,13 +206,18 @@ final class BlockEmulator: TerminalDelegate {
         case .reply(let bytes):
             onResponse(bytes[...])
         case .image(let placement):
-            guard let image = NSImage(data: placement.data) else { return }
-            let motion = MotionPicture.decode(placement.data)
-            record(
-                image, width: Self.request(placement.width), height: Self.request(placement.height),
-                animation: motion?.animation, pixels: motion?.pixels ?? Self.pixelSize(of: image)
-            )
+            show(placement)
         }
+    }
+
+    private func show(_ placement: InlineGraphics.Placement) {
+        guard GraphicsBounds.admits(imageData: placement.data), let image = NSImage(data: placement.data) else { return }
+        let motion = MotionPicture.decode(placement.data)
+        record(
+            image, width: Self.request(placement.width), height: Self.request(placement.height),
+            animation: motion?.animation, pixels: motion?.pixels ?? Self.pixelSize(of: image),
+            preserveAspectRatio: placement.preserveAspectRatio, moveCursor: placement.moveCursor
+        )
     }
 
     private func movePastImages() {
@@ -310,8 +322,10 @@ final class BlockEmulator: TerminalDelegate {
                 continue
             }
             renderSerial += 1
+            let masked = line.text.maskingPlaceholders()
             byRow[line.row - trimmed] = RenderedLine(
-                row: line.row, line: nil, text: line.text.maskingPlaceholders(), wrapped: line.wrapped, extent: line.extent, serial: renderSerial
+                row: line.row, line: nil, text: masked, wrapped: line.wrapped, extent: line.extent,
+                units: masked.characters.reduce(0) { $0 + $1.utf16.count }, serial: renderSerial
             )
         }
         func rendered(_ row: Int) -> RenderedLine? {
@@ -370,11 +384,11 @@ final class BlockEmulator: TerminalDelegate {
                 row = band.range.upperBound
                 continue
             }
-            let line = rendered(row) ?? RenderedLine(row: row, line: nil, text: AttributedString(), wrapped: false, extent: 0, serial: 0)
+            let line = rendered(row) ?? RenderedLine(row: row, line: nil, text: AttributedString(), wrapped: false, extent: 0, units: 0, serial: 0)
             if !pending.isEmpty, !line.wrapped, row / Self.chunkRows != pendingStart / Self.chunkRows {
                 closeChunk(hangs: true)
             }
-            let units = line.text.characters.reduce(0) { $0 + $1.utf16.count }
+            let units = line.units
             if pending.isEmpty {
                 pendingStart = row
                 logicalLine = 0
@@ -426,11 +440,12 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     private func chunk(_ rows: [RenderedLine], start: Int, hangs: Bool, keeping kept: inout [Int: CachedChunk]) -> TextChunk {
-        let serials = rows.map(\.serial) + [hangs ? 1 : 0]
-        if let cached = chunkCache[start], cached.serials == serials {
+        if let cached = chunkCache[start], cached.serials.count == rows.count + 1, cached.serials[rows.count] == (hangs ? 1 : 0),
+           rows.indices.allSatisfy({ cached.serials[$0] == rows[$0].serial }) {
             kept[start] = cached
             return cached.chunk
         }
+        let serials = rows.map(\.serial) + [hangs ? 1 : 0]
         var text = AttributedString()
         for (index, line) in rows.enumerated() {
             if index > 0, !line.wrapped { text.append(AttributedString("\n")) }
@@ -486,11 +501,11 @@ final class BlockEmulator: TerminalDelegate {
             guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
             let fresh: RenderedLine
             if row < settled, !line.isWrapped, let carry = carried[ObjectIdentifier(line)], carry.line === line {
-                fresh = RenderedLine(row: row, line: line, text: carry.text, wrapped: false, extent: carry.extent, serial: carry.serial)
+                fresh = RenderedLine(row: row, line: line, text: carry.text, wrapped: false, extent: carry.extent, units: carry.units, serial: carry.serial)
             } else {
                 renderSerial += 1
-                let (text, extent) = render(line)
-                fresh = RenderedLine(row: row, line: line, text: text, wrapped: line.isWrapped, extent: extent, serial: renderSerial)
+                let (text, extent, units) = render(line)
+                fresh = RenderedLine(row: row, line: line, text: text, wrapped: line.isWrapped, extent: extent, units: units, serial: renderSerial)
             }
             if row < settled {
                 if slot >= lineCache.count { lineCache.append(contentsOf: repeatElement(nil, count: slot - lineCache.count + 1)) }
@@ -521,7 +536,7 @@ final class BlockEmulator: TerminalDelegate {
         return true
     }
 
-    private func render(_ line: BufferLine) -> (text: AttributedString, extent: Int) {
+    private func render(_ line: BufferLine) -> (text: AttributedString, extent: Int, units: Int) {
         var end = line.count
         while end > 0 {
             let cell = line[end - 1]
@@ -540,9 +555,11 @@ final class BlockEmulator: TerminalDelegate {
         var runAttribute = Attribute.empty
         var runPayload: String?
         var started = false
+        var units = 0
         func flush() {
             guard started, !run.isEmpty else { return }
-            result.append(AttributedString(run, attributes: container(runAttribute, link: runPayload.flatMap(Self.link))))
+            result.append(AttributedString(run, attributes: container(runAttribute, link: runPayload.flatMap(link))))
+            units += run.utf16.count
             run = ""
         }
         for column in 0..<end {
@@ -560,7 +577,7 @@ final class BlockEmulator: TerminalDelegate {
             run.append(character == "\u{0}" ? " " : character)
         }
         flush()
-        return (result, end)
+        return (result, end, units)
     }
 
     private func container(_ attribute: Attribute, link: URL?) -> AttributeContainer {
@@ -572,14 +589,11 @@ final class BlockEmulator: TerminalDelegate {
         return built
     }
 
-    private static func link(_ payload: String) -> URL? {
+    private func link(_ payload: String) -> URL? {
         guard let separator = payload.firstIndex(of: ";")
         else { return nil }
         let target = payload[payload.index(after: separator)...]
-        guard let url = URL(string: String(target)),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https", "mailto", "file", "ssh"].contains(scheme)
-        else { return nil }
+        guard let url = URL(string: String(target)), LinkPolicy.allows(url, remote: remoteName != nil) else { return nil }
         return url
     }
 
@@ -591,12 +605,13 @@ final class BlockEmulator: TerminalDelegate {
 
     func clipboardCopy(source: Terminal, content: Data) {
         guard let text = String(data: content, encoding: .utf8) else { return }
+        if let remoteName, !ClipboardPermission.allowWrite(from: remoteName) { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
 
     func clipboardRead(source: Terminal) -> Data? {
-        ClipboardPermission.readClipboard()
+        ClipboardPermission.readClipboard(from: remoteName)
     }
 
     func progressReport(source: Terminal, report: Terminal.ProgressReport) {
@@ -624,30 +639,28 @@ final class BlockEmulator: TerminalDelegate {
         case .reply(let bytes):
             onResponse(bytes[...])
         case .image(let placement):
-            guard let image = NSImage(data: placement.data) else { return }
-            let motion = MotionPicture.decode(placement.data)
-            record(
-                image, width: Self.request(placement.width), height: Self.request(placement.height),
-                animation: motion?.animation, pixels: motion?.pixels ?? Self.pixelSize(of: image)
-            )
+            show(placement)
         }
     }
 
     func createImage(
         source: Terminal, data: Data, width: ImageSizeRequest, height: ImageSizeRequest, preserveAspectRatio: Bool
     ) {
-        guard data.count <= TerminalGraphics.byteLimit, let image = NSImage(data: data) else { return }
+        guard data.count <= TerminalGraphics.byteLimit, GraphicsBounds.admits(imageData: data),
+              let image = NSImage(data: data)
+        else { return }
         let motion = MotionPicture.decode(data)
         let pixels = motion?.pixels ?? Self.pixelSize(of: image)
         if !landKitty(image, pixels: pixels) {
-            record(image, width: width, height: height, animation: motion?.animation, pixels: pixels)
+            record(
+                image, width: width, height: height, animation: motion?.animation, pixels: pixels,
+                preserveAspectRatio: preserveAspectRatio
+            )
         }
     }
 
     func createImageFromBitmap(source: Terminal, bytes: inout [UInt8], width: Int, height: Int) {
-        let byteCount = Int64(width) * Int64(height) * 4
-        guard width > 0, height > 0, byteCount > 0, byteCount <= Int64(TerminalGraphics.byteLimit),
-              bytes.count >= Int(byteCount),
+        guard GraphicsBounds.admits(width: width, height: height), bytes.count >= width * height * 4,
               let provider = CGDataProvider(data: Data(bytes) as CFData),
               let cgImage = CGImage(
                   width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
@@ -661,6 +674,14 @@ final class BlockEmulator: TerminalDelegate {
         if !landKitty(image, pixels: pixels) {
             record(image, width: .auto, height: .auto, pixels: pixels)
         }
+    }
+
+    private func showSixel(_ sequence: ArraySlice<UInt8>) {
+        guard let sixel = SixelDecoder.decode(sequence: sequence), GraphicsBounds.admits(width: sixel.width, height: sixel.height),
+              let cgImage = sixel.cgImage
+        else { return }
+        let pixels = CGSize(width: sixel.width, height: sixel.height)
+        record(NSImage(cgImage: cgImage, size: pixels), width: .auto, height: .auto, pixels: pixels)
     }
 
     private static func request(_ size: InlineGraphics.Size) -> ImageSizeRequest {
@@ -681,13 +702,17 @@ final class BlockEmulator: TerminalDelegate {
 
     private func record(
         _ image: NSImage, width: ImageSizeRequest, height: ImageSizeRequest,
-        animation: KittyAnimation? = nil, pixels: CGSize? = nil
+        animation: KittyAnimation? = nil, pixels: CGSize? = nil, preserveAspectRatio: Bool = true, moveCursor: Bool = true
     ) {
         // full-screen programs draw on the alternate screen, and that content vanishes when they exit
         guard !terminal.isCurrentBufferAlternate else { return }
         var placement = InlineImage(image: image, width: width, height: height, anchor: cursorRow)
         placement.column = min(terminal.buffer.x, max(terminal.cols - 1, 0))
         placement.animation = animation
+        placement.preserveAspectRatio = preserveAspectRatio
+        placement.pane = CGSize(
+            width: CGFloat(terminal.cols) * TerminalMetrics.cellWidth, height: CGFloat(terminal.rows) * TerminalMetrics.lineHeight
+        )
         if let pixels {
             placement.pixelSize = pixels
             placement.scale = Self.backingScale
@@ -698,7 +723,7 @@ final class BlockEmulator: TerminalDelegate {
         placement.rowSpan = rows
         placement.columnSpan = columns
         images.append(placement)
-        cursorAdvance += rows
+        if moveCursor { cursorAdvance += rows }
     }
 
     func showCursor(source: Terminal) { cursorHidden = false }

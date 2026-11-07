@@ -855,7 +855,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
             apply(mark.kind)
             cursor = end
         }
-        if cursor < extracted.bytes.count { present(Array(extracted.bytes[cursor...]), to: block) }
+        if cursor < extracted.bytes.count { present(cursor == 0 ? extracted.bytes : Array(extracted.bytes[cursor...]), to: block) }
         scheduleRender()
     }
 
@@ -877,7 +877,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         while !rest.isEmpty {
             let entering = altScreen == nil
             guard let end = AltScreenSequence.firstSwitch(in: rest, entering: entering) else {
-                deliver(Array(rest), to: block)
+                deliver(rest.count == bytes.count ? bytes : Array(rest), to: block)
                 break
             }
             deliver(Array(rest[..<end]), to: block)
@@ -963,9 +963,14 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         companionTap?(.output(blockID: block.id, bytes: Data(bytes)))
         if let altScreen {
             // The text grid never sees a full-screen frame, so the picture cannot scroll away.
-            var pending = emulatorGraphicsHold
-            pending.append(contentsOf: bytes)
-            let split = KittyGraphicsScanner.split(pending)
+            let scanned = emulatorGraphicsHold.count
+            emulatorGraphicsHold.append(contentsOf: bytes)
+            let hold = emulatorGraphicsHold
+            if scanned > 0, hold.count >= 3, hold[0] == 0x1B, hold[1] == 0x5F, hold[2] == 0x47,
+               KittyGraphicsScanner.terminator(in: hold, from: max(3, scanned - 1)) == nil {
+                return
+            }
+            let split = KittyGraphicsScanner.split(hold)
             emulatorGraphicsHold = Array(split.remainder)
             var plain: [UInt8] = []
             var fallback: [UInt8] = []

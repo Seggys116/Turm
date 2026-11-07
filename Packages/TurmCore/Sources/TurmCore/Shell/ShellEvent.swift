@@ -40,8 +40,16 @@ public nonisolated struct ShellStreamParser: Sendable {
     public init() {}
 
     public mutating func consume(_ bytes: some Sequence<UInt8>) -> [StreamPiece] {
+        if let pieces = bytes.withContiguousStorageIfAvailable({ consume(buffer: $0) }) {
+            return pieces
+        }
+        return Array(bytes).withUnsafeBufferPointer { consume(buffer: $0) }
+    }
+
+    private mutating func consume(buffer: UnsafeBufferPointer<UInt8>) -> [StreamPiece] {
         var pieces: [StreamPiece] = []
         var plain: [UInt8] = []
+        plain.reserveCapacity(buffer.count)
 
         func flush() {
             if !plain.isEmpty {
@@ -50,14 +58,20 @@ public nonisolated struct ShellStreamParser: Sendable {
             }
         }
 
-        for byte in bytes {
+        var index = 0
+        while index < buffer.count {
+            if state == .ground, let base = buffer.baseAddress {
+                let escape = memchr(base + index, Int32(Self.esc), buffer.count - index)
+                let stop = escape.map { base.distance(to: $0.assumingMemoryBound(to: UInt8.self)) } ?? buffer.count
+                plain.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[index..<stop]))
+                index = stop
+                if index == buffer.count { break }
+            }
+            let byte = buffer[index]
+            index += 1
             switch state {
             case .ground:
-                if byte == Self.esc {
-                    state = .escape
-                } else {
-                    plain.append(byte)
-                }
+                state = .escape
             case .escape:
                 if byte == Self.closeBracket {
                     state = .osc

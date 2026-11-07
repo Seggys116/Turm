@@ -91,7 +91,7 @@ final class CompanionBridge {
             session.interrupt()
         case .resize(let id, let cols, let rows):
             guard let session = entries[id]?.session else { return notFound(peer) }
-            guard (2...500).contains(cols), (2...300).contains(rows) else { return malformed(peer) }
+            guard CompanionTerminalSize.contains(cols: cols, rows: rows) else { return malformed(peer) }
             session.resize(cols: cols, rows: rows)
         case .create(let directory, let command, let space):
             create(directory: directory, command: command, space: space, for: peer)
@@ -497,45 +497,71 @@ final class CompanionBridge {
             return fail(peer, "Path is outside the session directory.")
         }
 
-        guard FileManager.default.fileExists(atPath: normalizedPath) else { return notFound(peer) }
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { Self.load(normalizedPath) }.value
+            switch result {
+            case .success(let data):
+                peer.send(.fileContents(id: id, path: normalizedPath, data: data, truncated: false))
+            case .failure(let failure):
+                self?.reply(peer, failure.code, failure.text)
+            }
+        }
+    }
 
+    private nonisolated struct ReadFailure: Error, Sendable {
+        let code: String
+        let text: String
+    }
+
+    private nonisolated static func load(_ path: String) -> Result<Data, ReadFailure> {
+        let descriptor = open(path, O_RDONLY | O_NONBLOCK)
+        guard descriptor >= 0 else {
+            let missing = errno == ENOENT || errno == ENOTDIR
+            return .failure(ReadFailure(
+                code: missing ? CompanionErrorCode.notFound : CompanionErrorCode.failed,
+                text: missing ? "That file no longer exists." : String(cString: strerror(errno))
+            ))
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
+            return .failure(ReadFailure(code: CompanionErrorCode.failed, text: "Only regular files can be read."))
+        }
+        let tooLarge = ReadFailure(code: CompanionErrorCode.failed, text: "That file is larger than the \(CompanionFileLimits.maxRead / 1024 / 1024) MB a phone can open.")
+        guard info.st_size <= CompanionFileLimits.maxRead else { return .failure(tooLarge) }
         do {
-            let raw = try Data(contentsOf: URL(fileURLWithPath: normalizedPath))
-            let (data, truncated) = CompanionFileLimits.cappedData(raw, limit: CompanionFileLimits.maxRead)
-            peer.send(.fileContents(id: id, path: normalizedPath, data: data, truncated: truncated))
+            let data = try handle.read(upToCount: CompanionFileLimits.maxRead + 1) ?? Data()
+            return data.count > CompanionFileLimits.maxRead ? .failure(tooLarge) : .success(data)
         } catch {
-            fail(peer, error.localizedDescription)
+            return .failure(ReadFailure(code: CompanionErrorCode.failed, text: error.localizedDescription))
         }
     }
 
     private func writeFile(id: UUID, path: String, data: Data, overwrite: Bool, for peer: CompanionPeer) {
-        guard entries[id]?.session != nil else { return notFound(peer) }
-
-        let exists = FileManager.default.fileExists(atPath: path)
-        if let sessionDir = entries[id]?.session?.directory,
-           let allowed = Self.allowed(path, root: sessionDir, overwrite: overwrite, exists: exists) {
-            return write(allowed, data: data, peer: peer, request: "writeFile")
-        }
-
-        let uploadsOn = UserDefaults.standard.bool(forKey: "turm.companion.uploads")
-        let uploadRoot = UserDefaults.standard.string(forKey: "turm.companion.uploadRoot") ?? ""
-        guard uploadsOn, !uploadRoot.isEmpty else {
-            return fail(peer, "File uploads are not enabled.")
+        guard let session = entries[id]?.session else { return notFound(peer) }
+        let defaults = UserDefaults.standard
+        let roots: [String]
+        switch CompanionUploads.roots(
+            uploadsEnabled: defaults.bool(forKey: "turm.companion.uploads"),
+            uploadRoot: defaults.string(forKey: "turm.companion.uploadRoot") ?? "",
+            shellDirectory: session.directory
+        ) {
+        case .failure(let refusal):
+            return fail(peer, refusal.text)
+        case .success(let allowed):
+            roots = allowed
         }
         guard data.count <= CompanionFileLimits.maxWrite else {
             return fail(peer, "File exceeds the maximum upload size.")
         }
-        switch CompanionWrites.decide(uploadsEnabled: true, path: path, allowedRoot: uploadRoot, overwrite: overwrite, exists: exists) {
-        case .refuse(let reason):
-            return fail(peer, reason)
-        case .allow(let normalizedPath):
-            let resolvedPath = URL(fileURLWithPath: normalizedPath).resolvingSymlinksInPath().path
-            let resolvedRoot = URL(fileURLWithPath: uploadRoot).resolvingSymlinksInPath().path
-            guard Self.isDescendant(resolvedPath, of: resolvedRoot) else {
-                return fail(peer, "Path is outside the allowed root after symlink resolution.")
+        let exists = FileManager.default.fileExists(atPath: path)
+        if exists, !overwrite { return fail(peer, "That file already exists.") }
+        for root in roots {
+            if let target = Self.allowed(path, root: root, overwrite: overwrite, exists: exists) {
+                return write(target, data: data, peer: peer, request: "writeFile")
             }
-            write(resolvedPath, data: data, peer: peer, request: "writeFile")
         }
+        fail(peer, "That path is outside the folders uploads are allowed into.")
     }
 
     private static func allowed(_ path: String, root: String, overwrite: Bool, exists: Bool) -> String? {

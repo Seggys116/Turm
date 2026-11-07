@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import TurmCore
@@ -65,6 +66,9 @@ final class Workspace {
         }
     }
     private var recentTabs: [UUID] = []
+    @ObservationIgnored private var saveTracker = SaveTracker()
+    @ObservationIgnored private var saveTimer: Task<Void, Never>?
+    @ObservationIgnored private var resignObserver: NSObjectProtocol?
     private var sessions: [PaneID: TerminalSession] = [:]
     private let closeCoordinator: CloseCoordinator
     let windowID: UUID
@@ -99,6 +103,7 @@ final class Workspace {
             sessions[first] = makeSession(for: first)
         }
         closeCoordinator.register(self)
+        observeResign()
     }
 
     init(restoring window: SavedWindow, closeCoordinator: CloseCoordinator = .shared) {
@@ -132,6 +137,15 @@ final class Workspace {
         self.savedFrame = window.frame
         closeCoordinator.register(self)
         created.forEach { bind($1, to: $0) }
+        observeResign()
+    }
+
+    private func observeResign() {
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushPendingSave() }
+        }
     }
 
     func noteFrame(_ rect: NSRect, isKey: Bool) {
@@ -165,7 +179,15 @@ final class Workspace {
         )
     }
 
-    func archivedSessions() -> [ArchivedSession] {
+    func blockSignatures() -> [UUID: Int] {
+        var result: [UUID: Int] = [:]
+        for (pane, session) in sessionEntries {
+            result[pane.raw] = BlockWriteLedger.signature(of: session.blocks.filter { !$0.isRunning }.map(\.id))
+        }
+        return result
+    }
+
+    func archivedSessions(blocksFor: Set<UUID> = []) -> [ArchivedSession] {
         sessionEntries.map { pane, session in
             let hostID = session.restoredHostID ?? session.connection?.host?.id
             let target = session.remoteTarget ?? session.restoredTarget
@@ -185,13 +207,13 @@ final class Workspace {
                 localDirectory = nil
                 remoteTarget = nil
             }
-            let blocks = session.blocks.filter { !$0.isRunning }.map { block in
+            let blocks = blocksFor.contains(pane.raw) ? session.blocks.filter { !$0.isRunning }.map { block in
                 SavedBlock(
                     id: block.id, command: block.command, directory: block.directory, gitBranch: block.git?.branch,
                     host: block.host, exitCode: block.exitCode, duration: block.duration.map(WorkspaceArchive.seconds),
                     output: block.plainOutput
                 )
-            }
+            } : []
             return ArchivedSession(
                 pane: pane, directory: directory, shell: session.archiveShell, history: BlockArchive.cappedHistory(session.history.entries),
                 sshHostID: sshHostID, localDirectory: localDirectory, remoteTarget: remoteTarget,
@@ -201,16 +223,55 @@ final class Workspace {
     }
 
     private func persistLayout() {
-        guard !didTerminate else { return }
-        WorkspacePersistence.save(self)
+        schedulePersist { $0.markLayout(at: $1) }
     }
 
     private func persistBlocks() {
-        guard !didTerminate else { return }
-        WorkspacePersistence.saveBlocks(of: self)
+        schedulePersist { $0.markBlocks(at: $1) }
+    }
+
+    private func schedulePersist(_ mark: (inout SaveTracker, Date) -> Void) {
+        guard !didTerminate, WorkspacePersistence.allowsDisk, persistsToDisk else { return }
+        mark(&saveTracker, Date())
+        armSaveTimer()
+    }
+
+    private func armSaveTimer() {
+        guard saveTimer == nil, let fire = saveTracker.fireTime else { return }
+        let wait = max(0, fire.timeIntervalSinceNow)
+        saveTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            self?.saveTimerFired()
+        }
+    }
+
+    private func saveTimerFired() {
+        saveTimer = nil
+        guard !didTerminate else {
+            saveTracker.cancel()
+            return
+        }
+        if let batch = saveTracker.consumeIfDue(at: Date()) {
+            WorkspacePersistence.flush(self, batch)
+        } else {
+            armSaveTimer()
+        }
+    }
+
+    func cancelPendingSave() {
+        saveTimer?.cancel()
+        saveTimer = nil
+        saveTracker.cancel()
+    }
+
+    func flushPendingSave() {
+        guard saveTracker.isPending else { return }
+        WorkspacePersistence.save(self)
     }
 
     deinit {
+        saveTimer?.cancel()
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         didTerminate = true
         sessions.values.forEach { $0.terminate() }
     }
@@ -256,6 +317,7 @@ final class Workspace {
     func terminateAll() {
         guard !didTerminate else { return }
         didTerminate = true
+        cancelPendingSave()
         let closing = Array(sessions.values)
         sessions.removeAll()
         for session in closing {

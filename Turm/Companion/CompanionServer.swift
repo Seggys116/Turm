@@ -116,6 +116,7 @@ final class CompanionServer {
     struct PendingApproval: Equatable {
         let deviceName: String
         let code: String
+        var confirming = false
     }
 
     struct PairingWindow: Equatable {
@@ -360,7 +361,7 @@ final class CompanionServer {
         }
         let peer = CompanionPeer(connection: CompanionConnection(accepted: network))
         peer.remote = remote
-        peers[peer.id] = peer
+        track(peer)
         peer.connection.onState = { [weak self, weak peer] state in
             guard let self, let peer else { return }
             self.stateChanged(state, of: peer)
@@ -372,7 +373,9 @@ final class CompanionServer {
         peer.timeout = Task { [weak self, weak peer] in
             try? await Task.sleep(for: Self.helloDeadline)
             guard !Task.isCancelled, let self, let peer, peer.stage != .authenticated else { return }
+            let silent = !peer.wasReady
             self.drop(peer)
+            if silent { self.strike(peer.remote) }
         }
         peer.connection.start()
     }
@@ -396,7 +399,8 @@ final class CompanionServer {
 
     private static func host(of endpoint: NWEndpoint) -> String {
         guard case .hostPort(let host, _) = endpoint else { return "unknown" }
-        return "\(host)".split(separator: "%").first.map(String.init) ?? "unknown"
+        let text = "\(host)".split(separator: "%").first.map(String.init) ?? "unknown"
+        return CompanionPeerAddress.key(text)
     }
 
     private func strike(_ remote: String) {
@@ -448,6 +452,10 @@ final class CompanionServer {
         peers[peer.id] = nil
         bridge.peerClosed(peer)
         refreshLiveDevices()
+    }
+
+    func track(_ peer: CompanionPeer) {
+        peers[peer.id] = peer
     }
 
     func received(_ message: CompanionMessage, from peer: CompanionPeer) {
@@ -543,31 +551,50 @@ final class CompanionServer {
         case .finished(let deviceID, _, _, _) where deviceID == macID:
             failPairing(peer, text: "A Mac cannot pair with itself.")
         case .approval(let code, _, let name):
-            peer.timeout?.cancel()
             pairing?.pending = PendingApproval(deviceName: PairedDevices.clean(name), code: code)
-            peer.timeout = Task { [weak self, weak peer] in
-                try? await Task.sleep(for: Self.approvalDeadline)
-                guard !Task.isCancelled, let self, let peer, self.peers[peer.id] != nil else { return }
-                self.failPairing(peer, text: "The pairing was not approved in time.")
-            }
-        case .finished(let deviceID, let name, let key, let reply):
-            do {
-                try devices.add(id: deviceID, name: name, key: key)
-            } catch {
-                failPairing(peer, text: "The pairing key could not be stored.")
-                return
-            }
+            startApprovalTimer(for: peer, text: "The pairing was not approved in time.")
+        case .awaitConfirm(let deviceID, _) where devices.device(deviceID) != nil:
+            failPairing(peer, text: "A device with this ID is already paired with this Mac. Revoke it in Remote Access settings on the Mac first.")
+        case .awaitConfirm(_, let reply):
             peer.send(reply)
-            peer.connection.close()
-            peer.timeout?.cancel()
-            peers[peer.id] = nil
-            let stored = devices.device(deviceID)?.name ?? name
-            endPairing(outcome: .paired(stored))
+            pairing?.pending?.confirming = true
+            startApprovalTimer(for: peer, text: "The other device did not confirm in time.")
+        case .confirmed(let deviceID, let name, let key):
+            store(deviceID: deviceID, name: name, key: key, reply: .pairConfirm, from: peer)
+        case .finished(let deviceID, let name, let key, let reply):
+            store(deviceID: deviceID, name: name, key: key, reply: reply, from: peer)
         }
     }
 
+    private func startApprovalTimer(for peer: CompanionPeer, text: String) {
+        peer.timeout?.cancel()
+        peer.timeout = Task { [weak self, weak peer] in
+            try? await Task.sleep(for: Self.approvalDeadline)
+            guard !Task.isCancelled, let self, let peer, self.peers[peer.id] != nil else { return }
+            self.failPairing(peer, text: text)
+        }
+    }
+
+    private func store(deviceID: UUID, name: String, key: Data, reply: CompanionMessage?, from peer: CompanionPeer) {
+        do {
+            try devices.add(id: deviceID, name: name, key: key)
+        } catch PairedDevices.AddError.duplicate {
+            failPairing(peer, text: "A device with this ID is already paired with this Mac. Revoke it in Remote Access settings on the Mac first.")
+            return
+        } catch {
+            failPairing(peer, text: "The pairing key could not be stored.")
+            return
+        }
+        if let reply { peer.send(reply) }
+        peer.connection.close()
+        peer.timeout?.cancel()
+        peers[peer.id] = nil
+        let stored = devices.device(deviceID)?.name ?? name
+        endPairing(outcome: .paired(stored))
+    }
+
     func approvePairing() {
-        guard pairing?.pending != nil, let id = pairingPeer, let peer = peers[id], var responder = peer.responder else { return }
+        guard let pending = pairing?.pending, !pending.confirming, let id = pairingPeer, let peer = peers[id], var responder = peer.responder else { return }
         let step = responder.approve()
         peer.responder = responder
         apply(step, to: peer)

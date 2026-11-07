@@ -47,7 +47,10 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
 
-    init(cols: Int, rows: Int) {
+    let remoteName: String?
+
+    init(cols: Int, rows: Int, remoteName: String? = nil) {
+        self.remoteName = remoteName
         var options = TerminalOptions.default
         options.cols = cols
         options.rows = rows
@@ -58,6 +61,10 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     }
 
     func feed(_ bytes: [UInt8]) {
+        process(bytes, answering: true)
+    }
+
+    private func process(_ bytes: [UInt8], answering: Bool) {
         let cell = InlineGraphics.Cell(
             height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(BlockEmulator.backingScale)
         )
@@ -68,26 +75,38 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
             case .bytes(let raw):
                 view.feed(byteArray: raw)
             case .sixel(let image):
-                guard image.count <= TerminalGraphics.byteLimit else { continue }
-                view.feed(byteArray: image)
+                guard image.count <= TerminalGraphics.byteLimit, SixelPrescan.admits(image) else { continue }
+                drawSixel(image)
+            case .query(let reply):
+                if answering, !reply.isEmpty { onInput(reply) }
             case .osc(let payload):
-                let text = String(decoding: payload, as: UTF8.self)
-                if text.lowercased().hasPrefix("file=") {
+                let isFile = String(decoding: payload.prefix(5), as: UTF8.self).lowercased() == "file="
+                switch inlineGraphics.receive(payload, cell: cell) {
+                case .reply(let reply):
+                    if answering { onInput(reply) }
+                case .image(let placement):
+                    guard isFile, GraphicsBounds.admits(imageData: placement.data) else { break }
                     var sequence = Array("\u{1B}]1337;".utf8)
                     sequence.append(contentsOf: payload)
                     sequence.append(contentsOf: [0x1B, 0x5C])
                     view.feed(byteArray: sequence[...])
-                } else if case .reply(let reply) = inlineGraphics.receive(payload, cell: cell) {
-                    onInput(reply)
+                case nil:
+                    break
                 }
             }
         }
         graphicHold.hold(split.remainder)
     }
 
+    private func drawSixel(_ sequence: ArraySlice<UInt8>) {
+        guard let sixel = SixelDecoder.decode(sequence: sequence), GraphicsBounds.admits(width: sixel.width, height: sixel.height) else { return }
+        var pixels = sixel.premultipliedRGBA
+        view.createImageFromBitmap(source: view.getTerminal(), bytes: &pixels, width: sixel.width, height: sixel.height)
+    }
+
     func replay(_ bytes: [UInt8]) {
         isReplaying = true
-        view.feed(byteArray: bytes[...])
+        process(bytes, answering: false)
         isReplaying = false
     }
 
@@ -202,7 +221,8 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     func scrolled(source: TerminalView, position: Double) {}
 
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+        guard let url = URL(string: link), LinkPolicy.allows(url, remote: remoteName != nil) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func bell(source: TerminalView) {
@@ -210,6 +230,7 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     }
 
     func clipboardCopy(source: TerminalView, content: Data) {
+        if let remoteName, !ClipboardPermission.allowWrite(from: remoteName) { return }
         NSPasteboard.general.clearContents()
         if let text = String(data: content, encoding: .utf8) {
             NSPasteboard.general.setString(text, forType: .string)
@@ -217,7 +238,7 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     }
 
     func clipboardRead(source: TerminalView) -> Data? {
-        ClipboardPermission.readClipboard()
+        ClipboardPermission.readClipboard(from: remoteName)
     }
 
     func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {

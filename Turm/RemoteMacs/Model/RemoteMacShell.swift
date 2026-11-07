@@ -37,6 +37,8 @@ final class RemoteMacShell {
 
     var hasContent: Bool { macColumns > 0 }
 
+    private var macName: String { connection?.name ?? "the connected Mac" }
+
     var runningBlock: Block? {
         blocks.last { $0.isRunning }
     }
@@ -131,13 +133,14 @@ final class RemoteMacShell {
     }
 
     private func makeBlock(command: String, directory: String, git: CompanionGit?, host: String?, size: (cols: Int, rows: Int)) -> Block {
-        let emulator = BlockEmulator(cols: size.cols, rows: size.rows)
+        let emulator = BlockEmulator(cols: size.cols, rows: size.rows, remoteName: macName)
         emulator.apply(dark: isDark)
         let status = git.map { GitStatus(branch: $0.branch, files: $0.files, added: $0.added, removed: $0.removed) }
         return Block(command: command, directory: directory, git: status, host: host, emulator: emulator)
     }
 
-    private func render(cols: Int, rows: Int, history: [BlockSummary], running: RunningBlock?) {
+    private func render(cols remoteCols: Int, rows remoteRows: Int, history: [BlockSummary], running: RunningBlock?) {
+        let (cols, rows) = CompanionTerminalSize.clamped(cols: remoteCols, rows: remoteRows)
         leaveFullScreen(restoring: false)
         refresh?.cancel()
         refresh = nil
@@ -233,7 +236,7 @@ final class RemoteMacShell {
     private func enterFullScreen(for block: Block) {
         let columns = macColumns >= 2 && macRows >= 2 ? macColumns : Self.fallbackSize.cols
         let rows = macColumns >= 2 && macRows >= 2 ? macRows : Self.fallbackSize.rows
-        let host = AltScreenHost(cols: columns, rows: rows)
+        let host = AltScreenHost(cols: columns, rows: rows, remoteName: macName)
         host.apply(dark: isDark)
         host.replay(block.rawBytes)
         host.onInput = { [weak self] bytes in self?.sendInput(Data(bytes)) }

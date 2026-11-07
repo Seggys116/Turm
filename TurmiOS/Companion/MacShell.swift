@@ -121,11 +121,12 @@ final class MacShell {
         macRows = rows
         if originalSize == nil || fitCount == 0 { originalSize = (cols, rows) }
         let size = emulationSize
-        blocks = history.map { MacBlock(summary: $0, columns: size.cols, rows: size.rows) }
+        let name = connection?.name
+        blocks = history.map { MacBlock(summary: $0, columns: size.cols, rows: size.rows, macName: name) }
         if let running {
             let block = MacBlock(
                 id: running.id, command: running.command, location: running.location, directory: running.directory,
-                git: running.git, host: running.host, columns: size.cols, rows: size.rows, resumed: true
+                git: running.git, host: running.host, columns: size.cols, rows: size.rows, resumed: true, macName: name
             )
             blocks.append(block)
             deliver(running.bytes, to: block)
@@ -142,7 +143,7 @@ final class MacShell {
         let size = emulationSize
         blocks.append(MacBlock(
             id: id, command: command, location: location, directory: directory, git: git, host: host,
-            columns: size.cols, rows: size.rows
+            columns: size.cols, rows: size.rows, macName: connection?.name
         ))
         trimBlocks()
         if !command.isEmpty { phase = .running }

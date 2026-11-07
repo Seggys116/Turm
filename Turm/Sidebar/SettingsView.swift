@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TurmCore
 
 enum AppearancePreference: String, CaseIterable, Identifiable {
     case system
@@ -184,6 +185,8 @@ struct SettingsView: View {
     @AppStorage(AppearancePreference.key) private var appearance = AppearancePreference.system
     @AppStorage(AppIconPreference.key) private var appIcon = AppIconPreference.automatic
     @AppStorage(SidebarPreference.key) private var isSidebarVisible = true
+    @AppStorage(CollapsedSidebarMode.topBarKey) private var collapsedTopBar = true
+    @AppStorage(CollapsedSidebarMode.popOutKey) private var collapsedPopOut = true
     @State private var tab = SettingsTab.appearance
     @State private var isContextMenuEnabled = ContextMenuService.isEnabled
     @State private var isCopyPathEnabled = ContextMenuService.isCopyPathEnabled
@@ -249,10 +252,22 @@ struct SettingsView: View {
             }
         }
         section("Layout") {
-            row("Show sidebar", detail: "The shell list sits on the window background. Hiding it leaves an edge you can hover to bring it back.") {
+            row("Show sidebar", detail: "The shell list sits on the window background. Hiding it leaves the options below.") {
                 Toggle("Show sidebar", isOn: $isSidebarVisible)
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
+            }
+            row("Top bar when collapsed", detail: collapsedTopBarDetail) {
+                Toggle("Top bar when collapsed", isOn: Binding(get: { collapsedMode.topBar }, set: { collapsedTopBar = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(SquareToggleStyle())
+                    .disabled(!collapsedMode.canDisableTopBar)
+            }
+            row("Pop-out sidebar when collapsed", detail: collapsedPopOutDetail) {
+                Toggle("Pop-out sidebar when collapsed", isOn: Binding(get: { collapsedMode.popOut }, set: { collapsedPopOut = $0 }))
+                    .labelsHidden()
+                    .toggleStyle(SquareToggleStyle())
+                    .disabled(!collapsedMode.canDisablePopOut)
             }
             row("Restore windows", detail: "Reopen spaces, folders and finished commands. The files are in Application Support and can contain command output.") {
                 Toggle("Restore windows", isOn: Binding(
@@ -267,6 +282,20 @@ struct SettingsView: View {
                     .buttonStyle(SettingsButtonStyle())
             }
         }
+    }
+
+    private var collapsedMode: CollapsedSidebarMode {
+        CollapsedSidebarMode(topBar: collapsedTopBar, popOut: collapsedPopOut)
+    }
+
+    private var collapsedTopBarDetail: String {
+        let base = "Show the window buttons, a button to bring the sidebar back, and a chip for each shell in a bar above the card."
+        return collapsedMode.canDisableTopBar ? base : base + " It stays on while the pop-out sidebar is off."
+    }
+
+    private var collapsedPopOutDetail: String {
+        let base = "Slide the sidebar over the card when the pointer rests on the left edge."
+        return collapsedMode.canDisablePopOut ? base : base + " It stays on while the top bar is off."
     }
 
     @ViewBuilder

@@ -13,6 +13,8 @@ struct OutputProgress {
 
     private static let lineLimit = 512
 
+    // line holds up to twice the limit so trimming is amortised; recent is the logical line
+
     private var line: [UInt8] = []
     private var lastLine: [UInt8] = []
     private var returned = false
@@ -22,7 +24,11 @@ struct OutputProgress {
 
     mutating func feed(_ bytes: some Sequence<UInt8>) {
         for byte in bytes { consume(byte) }
-        percent = Self.percent(in: line.isEmpty ? lastLine : line)
+        percent = Self.percent(in: line.isEmpty ? lastLine : recent)
+    }
+
+    private var recent: [UInt8] {
+        line.count > Self.lineLimit ? Array(line.suffix(Self.lineLimit)) : line
     }
 
     private mutating func consume(_ byte: UInt8) {
@@ -57,7 +63,7 @@ struct OutputProgress {
         case 0x1B:
             escape = .start
         case 0x0A:
-            if !line.isEmpty { lastLine = line }
+            if !line.isEmpty { lastLine = recent }
             line = []
             returned = false
         case 0x0D:
@@ -70,7 +76,7 @@ struct OutputProgress {
                 returned = false
             }
             line.append(byte)
-            if line.count > Self.lineLimit { line.removeFirst(line.count - Self.lineLimit) }
+            if line.count >= Self.lineLimit * 2 { line.removeFirst(line.count - Self.lineLimit) }
         }
     }
 

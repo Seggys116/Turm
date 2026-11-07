@@ -78,8 +78,8 @@ struct RemotePairingSheet: View {
         switch pairing.state {
         case .working(let text):
             progress(text)
-        case .checking(let code, let macName):
-            checking(code: code, macName: macName)
+        case .checking(let code, let macName, let needsConfirm):
+            checking(code: code, macName: macName, needsConfirm: needsConfirm)
         case .done(let name):
             note("Paired with \(name).")
         case .idle, .failed:
@@ -189,16 +189,26 @@ struct RemotePairingSheet: View {
         .padding(.vertical, 24)
     }
 
-    private func checking(code: String, macName: String) -> some View {
+    private func checking(code: String, macName: String, needsConfirm: Bool) -> some View {
         VStack(spacing: 12) {
             Text(code)
                 .font(.system(size: 34, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.text.color)
-            Text("Compare this code with the one on \(macName), then approve there.")
+            Text(needsConfirm
+                ? "Compare this code with the one on \(macName). Only continue if they are identical."
+                : "Compare this code with the one on \(macName), then approve there.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText.color)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            if needsConfirm {
+                HStack(spacing: 8) {
+                    Button("They Differ") { pairing.codesDiffer() }
+                        .buttonStyle(SettingsButtonStyle())
+                    Button("Codes Match") { pairing.confirmCodes() }
+                        .buttonStyle(SettingsButtonStyle(prominent: true))
+                }
+            }
         }
         .padding(.vertical, 12)
     }

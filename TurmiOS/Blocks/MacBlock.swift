@@ -25,7 +25,7 @@ final class MacBlock: Identifiable {
     @ObservationIgnored private var started: Date?
     @ObservationIgnored private var refresh: Task<Void, Never>?
 
-    init(summary: BlockSummary, columns: Int = 80, rows: Int = 24) {
+    init(summary: BlockSummary, columns: Int = 80, rows: Int = 24, macName: String? = nil) {
         id = summary.id
         command = summary.command
         location = summary.location
@@ -38,6 +38,7 @@ final class MacBlock: Identifiable {
         isRunning = false
         if let styled = summary.styled, !styled.isEmpty {
             let emulator = MacBlockEmulator(cols: columns, rows: rows)
+            emulator.macName = macName
             emulator.feed([UInt8](styled))
             output = emulator.render()
         } else {
@@ -47,7 +48,7 @@ final class MacBlock: Identifiable {
 
     init(
         id: UUID, command: String, location: String, directory: String, git: CompanionGit?, host: String?,
-        columns: Int, rows: Int, resumed: Bool = false, respond: (([UInt8]) -> Void)? = nil
+        columns: Int, rows: Int, resumed: Bool = false, macName: String? = nil, respond: (([UInt8]) -> Void)? = nil
     ) {
         self.id = id
         self.command = command
@@ -60,6 +61,7 @@ final class MacBlock: Identifiable {
         output = NSAttributedString()
         started = resumed ? nil : Date()
         let emulator = MacBlockEmulator(cols: columns, rows: rows)
+        emulator.macName = macName
         emulator.onProgress = { [weak self] report in self?.progress = report }
         emulator.onResponse = respond
         self.emulator = emulator

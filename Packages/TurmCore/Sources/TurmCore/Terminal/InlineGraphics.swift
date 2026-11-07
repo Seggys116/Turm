@@ -19,6 +19,8 @@ public enum InlineGraphics {
         public var width: Size
         public var height: Size
         public var preserveAspectRatio: Bool
+        public var moveCursor = true
+        public var declaredSize: Int?
     }
 
     public struct Cell: Equatable, Sendable {
@@ -154,7 +156,11 @@ public struct InlineGraphicsSession: Sendable {
             return .reply(Self.capabilities)
         case "multipartfile":
             let fields = Self.fields(value)
-            transfer = Transfer(inline: fields["inline"] == "1", width: Self.dimension(fields["width"]), height: Self.dimension(fields["height"]), preserveAspectRatio: fields["preserveAspectRatio"] != "0")
+            transfer = Transfer(
+                inline: fields["inline"] == "1", width: Self.dimension(fields["width"]), height: Self.dimension(fields["height"]),
+                preserveAspectRatio: fields["preserveAspectRatio"] != "0",
+                moveCursor: fields["doNotMoveCursor"] != "1", declaredSize: fields["size"].flatMap { Int($0) }
+            )
             return nil
         case "filepart":
             transfer?.append(value)
@@ -165,6 +171,7 @@ public struct InlineGraphicsSession: Sendable {
         case "file":
             return Self.file(value)
         default:
+            // CurrentDir, RemoteHost, SetUserVar and SetMark have no consumer in the terminal views, so they are dropped
             return nil
         }
     }
@@ -180,7 +187,9 @@ public struct InlineGraphicsSession: Sendable {
             data: data,
             width: dimension(fields["width"]),
             height: dimension(fields["height"]),
-            preserveAspectRatio: fields["preserveAspectRatio"] != "0"
+            preserveAspectRatio: fields["preserveAspectRatio"] != "0",
+            moveCursor: fields["doNotMoveCursor"] != "1",
+            declaredSize: fields["size"].flatMap { Int($0) }
         ))
     }
 
@@ -220,6 +229,8 @@ public struct InlineGraphicsSession: Sendable {
         var width: InlineGraphics.Size
         var height: InlineGraphics.Size
         var preserveAspectRatio: Bool
+        var moveCursor: Bool
+        var declaredSize: Int?
         var encoded = ""
 
         mutating func append(_ chunk: String) {
@@ -235,7 +246,10 @@ public struct InlineGraphicsSession: Sendable {
             guard inline, let data = Data(base64Encoded: Data(encoded.utf8), options: .ignoreUnknownCharacters), !data.isEmpty else {
                 return nil
             }
-            return InlineGraphics.Placement(data: data, width: width, height: height, preserveAspectRatio: preserveAspectRatio)
+            return InlineGraphics.Placement(
+                data: data, width: width, height: height, preserveAspectRatio: preserveAspectRatio,
+                moveCursor: moveCursor, declaredSize: declaredSize
+            )
         }
     }
 }
@@ -253,6 +267,8 @@ public enum TerminalGraphics {
         case bytes(ArraySlice<UInt8>)
         case osc(ArraySlice<UInt8>)
         case sixel(ArraySlice<UInt8>)
+        /// The reply to a `CSI ? Pi ; Pa ; Pv S` graphics attribute query, which the terminal engine must never see.
+        case query([UInt8])
     }
 
     public static func split(_ bytes: [UInt8]) -> (pieces: [Piece], remainder: ArraySlice<UInt8>) {
@@ -281,6 +297,15 @@ public enum TerminalGraphics {
                 pieces.append(.sixel(bytes[index..<sequenceEnd]))
                 plain = sequenceEnd
                 index = sequenceEnd
+            case .query(let reply, let sequenceEnd):
+                if plain < index { pieces.append(.bytes(bytes[plain..<index])) }
+                pieces.append(.query(reply))
+                plain = sequenceEnd
+                index = sequenceEnd
+            case .cancelled(let sequenceEnd):
+                if plain < index { pieces.append(.bytes(bytes[plain..<index])) }
+                plain = sequenceEnd
+                index = sequenceEnd
             }
         }
         if plain < bytes.count { pieces.append(.bytes(bytes[plain...])) }
@@ -292,7 +317,33 @@ public enum TerminalGraphics {
         case incomplete
         case osc(payloadEnd: Int, sequenceEnd: Int)
         case sixel(sequenceEnd: Int)
+        case query(reply: [UInt8], sequenceEnd: Int)
+        case cancelled(sequenceEnd: Int)
     }
+
+    fileprivate enum Ending {
+        case closed(payloadEnd: Int, sequenceEnd: Int)
+        case cancelled(sequenceEnd: Int)
+    }
+
+    /// Where the terminator search of a held image sequence begins, once its header is complete.
+    fileprivate static func bodyStart(of held: [UInt8]) -> (index: Int, allowBell: Bool)? {
+        guard held.count >= 2, held[0] == 0x1B else { return nil }
+        switch held[1] {
+        case 0x5D:
+            guard held.count >= 2 + marker.count, held[2..<(2 + marker.count)].elementsEqual(marker) else { return nil }
+            return (2 + marker.count, true)
+        case 0x50:
+            var cursor = 2
+            while cursor < held.count, held[cursor] >= 0x20, held[cursor] <= 0x3F { cursor += 1 }
+            guard cursor < held.count, held[cursor] == 0x71 else { return nil }
+            return (cursor + 1, false)
+        default:
+            return nil
+        }
+    }
+
+    private static let queryLimit = 64
 
     private static let marker = Array("1337;".utf8)
 
@@ -303,11 +354,30 @@ public enum TerminalGraphics {
             return osc(bytes, at: index)
         case 0x50:
             return sixel(bytes, at: index)
+        case 0x5B:
+            return query(bytes, at: index)
         default:
             return .text
         }
     }
 
+    private static func query(_ bytes: [UInt8], at index: Int) -> Mark {
+        let introducer = index + 2
+        guard introducer < bytes.count else { return .incomplete }
+        guard bytes[introducer] == 0x3F else { return .text }
+        let start = introducer + 1
+        var cursor = start
+        while cursor < bytes.count, cursor - start <= queryLimit, bytes[cursor] == 0x3B || (0x30...0x39).contains(bytes[cursor]) {
+            cursor += 1
+        }
+        if cursor - start > queryLimit { return .text }
+        guard cursor < bytes.count else { return .incomplete }
+        guard bytes[cursor] == 0x53 else { return .text }
+        let numbers = bytes[start..<cursor].split(separator: 0x3B, omittingEmptySubsequences: false).map { field in
+            field.reduce(0) { min($0 * 10 + Int($1 - 0x30), 1_000_000_000) }
+        }
+        return .query(reply: GraphicsAttributes.reply(for: numbers) ?? [], sequenceEnd: cursor + 1)
+    }
     private static func osc(_ bytes: [UInt8], at index: Int) -> Mark {
         let start = index + 2
         let available = bytes.count - start
@@ -315,8 +385,11 @@ public enum TerminalGraphics {
             return bytes[start...].elementsEqual(marker.prefix(available)) ? .incomplete : .text
         }
         guard bytes[start..<(start + marker.count)].elementsEqual(marker) else { return .text }
-        guard let end = terminator(bytes, from: start + marker.count, allowBell: true) else { return .incomplete }
-        return .osc(payloadEnd: end.payloadEnd, sequenceEnd: end.sequenceEnd)
+        switch terminator(bytes, from: start + marker.count, allowBell: true) {
+        case .closed(let payloadEnd, let sequenceEnd)?: return .osc(payloadEnd: payloadEnd, sequenceEnd: sequenceEnd)
+        case .cancelled(let sequenceEnd)?: return .cancelled(sequenceEnd: sequenceEnd)
+        case nil: return .incomplete
+        }
     }
 
     private static func sixel(_ bytes: [UInt8], at index: Int) -> Mark {
@@ -324,16 +397,21 @@ public enum TerminalGraphics {
         while cursor < bytes.count, bytes[cursor] >= 0x20, bytes[cursor] <= 0x3F { cursor += 1 }
         guard cursor < bytes.count else { return .incomplete }
         guard bytes[cursor] == 0x71 else { return .text }
-        guard let end = terminator(bytes, from: cursor + 1, allowBell: false) else { return .incomplete }
-        return .sixel(sequenceEnd: end.sequenceEnd)
+        switch terminator(bytes, from: cursor + 1, allowBell: false) {
+        case .closed(_, let sequenceEnd)?: return .sixel(sequenceEnd: sequenceEnd)
+        case .cancelled(let sequenceEnd)?: return .cancelled(sequenceEnd: sequenceEnd)
+        case nil: return .incomplete
+        }
     }
 
-    private static func terminator(_ bytes: [UInt8], from index: Int, allowBell: Bool) -> (payloadEnd: Int, sequenceEnd: Int)? {
+    fileprivate static func terminator(_ bytes: [UInt8], from index: Int, allowBell: Bool) -> Ending? {
         var cursor = index
         while cursor < bytes.count {
-            if allowBell, bytes[cursor] == 0x07 { return (cursor, cursor + 1) }
+            if allowBell, bytes[cursor] == 0x07 { return .closed(payloadEnd: cursor, sequenceEnd: cursor + 1) }
+            if bytes[cursor] == 0x9C { return .closed(payloadEnd: cursor, sequenceEnd: cursor + 1) }
+            if bytes[cursor] == 0x18 || bytes[cursor] == 0x1A { return .cancelled(sequenceEnd: cursor + 1) }
             if bytes[cursor] == 0x1B, cursor + 1 < bytes.count, bytes[cursor + 1] == 0x5C {
-                return (cursor, cursor + 2)
+                return .closed(payloadEnd: cursor, sequenceEnd: cursor + 2)
             }
             if bytes[cursor] == 0x1B, cursor + 1 == bytes.count { return nil }
             cursor += 1
@@ -350,14 +428,34 @@ public enum TerminalGraphics {
 public struct GraphicHold: Sendable {
     private var pending: [UInt8] = []
     private var discarding = false
+    private var bellEnds = true
+    private var scanned: Int?
 
     public init() {}
 
     public mutating func intake(_ incoming: [UInt8]) -> [UInt8]? {
         if discarding {
-            guard let end = Self.sequenceEnd(incoming, from: 0) else { return nil }
+            guard let end = Self.sequenceEnd(incoming, from: 0, allowBell: bellEnds) else { return nil }
             discarding = false
             return intake(Array(incoming[end...]))
+        }
+        // a held sequence still waiting for its terminator is extended in place and only the new bytes are searched
+        if let from = scanned {
+            pending.append(contentsOf: incoming)
+            if TerminalGraphics.terminator(pending, from: from, allowBell: bellEnds) == nil {
+                if pending.count > TerminalGraphics.byteLimit {
+                    discarding = true
+                    pending = []
+                    scanned = nil
+                } else {
+                    scanned = max(from, pending.count - (pending.last == 0x1B ? 1 : 0))
+                }
+                return nil
+            }
+            scanned = nil
+            let combined = pending
+            pending = []
+            return combined
         }
         var combined = pending
         pending = []
@@ -366,22 +464,29 @@ public struct GraphicHold: Sendable {
     }
 
     public mutating func hold(_ suffix: ArraySlice<UInt8>) {
+        scanned = nil
         guard !suffix.isEmpty else {
             pending = []
             return
         }
         if suffix.count > TerminalGraphics.byteLimit {
             discarding = true
+            bellEnds = !suffix.starts(with: [0x1B, 0x50])
             pending = []
             return
         }
         pending = Array(suffix)
+        if let body = TerminalGraphics.bodyStart(of: pending) {
+            scanned = body.index
+            bellEnds = body.allowBell
+        }
     }
 
-    private static func sequenceEnd(_ bytes: [UInt8], from index: Int) -> Int? {
+    private static func sequenceEnd(_ bytes: [UInt8], from index: Int, allowBell: Bool) -> Int? {
         var cursor = index
         while cursor < bytes.count {
-            if bytes[cursor] == 0x07 { return cursor + 1 }
+            if allowBell, bytes[cursor] == 0x07 { return cursor + 1 }
+            if bytes[cursor] == 0x9C || bytes[cursor] == 0x18 || bytes[cursor] == 0x1A { return cursor + 1 }
             if bytes[cursor] == 0x1B, cursor + 1 < bytes.count, bytes[cursor + 1] == 0x5C {
                 return cursor + 2
             }

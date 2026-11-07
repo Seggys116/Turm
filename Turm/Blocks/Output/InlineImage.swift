@@ -38,6 +38,8 @@ struct InlineImage: Identifiable {
     var crop: CGRect?
     var tile: KittyTile?
     var background: NSColor?
+    var preserveAspectRatio = true
+    var pane = CGSize.zero
 
     var naturalSize: CGSize {
         guard pixelSize.width > 0, pixelSize.height > 0 else { return image.size }
@@ -47,8 +49,8 @@ struct InlineImage: Identifiable {
     func requestedSize(cellWidth: CGFloat, lineHeight: CGFloat) -> CGSize {
         let natural = naturalSize
         guard natural.width > 0, natural.height > 0 else { return .zero }
-        let requestedWidth = Self.points(width, cell: cellWidth)
-        let requestedHeight = Self.points(height, cell: lineHeight)
+        let requestedWidth = Self.points(width, cell: cellWidth, pane: pane.width)
+        let requestedHeight = Self.points(height, cell: lineHeight, pane: pane.height)
         switch (requestedWidth, requestedHeight) {
         case (nil, nil):
             return natural
@@ -61,11 +63,12 @@ struct InlineImage: Identifiable {
         }
     }
 
-    private static func points(_ request: ImageSizeRequest, cell: CGFloat) -> CGFloat? {
+    private static func points(_ request: ImageSizeRequest, cell: CGFloat, pane: CGFloat) -> CGFloat? {
         switch request {
         case .cells(let count): return CGFloat(count) * cell
         case .pixels(let count): return CGFloat(count)
-        case .auto, .percent: return nil
+        case .percent(let count): return pane > 0 ? pane * CGFloat(count) / 100 : nil
+        case .auto: return nil
         }
     }
 }

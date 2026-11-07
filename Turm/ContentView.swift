@@ -28,6 +28,11 @@ struct ContentView: View {
                 sidebarWidth: sidebarWidth,
                 onSidebarWidth: { storedSidebarWidth = Double($0) },
                 sidebar: { sidebar },
+                topBar: {
+                    CollapsedTopBar(library: library, host: host, workspace: workspace) {
+                        withAnimation(ChromeMetrics.motion) { isSidebarVisible = true }
+                    }
+                },
                 content: { content }
             )
             searchLayer

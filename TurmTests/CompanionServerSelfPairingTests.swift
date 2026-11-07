@@ -28,6 +28,7 @@ struct CompanionServerSelfPairingTests {
                 sent.append($0)
                 return true
             })
+            server.track(peer)
         }
 
         func pair(deviceID: UUID, bootstrap: CompanionBootstrap) throws -> CompanionMessage {
@@ -77,6 +78,74 @@ struct CompanionServerSelfPairingTests {
         #expect(errorText(reply) == "A Mac cannot pair with itself.")
         #expect(harness.server.pairing?.pending == nil)
         #expect(harness.server.devices.devices.isEmpty)
+    }
+
+    @Test func typedCodePairingStoresOnlyAfterTheClientConfirms() throws {
+        let harness = try Harness()
+        defer { harness.finish() }
+        let window = try #require(harness.server.pairing)
+        let other = UUID()
+        var client = CompanionPairingClient(bootstrap: .code(window.code), deviceID: other, deviceName: "Other Mac")
+        harness.server.received(client.begin(), from: harness.peer)
+        let key = try #require(harness.sent.last)
+        guard case .confirm(_, let reveal) = client.receive(key) else {
+            Issue.record("the client did not reach the confirm step")
+            return
+        }
+        harness.server.received(reveal, from: harness.peer)
+        #expect(harness.server.pairing?.pending != nil)
+        harness.server.approvePairing()
+        let done = try #require(harness.sent.last)
+        guard case .pairDone = done else {
+            Issue.record("expected pairDone, got \(done)")
+            return
+        }
+        #expect(harness.server.pairing?.pending?.confirming == true)
+        #expect(harness.server.devices.device(other) == nil)
+        _ = client.receive(done)
+        guard case .finishing(let confirm, _, _, _) = client.approve() else {
+            Issue.record("the client did not release its key")
+            return
+        }
+        harness.server.received(confirm, from: harness.peer)
+        #expect(harness.server.devices.device(other) != nil)
+    }
+
+    @Test func rejectingAfterPairDoneStoresNothing() throws {
+        let harness = try Harness()
+        defer { harness.finish() }
+        let window = try #require(harness.server.pairing)
+        let other = UUID()
+        var client = CompanionPairingClient(bootstrap: .code(window.code), deviceID: other, deviceName: "Other Mac")
+        harness.server.received(client.begin(), from: harness.peer)
+        let key = try #require(harness.sent.last)
+        guard case .confirm(_, let reveal) = client.receive(key) else {
+            Issue.record("the client did not reach the confirm step")
+            return
+        }
+        harness.server.received(reveal, from: harness.peer)
+        harness.server.approvePairing()
+        harness.server.rejectPairing()
+        #expect(harness.server.devices.device(other) == nil)
+        #expect(harness.server.devices.devices.isEmpty)
+    }
+
+    @Test func aClientThatNeverDeclaredConfirmationStoresOnApproval() throws {
+        let harness = try Harness()
+        defer { harness.finish() }
+        let window = try #require(harness.server.pairing)
+        let other = UUID()
+        var client = CompanionPairingClient(bootstrap: .code(window.code), deviceID: other, deviceName: "Old Phone")
+        guard case .pairBegin(let id, let name, let commitment, _) = client.begin() else { return }
+        harness.server.received(.pairBegin(deviceID: id, name: name, commitment: commitment), from: harness.peer)
+        let key = try #require(harness.sent.last)
+        guard case .confirm(_, let reveal) = client.receive(key) else {
+            Issue.record("the client did not reach the confirm step")
+            return
+        }
+        harness.server.received(reveal, from: harness.peer)
+        harness.server.approvePairing()
+        #expect(harness.server.devices.device(other) != nil)
     }
 
     @Test func qrPairingFromAnotherDeviceStillSucceeds() throws {

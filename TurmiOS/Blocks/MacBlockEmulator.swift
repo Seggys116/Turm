@@ -9,6 +9,7 @@ final class MacBlockEmulator: TerminalDelegate {
     private(set) var terminal: Terminal!
     var onProgress: (Terminal.ProgressReport?) -> Void = { _ in }
     var onResponse: (([UInt8]) -> Void)?
+    var macName: String?
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
     private var pictures: [Picture] = []
@@ -42,8 +43,10 @@ final class MacBlockEmulator: TerminalDelegate {
             case .osc(let payload):
                 showCommand(payload)
             case .sixel(let image):
-                guard image.count <= TerminalGraphics.byteLimit else { continue }
-                terminal.feed(byteArray: Array(image))
+                guard image.count <= TerminalGraphics.byteLimit, SixelPrescan.admits(image) else { continue }
+                showSixel(image)
+            case .query(let reply):
+                if !reply.isEmpty { onResponse?(reply) }
             case .bytes(let raw):
                 let text = Array(raw)
                 if text.contains(0x1B) { noteClears(text) }
@@ -183,13 +186,22 @@ final class MacBlockEmulator: TerminalDelegate {
             guard let image = scaled(placement.data) else { return }
             place(
                 image, width: request(placement.width), height: request(placement.height),
-                preserveAspectRatio: placement.preserveAspectRatio, fromEngine: false
+                preserveAspectRatio: placement.preserveAspectRatio, fromEngine: false, moveCursor: placement.moveCursor
             )
         }
     }
 
+    private func showSixel(_ sequence: ArraySlice<UInt8>) {
+        guard let sixel = SixelDecoder.decode(sequence: sequence), GraphicsBounds.admits(width: sixel.width, height: sixel.height),
+              let cgImage = sixel.cgImage
+        else { return }
+        let image = UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
+        place(image, width: .auto, height: .auto, preserveAspectRatio: true, fromEngine: true)
+    }
+
     private func place(
-        _ image: UIImage, width: ImageSizeRequest, height: ImageSizeRequest, preserveAspectRatio: Bool, fromEngine: Bool
+        _ image: UIImage, width: ImageSizeRequest, height: ImageSizeRequest, preserveAspectRatio: Bool, fromEngine: Bool,
+        moveCursor: Bool = true
     ) {
         guard !terminal.isCurrentBufferAlternate else { return }
         let cell = BlockStyle.cellSize(fontSize: fontSize)
@@ -214,7 +226,7 @@ final class MacBlockEmulator: TerminalDelegate {
         pictures.append(Picture(row: row, rows: rows, columns: columns, image: image))
         if fromEngine {
             anchored.append((row, rows))
-        } else {
+        } else if moveCursor {
             terminal.feed(byteArray: Array(String(repeating: "\r\n", count: rows).utf8))
         }
     }
@@ -237,7 +249,7 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     private func scaled(_ data: Data) -> UIImage? {
-        guard let image = UIImage(data: data) else { return nil }
+        guard GraphicsBounds.admits(imageData: data), let image = UIImage(data: data) else { return nil }
         guard let cgImage = image.cgImage else { return image }
         return UIImage(cgImage: cgImage, scale: displayScale, orientation: image.imageOrientation)
     }
@@ -347,9 +359,7 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     func createImageFromBitmap(source: Terminal, bytes: inout [UInt8], width: Int, height: Int) {
-        let byteCount = Int64(width) * Int64(height) * 4
-        guard width > 0, height > 0, byteCount > 0, byteCount <= Int64(TerminalGraphics.byteLimit),
-              bytes.count >= Int(byteCount),
+        guard GraphicsBounds.admits(width: width, height: height), bytes.count >= width * height * 4,
               let provider = CGDataProvider(data: Data(bytes) as CFData),
               let cgImage = CGImage(
                 width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
@@ -364,7 +374,25 @@ final class MacBlockEmulator: TerminalDelegate {
 
     func clipboardCopy(source: Terminal, content: Data) {
         guard let text = String(data: content, encoding: .utf8) else { return }
-        UIPasteboard.general.string = text
+        let name = macName ?? "the connected Mac"
+        DispatchQueue.main.async { Self.confirmCopy(text, from: name) }
+    }
+
+    private static func confirmCopy(_ text: String, from name: String) {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }),
+              var presenter = scene.keyWindow?.rootViewController
+        else { return }
+        while let next = presenter.presentedViewController { presenter = next }
+        guard !(presenter is UIAlertController) else { return }
+        let alert = UIAlertController(
+            title: "Allow \(name) to change your clipboard?",
+            message: "A program running on \(name) asked to copy text to the clipboard on this device.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Deny", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Allow Once", style: .default) { _ in UIPasteboard.general.string = text })
+        presenter.present(alert, animated: true)
     }
 
     func clipboardRead(source: Terminal) -> Data? {

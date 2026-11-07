@@ -184,7 +184,8 @@ private struct RemoteSessionView: View {
             .onEnded { value in
                 driver.task?.cancel()
                 driver.task = nil
-                if driver.active, !driver.moved, driver.clicks == 1, let url = selection.link(at: contentPoint(value.location)) {
+                if driver.active, !driver.moved, driver.clicks == 1, let url = selection.link(at: contentPoint(value.location)),
+                   LinkPolicy.allows(url, remote: true) {
                     NSWorkspace.shared.open(url)
                 }
                 if driver.active { selection.hasSelection ? selection.claimFocus() : selection.releaseFocus() }

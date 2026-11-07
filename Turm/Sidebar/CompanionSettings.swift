@@ -51,13 +51,13 @@ struct CompanionSettings: View {
                     .toggleStyle(SquareToggleStyle())
                     .onChange(of: enabled) { _, _ in server.settingsChanged() }
             }
-            SettingsFormRow("Allow file uploads", detail: "A paired device can upload into the folder you choose. Off until you turn it on.") {
+            SettingsFormRow("Allow file uploads", detail: "A paired device can upload into the folder you choose and into a shell's current folder. Off until you turn it on.") {
                 Toggle("Allow file uploads", isOn: $uploadsEnabled)
                     .labelsHidden()
                     .toggleStyle(SquareToggleStyle())
             }
             if uploadsEnabled {
-                SettingsFormRow("Upload folder", detail: uploadRoot.isEmpty ? "Choose a folder. Uploads outside it are refused." : uploadRoot) {
+                SettingsFormRow("Upload folder", detail: uploadRoot.isEmpty ? "Choose a folder. Uploads stay off until you do." : uploadRoot) {
                     Button("Choose...") { chooseUploadFolder() }
                         .buttonStyle(SettingsButtonStyle())
                 }
@@ -293,11 +293,17 @@ private struct CompanionPairingSheet: View {
                 .foregroundStyle(Theme.secondaryText.color)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            if pending.confirming {
+                Text("Waiting for the other device to confirm...")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondaryText.color)
+            }
             HStack(spacing: 8) {
                 Button("Reject") { server.rejectPairing() }
                     .buttonStyle(SettingsButtonStyle())
                 Button("Approve") { server.approvePairing() }
                     .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(pending.confirming)
             }
         }
     }

@@ -14,7 +14,8 @@ final class Block: Identifiable {
     let emulator: BlockEmulator
     private(set) var connectedTo: String?
     private(set) var notice: String?
-    private(set) var output = ""
+    @ObservationIgnored private var cachedOutput = ""
+    @ObservationIgnored private var cachedOutputRevision = -1
     private(set) var segments: [OutputSegment] = []
     private(set) var cursor: OutputCursor?
     private(set) var exitCode: Int32?
@@ -47,11 +48,17 @@ final class Block: Identifiable {
     }
 
     var rawBytes: [UInt8] {
-        rawLog
+        rawLog.count > Self.rawLogLimit ? Array(rawLog.suffix(Self.rawLogLimit)) : rawLog
     }
 
+    var output: String { plainOutput }
+
     var plainOutput: String {
-        output
+        if cachedOutputRevision != revision {
+            cachedOutput = segments.plainText
+            cachedOutputRevision = revision
+        }
+        return cachedOutput
     }
 
     var hasOutput: Bool {
@@ -60,7 +67,7 @@ final class Block: Identifiable {
 
     func append(_ bytes: [UInt8]) {
         rawLog.append(contentsOf: bytes)
-        if rawLog.count > Self.rawLogLimit {
+        if rawLog.count > Self.rawLogLimit + Self.rawLogLimit / 4 {
             rawLog.removeFirst(rawLog.count - Self.rawLogLimit)
         }
         emulator.feed(bytes)
@@ -69,7 +76,6 @@ final class Block: Identifiable {
     func refreshOutput() {
         segments = emulator.renderSegments()
         cursor = emulator.cursor
-        output = segments.plainText
         revision += 1
     }
 

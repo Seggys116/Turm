@@ -120,6 +120,11 @@ enum KittyGraphicsScanner {
                     return finish(bytes, pieces, start, index)
                 }
                 if start < index { pieces.append(Piece(bytes: bytes[start..<index], kind: .text)) }
+                if bytes[end] != escape {
+                    start = end + 1
+                    index = start
+                    continue
+                }
                 let body = bytes[(index + 3)..<end]
                 let control = body.firstIndex(of: 0x3B).map { body[..<$0] } ?? body
                 pieces.append(Piece(bytes: bytes[index..<(end + 2)], kind: .graphics(parse(control))))
@@ -175,10 +180,12 @@ enum KittyGraphicsScanner {
         return result
     }
 
+    /// Index of the `ESC \` that closes a command, or of the CAN or SUB byte that cancels it.
     static func terminator(in bytes: [UInt8], from: Int) -> Int? {
         var end = max(from, 0)
-        while end + 1 < bytes.count {
-            if bytes[end] == escape, bytes[end + 1] == 0x5C { return end }
+        while end < bytes.count {
+            if bytes[end] == 0x18 || bytes[end] == 0x1A { return end }
+            if bytes[end] == escape, end + 1 < bytes.count, bytes[end + 1] == 0x5C { return end }
             end += 1
         }
         return nil
