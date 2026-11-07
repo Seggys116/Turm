@@ -114,6 +114,17 @@ enum KittyLoadCheck {
         return nil
     }
 
+    static func sharedSlice(_ name: String, offset: Int, count: Int) -> Data? {
+        let descriptor = name.withCString { sharedMemoryOpen($0, O_RDONLY, 0) }
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, offset >= 0, count > 0, offset + count <= Int(info.st_size) else { return nil }
+        guard let map = mmap(nil, Int(info.st_size), PROT_READ, MAP_SHARED, descriptor, 0), map != MAP_FAILED else { return nil }
+        defer { munmap(map, Int(info.st_size)) }
+        return Data(bytes: map.advanced(by: offset), count: count)
+    }
+
     private static func finish(_ state: inout KittyLoadState, _ command: KittyCommand) -> KittyFailure? {
         if let compression = command.compression, compression != "z" {
             return KittyFailure(code: "EINVAL", message: "Unknown image compression: \(compression)")

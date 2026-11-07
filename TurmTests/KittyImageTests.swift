@@ -1892,3 +1892,356 @@ struct KittyScrollbackClearTests {
         }
     }
 }
+
+struct KittyQueryTests {
+    @Test func queryOfValidDataRepliesOKWithoutStoring() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=q,f=24,s=1,v=1,i=31", pixel))
+        #expect(replies.contain("i=31;OK"))
+        #expect(emulator.sources[31] == nil)
+        #expect(emulator.images.isEmpty)
+    }
+
+    @Test func queryOfBadFormatRepliesWithTheError() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=q,f=99,s=1,v=1,i=31", pixel))
+        #expect(replies.contain("i=31;EINVAL:Unknown image format: 99"))
+        #expect(!replies.contain("OK"))
+    }
+
+    @Test func queryWithAnIDAndANumberIsRejected() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=q,f=24,s=1,v=1,i=31,I=2", pixel))
+        #expect(replies.contain("EINVAL:Must not specify both image id and image number"))
+        #expect(!replies.contain("OK"))
+    }
+}
+
+struct KittyMissingActionTests {
+    @Test func missingActionTransmitsLikeT() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("f=24,s=1,v=1,i=9", pixel))
+        #expect(replies.contain("i=9;OK"))
+        #expect(emulator.sources[9] != nil)
+        #expect(emulator.images.isEmpty)
+        emulator.feed(apc("a=p,i=9,C=1"))
+        #expect(emulator.images.map(\.kittyID) == [9])
+    }
+
+    @Test func missingActionFeedsTheQuota() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("f=24,s=1,v=1,i=9", pixel))
+        #expect(emulator.usedStorage > 0)
+    }
+
+    @Test func chunksWithoutAnActionContinueTheActiveJob() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=t,f=24,s=2,v=1,i=6,m=1", "AAAA"))
+        #expect(emulator.sources[6] == nil)
+        emulator.feed(apc("m=0", "AAAA"))
+        #expect(emulator.sources[6]?.size.width == 2)
+    }
+
+    @Test func chunkedTransmitWithoutAnyActionKey() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("f=24,s=2,v=1,i=6,m=1", "AAAA"))
+        emulator.feed(apc("m=0", "AAAA"))
+        #expect(emulator.sources[6]?.size.width == 2)
+    }
+}
+
+struct KittyFileSliceTests {
+    private func place(_ data: Data, _ keys: String, medium: String = "f") -> (BlockEmulator, Replies) {
+        let url = scratchFile(data, protocolName: false)
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,t=\(medium),i=1,C=1,\(keys)", base64(url.path)))
+        try? FileManager.default.removeItem(at: url)
+        return (emulator, replies)
+    }
+
+    @Test func offsetSkipsTheStartOfTheFile() {
+        let data = Data([9, 9, 1, 2, 3])
+        let (placed, _) = place(data, "O=2")
+        #expect(placed.images.count == 1)
+        let (short, replies) = place(data, "O=3")
+        #expect(replies.contain("EBADF"))
+        #expect(short.images.isEmpty)
+    }
+
+    @Test func sizeLimitsHowMuchIsRead() {
+        let data = Data(count: 8)
+        let (placed, _) = place(data, "S=3")
+        #expect(placed.images.count == 1)
+        let (short, replies) = place(data, "S=2")
+        #expect(replies.contain("EBADF"))
+        #expect(short.images.isEmpty)
+    }
+
+    @Test func sizeAndOffsetCombine() {
+        let (placed, _) = place(Data(count: 8), "S=3,O=5")
+        #expect(placed.images.count == 1)
+        let (short, replies) = place(Data(count: 8), "S=3,O=6")
+        #expect(replies.contain("EBADF"))
+        #expect(short.images.isEmpty)
+    }
+
+    @Test(.enabled(if: sharedMemoryWorks(), "POSIX shared memory cannot be created, mapped and re-opened read-only here"))
+    func sharedMemoryHonoursSizeAndOffset() {
+        let first = "/turmk\(UUID().uuidString.prefix(8))"
+        let second = "/turmk\(UUID().uuidString.prefix(8))"
+        defer {
+            _ = first.withCString { shm_unlink($0) }
+            _ = second.withCString { shm_unlink($0) }
+        }
+        #expect(createSharedMemory(first, size: 5) && createSharedMemory(second, size: 5))
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,t=s,i=1,C=1,S=3,O=2", base64(first)))
+        #expect(emulator.images.count == 1)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,t=s,i=2,C=1,O=20000", base64(second)))
+        #expect(replies.contain("i=2;EBADF"))
+        #expect(emulator.images.map(\.kittyID) == [1])
+    }
+}
+
+struct KittyPlaceholderIdentityTests {
+    private func tiles(_ emulator: BlockEmulator) -> [InlineImage] {
+        emulator.renderSegments().flatMap { segment -> [InlineImage] in
+            switch segment {
+            case .image(let image): return [image]
+            case .stack(let stack): return stack.images
+            case .text: return []
+            }
+        }
+    }
+
+    private func twoPlacements(id: Int) -> BlockEmulator {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=t,f=24,s=1,v=1,i=\(id)", pixel))
+        emulator.feed(apc("a=p,U=1,i=\(id),p=7,c=1,r=1"))
+        emulator.feed(apc("a=p,U=1,i=\(id),p=8,c=2,r=1"))
+        return emulator
+    }
+
+    private let pair = "\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}"
+
+    @Test func thirdDiacriticSuppliesTheHighByteOfTheID() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=t,f=24,s=1,v=1,i=\(0x0100_002A)", pixel))
+        emulator.feed(apc("a=p,U=1,i=\(0x0100_002A),c=1,r=1"))
+        emulator.feed(text("\u{1B}[38;5;42m\u{10EEEE}\u{0305}\u{0305}\u{030D}"))
+        #expect(tiles(emulator).map(\.kittyID) == [0x0100_002A])
+        let plain = BlockEmulator(cols: 40, rows: 10)
+        plain.feed(apc("a=t,f=24,s=1,v=1,i=42", pixel))
+        plain.feed(apc("a=p,U=1,i=42,c=1,r=1"))
+        plain.feed(text("\u{1B}[38;5;42m\u{10EEEE}\u{0305}\u{0305}\u{030D}"))
+        #expect(tiles(plain).isEmpty)
+    }
+
+    @Test func trueColourForegroundSuppliesTheID() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=t,f=24,s=1,v=1,i=258", pixel))
+        emulator.feed(apc("a=p,U=1,i=258,c=1,r=1"))
+        emulator.feed(text("\u{1B}[38;2;0;1;2m\u{10EEEE}\u{0305}\u{0305}"))
+        #expect(tiles(emulator).map(\.kittyID) == [258])
+    }
+
+    @Test func the256ColourForegroundSuppliesTheID() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=t,f=24,s=1,v=1,i=200", pixel))
+        emulator.feed(apc("a=p,U=1,i=200,c=1,r=1"))
+        emulator.feed(text("\u{1B}[38;5;200m\u{10EEEE}\u{0305}\u{0305}"))
+        #expect(tiles(emulator).map(\.kittyID) == [200])
+    }
+
+    @Test func trueColourUnderlineSuppliesThePlacementID() {
+        let emulator = twoPlacements(id: 42)
+        emulator.feed(text("\u{1B}[38;5;42m\u{1B}[58;2;0;0;8m\(pair)"))
+        let found = tiles(emulator)
+        #expect(found.count == 1)
+        #expect(found[0].placementID == 8)
+        #expect(found[0].tile?.columns == 2)
+    }
+
+    @Test func indexedUnderlineSuppliesThePlacementID() {
+        let emulator = twoPlacements(id: 42)
+        emulator.feed(text("\u{1B}[38;5;42m\u{1B}[58;5;8m\(pair)"))
+        let found = tiles(emulator)
+        #expect(found.count == 1)
+        #expect(found[0].placementID == 8)
+        #expect(found[0].tile?.columns == 2)
+    }
+
+    @Test func otherUnderlineSelectsTheOtherPlacement() {
+        let emulator = twoPlacements(id: 42)
+        emulator.feed(text("\u{1B}[38;5;42m\u{1B}[58;5;7m\u{10EEEE}\u{0305}\u{0305}"))
+        let found = tiles(emulator)
+        #expect(found.count == 1)
+        #expect(found[0].placementID == 7)
+        #expect(found[0].tile?.columns == 1)
+    }
+}
+
+struct KittyPlaceholderCropTests {
+    private let marks = ["\u{0305}", "\u{030D}", "\u{030E}"]
+
+    private func tiles(_ emulator: BlockEmulator) -> [InlineImage] {
+        emulator.renderSegments().flatMap { segment -> [InlineImage] in
+            switch segment {
+            case .image(let image): return [image]
+            case .stack(let stack): return stack.images
+            case .text: return []
+            }
+        }
+    }
+
+    private func fill(_ emulator: BlockEmulator, columns: Int, rows: Int) {
+        emulator.feed(text("\u{1B}[38;5;42m"))
+        for row in 0..<rows {
+            if row > 0 { emulator.feed(text("\r\n")) }
+            for column in 0..<columns { emulator.feed(text("\u{10EEEE}\(marks[row])\(marks[column])")) }
+        }
+    }
+
+    private func source(_ tile: InlineImage) -> CGRect {
+        guard let crop = tile.crop, let part = tile.tile else { return .zero }
+        let width = crop.width / CGFloat(part.columns)
+        let height = crop.height / CGFloat(part.rows)
+        return CGRect(
+            x: crop.minX + CGFloat(part.partColumn) * width, y: crop.minY + CGFloat(part.partRow) * height,
+            width: CGFloat(tile.columnSpan) * width, height: height
+        )
+    }
+
+    private func big() -> String {
+        Data(count: 48).base64EncodedString()
+    }
+
+    @Test func cropIsCarriedToTheVirtualPlacement() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,U=1,f=24,s=4,v=4,i=42,c=2,r=2,x=1,y=1,w=2,h=2,q=2", big()))
+        let placement = emulator.virtualPlacements[0]
+        #expect(placement.crop == CGRect(x: 1, y: 1, width: 2, height: 2))
+        #expect(placement.pixelSize == CGSize(width: 2, height: 2))
+        #expect(placement.image.cgImage(forProposedRect: nil, context: nil, hints: nil)?.width == 2)
+    }
+
+    @Test func cropThenTilingSplitsTheCroppedRegion() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,U=1,f=24,s=4,v=4,i=42,c=2,r=2,x=1,y=1,w=2,h=2,q=2", big()))
+        fill(emulator, columns: 2, rows: 2)
+        let found = tiles(emulator)
+        #expect(found.count == 2)
+        #expect(found.map(source) == [CGRect(x: 1, y: 1, width: 2, height: 1), CGRect(x: 1, y: 2, width: 2, height: 1)])
+    }
+
+    @Test func omittedSizeCropsToTheEdge() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,U=1,f=24,s=4,v=4,i=42,c=3,r=2,x=1,y=2,q=2", big()))
+        #expect(emulator.virtualPlacements[0].crop == CGRect(x: 1, y: 2, width: 3, height: 2))
+        fill(emulator, columns: 3, rows: 2)
+        let found = tiles(emulator)
+        #expect(found.map(source) == [CGRect(x: 1, y: 2, width: 3, height: 1), CGRect(x: 1, y: 3, width: 3, height: 1)])
+    }
+
+    @Test func uncroppedPlacementHasNoCrop() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,U=1,f=24,s=4,v=4,i=42,c=2,r=2,q=2", big()))
+        #expect(emulator.virtualPlacements[0].crop == nil)
+        #expect(emulator.virtualPlacements[0].pixelSize == CGSize(width: 4, height: 4))
+    }
+}
+
+struct KittyDeleteNumberTests {
+    @Test func deleteByNumberRemovesThePlacementsOfThatImage() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,I=5,C=1", pixel))
+        emulator.feed(apc("a=d,d=N,I=5"))
+        #expect(emulator.images.isEmpty)
+        #expect(emulator.sources[1] == nil)
+        #expect(!emulator.engineHasImage(1))
+    }
+
+    @Test func lowercaseDeleteByNumberKeepsTheData() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,I=5,C=1", pixel))
+        emulator.feed(apc("a=d,d=n,I=5"))
+        #expect(emulator.images.isEmpty)
+        #expect(emulator.sources[1] != nil)
+    }
+}
+
+struct KittyVirtualDeleteTests {
+    private func scene() -> BlockEmulator {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,U=1,f=24,s=1,v=1,i=42,p=3,c=1,r=1,z=-3,q=2", pixel))
+        emulator.feed(apc("a=T,U=1,f=24,s=1,v=1,i=43,p=4,c=1,r=1,z=2,q=2", pixel))
+        return emulator
+    }
+
+    @Test func deleteAllRemovesVirtualPlacementsAndKeepsTheData() {
+        let emulator = scene()
+        emulator.feed(apc("a=d,d=a"))
+        #expect(emulator.virtualPlacements.isEmpty)
+        #expect(emulator.sources[42] != nil && emulator.sources[43] != nil)
+    }
+
+    @Test func uppercaseDeleteAllAlsoFreesTheData() {
+        let emulator = scene()
+        emulator.feed(apc("a=d,d=A"))
+        #expect(emulator.virtualPlacements.isEmpty)
+        #expect(emulator.sources[42] == nil && emulator.sources[43] == nil)
+    }
+
+    @Test func deleteWithoutATargetRemovesVirtualPlacements() {
+        let emulator = scene()
+        emulator.feed(apc("a=d"))
+        #expect(emulator.virtualPlacements.isEmpty)
+    }
+
+    @Test func deleteByZIndexRemovesOnlyMatchingVirtualPlacements() {
+        let emulator = scene()
+        emulator.feed(apc("a=d,d=z,z=-3"))
+        #expect(emulator.virtualPlacements.map(\.kittyID) == [43])
+        emulator.feed(apc("a=d,d=Z,z=2"))
+        #expect(emulator.virtualPlacements.isEmpty)
+        #expect(emulator.sources[43] == nil)
+    }
+
+    @Test func positionBasedDeletesLeaveVirtualPlacementsAlone() {
+        let emulator = scene()
+        for keys in ["d=p,x=1,y=1", "d=P,x=1,y=1", "d=c", "d=x,x=1", "d=y,y=1", "d=q,x=1,y=1,z=-3"] {
+            emulator.feed(apc("a=d,\(keys)"))
+            #expect(emulator.virtualPlacements.count == 2, "\(keys)")
+        }
+    }
+
+    @Test func deleteByIDAndRangeStillRemoveVirtualPlacements() {
+        let emulator = scene()
+        emulator.feed(apc("a=d,d=i,i=42,p=3"))
+        #expect(emulator.virtualPlacements.map(\.kittyID) == [43])
+        emulator.feed(apc("a=d,d=r,x=40,y=50"))
+        #expect(emulator.virtualPlacements.isEmpty)
+    }
+}
+
+struct KittyChainDepthTests {
+    @Test func chainsBeyondTheLimitAreRejected() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,i=1,p=1,C=1", pixel))
+        for id in 2...17 {
+            emulator.feed(apc("a=T,f=24,s=1,v=1,i=\(id),p=1,P=\(id - 1),Q=1", pixel))
+        }
+        #expect(!replies.contain("ETOODEEP"))
+        #expect(emulator.images.count == 17)
+        emulator.feed(apc("a=T,f=24,s=1,v=1,i=18,p=1,P=17,Q=1", pixel))
+        #expect(replies.contain("ETOODEEP"))
+        #expect(emulator.images.count == 17)
+    }
+}

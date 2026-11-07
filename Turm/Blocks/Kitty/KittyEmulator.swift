@@ -103,10 +103,13 @@ extension BlockEmulator {
     }
 
     func feedGraphics(_ apc: ArraySlice<UInt8>, _ command: KittyCommand) {
-        guard let action = command.action else {
+        if command.action == nil, chunked != nil {
             continueChunk(Array(apc), command)
             return
         }
+        var command = command
+        let action = command.action ?? "t"
+        command.action = action
         if command.imageID != nil, command.imageNumber != nil, "acdfpq".contains(action) {
             fail(("EINVAL", "Must not specify both image id and image number"), command)
             if action == "f", command.more { start([], KittyJob(command: command, landing: .discard)) }
@@ -206,6 +209,13 @@ extension BlockEmulator {
     }
 
     private func forFeeding(_ bytes: [UInt8], _ job: KittyJob) -> [UInt8] {
+        if job.command.medium == "s", job.command.dataOffset > 0 || job.command.dataSize > 0,
+           let name = job.load.openedPath,
+           let slice = KittyLoadCheck.sharedSlice(name, offset: job.command.dataOffset, count: job.load.received) {
+            let head = KittyGraphicsScanner.rewrite(bytes[...], dropping: ["O", "S"], setting: [("t", "d")])
+            let controlEnd = head[3..<head.count - 2].firstIndex(of: 0x3B) ?? head.count - 2
+            return Array(head[0..<controlEnd]) + [0x3B] + Array(slice.base64EncodedString().utf8) + [0x1B, 0x5C]
+        }
         guard job.command.medium == "t", job.command.compression == nil else { return bytes }
         return KittyGraphicsScanner.rewrite(bytes[...], dropping: [], setting: [("t", "f")])
     }
@@ -627,7 +637,19 @@ extension BlockEmulator {
 
     private func registerVirtual(_ command: KittyCommand) {
         guard let id = command.imageID, let animation = sources[id] else { return }
-        let root = animation.frames[0].image
+        var root = animation.frames[0].image
+        var crop: CGRect?
+        if command.isCropped {
+            let left = max(command.x ?? 0, 0)
+            let top = max(command.y ?? 0, 0)
+            let width = command.cropWidth > 0 ? min(command.cropWidth, root.width - left) : root.width - left
+            let height = command.cropHeight > 0 ? min(command.cropHeight, root.height - top) : root.height - top
+            let rect = CGRect(x: left, y: top, width: width, height: height)
+            if width > 0, height > 0, let cropped = root.cropping(to: rect) {
+                root = cropped
+                crop = rect
+            }
+        }
         let pixels = CGSize(width: root.width, height: root.height)
         let columns = max(command.columns ?? 0, 0)
         let rows = max(command.rows ?? 0, 0)
@@ -645,6 +667,7 @@ extension BlockEmulator {
         placement.pixelSize = pixels
         placement.scale = Self.backingScale
         placement.animation = animation
+        placement.crop = crop
         virtualPlacements.removeAll { $0.kittyID == id && $0.placementID == command.placementID }
         virtualPlacements.append(placement)
     }
@@ -675,7 +698,9 @@ extension BlockEmulator {
             return
         }
         let before = placedIDs()
-        if ["i", "n", "r"].contains(mode) {
+        if mode == "a" {
+            virtualPlacements.removeAll()
+        } else if ["i", "n", "r", "z"].contains(mode) {
             virtualPlacements.applyKittyDelete(command, context: deleteContext())
         }
         images.applyKittyDelete(command, context: deleteContext())
