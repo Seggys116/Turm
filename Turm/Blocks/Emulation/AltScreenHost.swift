@@ -1,36 +1,16 @@
 import AppKit
-import Darwin
 import SwiftTerm
 import TurmCore
 
-@_silgen_name("shm_open")
-private func frameSharedMemoryOpen(_ name: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32
-
-final class FrameOverlay: NSView {
-    var cgImage: CGImage? {
-        didSet {
-            guard oldValue !== cgImage else { return }
-            wantsLayer = true
-            layer?.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-            layer?.contentsGravity = .resize
-            layer?.contents = cgImage
-        }
-    }
-
-    override var isOpaque: Bool { false }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func makeBackingLayer() -> CALayer {
-        let layer = CALayer()
-        layer.contentsGravity = .resize
-        return layer
-    }
-}
-
 final class AltScreenHost: NSObject, TerminalViewDelegate {
+    private static let heldLimit = 128 * 1024 * 1024
+
     let view: FullScreenTerminalView
-    let frameOverlay = FrameOverlay()
+    let engine = KittyEngine()
+    let painter = GraphicsLayerPainter()
+    /// The images drawn above the text; `view` keeps it and the backdrop beneath the text aligned with itself.
+    var frameOverlay: GraphicsLayerView { view.graphicsOverlay }
+    private(set) lazy var graphicsHost = AltScreenGraphicsHost(host: self)
     var onFiles: ([URL]) -> Void = { _ in } {
         didSet { view.onFiles = onFiles }
     }
@@ -42,10 +22,13 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     var onResize: (Int, Int) -> Void = { _, _ in }
     var onWindow: () -> Void = {}
     var reportsPixels = false
-    private var framePixels = CGSize.zero
     private var isReplaying = false
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
+    private var kittyHold: [UInt8] = []
+    private var skippingGraphics = false
+    private var skipCarry: [UInt8] = []
+    private var painted = false
 
     let remoteName: String?
 
@@ -54,21 +37,98 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         var options = TerminalOptions.default
         options.cols = cols
         options.rows = rows
-        view = FullScreenTerminalView(frame: .zero, font: nil, options: options)
+        view = FullScreenTerminalView(frame: .zero, font: nil, options: options, underlay: painter.underlay, overlay: painter.overlay)
         super.init()
         view.terminalDelegate = self
+        view.notifyUpdateChanges = true
         view.onWindow = { [weak self] in self?.onWindow() }
+        view.onGeometry = { [weak self] in self?.refreshGraphics() }
+        view.onBufferSwitch = { [weak self] alternate in
+            guard let self else { return }
+            engine.bufferSwitched(toAlternate: alternate)
+            refreshGraphics()
+        }
     }
 
-    func feed(_ bytes: [UInt8]) {
-        process(bytes, answering: true)
+    /// Feeds program output and returns it without kitty graphics commands, which never reach SwiftTerm.
+    @discardableResult
+    func feed(_ bytes: [UInt8]) -> [UInt8] {
+        process(bytes, live: true)
     }
 
-    private func process(_ bytes: [UInt8], answering: Bool) {
+    func replay(_ bytes: [UInt8]) {
+        isReplaying = true
+        process(bytes, live: false)
+        isReplaying = false
+    }
+
+    @discardableResult
+    private func process(_ bytes: [UInt8], live: Bool) -> [UInt8] {
+        var incoming = bytes
+        if skippingGraphics {
+            guard let rest = skipGraphics(incoming) else { return [] }
+            incoming = rest
+        }
+        if !kittyHold.isEmpty {
+            let scanned = kittyHold.count
+            kittyHold.append(contentsOf: incoming)
+            let opensGraphics = kittyHold.count >= 3 && kittyHold[0] == 0x1B && kittyHold[1] == 0x5F && kittyHold[2] == 0x47
+            if opensGraphics, KittyGraphicsScanner.terminator(in: kittyHold, from: max(3, scanned - 1)) == nil {
+                if kittyHold.count > Self.heldLimit {
+                    skipCarry = kittyHold.last == 0x1B ? [0x1B] : []
+                    skippingGraphics = true
+                    kittyHold = []
+                }
+                return []
+            }
+            incoming = kittyHold
+            kittyHold = []
+        }
+        guard incoming.contains(0x1B) else {
+            feedText(incoming[...], answering: live)
+            afterFeed()
+            return incoming
+        }
+        let split = KittyGraphicsScanner.split(incoming)
+        kittyHold = Array(split.remainder)
+        var kept: [UInt8] = []
+        kept.reserveCapacity(incoming.count)
+        for piece in split.pieces {
+            switch piece.kind {
+            case .text:
+                feedText(piece.bytes, answering: live)
+                kept.append(contentsOf: piece.bytes)
+            case .clear(let scope):
+                feedText(piece.bytes, answering: live)
+                kept.append(contentsOf: piece.bytes)
+                if scope == .scrollback { kept.append(contentsOf: Array("\u{1B}[22J".utf8)) }
+                clearGraphics(scope)
+            case .graphics:
+                // replayed output rebuilds only what the full-screen program drew, not the shell's main screen
+                guard live || view.getTerminal().isCurrentBufferAlternate else { continue }
+                engine.handle(piece.bytes, host: graphicsHost)
+            }
+        }
+        afterFeed()
+        return kept
+    }
+
+    private func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
+        let bytes = skipCarry + bytes
+        skipCarry = []
+        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
+            if bytes.last == 0x1B { skipCarry = [0x1B] }
+            return nil
+        }
+        skippingGraphics = false
+        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
+    }
+
+    private func feedText(_ bytes: ArraySlice<UInt8>, answering: Bool) {
         let cell = InlineGraphics.Cell(
             height: Double(TerminalMetrics.lineHeight), width: Double(TerminalMetrics.cellWidth), scale: Double(BlockEmulator.backingScale)
         )
-        guard let ready = graphicHold.intake(bytes) else { return }
+        guard !bytes.isEmpty, let ready = graphicHold.intake(Array(bytes)) else { return }
         let split = TerminalGraphics.split(ready)
         for piece in split.pieces {
             switch piece {
@@ -104,10 +164,67 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         view.createImageFromBitmap(source: view.getTerminal(), bytes: &pixels, width: sixel.width, height: sixel.height)
     }
 
-    func replay(_ bytes: [UInt8]) {
-        isReplaying = true
-        process(bytes, answering: false)
-        isReplaying = false
+    private func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
+        if scope == .scrollback {
+            pushScreenIntoScrollback()
+            view.feed(byteArray: Array("\u{1B}[2J".utf8)[...])
+        }
+        engine.clear(scope, host: graphicsHost)
+    }
+
+    private func pushScreenIntoScrollback() {
+        let terminal = view.getTerminal()
+        guard !terminal.isCurrentBufferAlternate else { return }
+        func blank(_ row: Int) -> Bool {
+            guard let line = terminal.getLine(row: row) else { return true }
+            for column in 0..<line.count {
+                let character = terminal.getCharacter(for: line[column])
+                if character != " " && character != "\u{0}" { return false }
+            }
+            return true
+        }
+        var count = terminal.rows
+        while count > 0, blank(count - 1) { count -= 1 }
+        guard count > 0 else { return }
+        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
+        view.feed(byteArray: Array(sequence.utf8)[...])
+    }
+
+    private func afterFeed() {
+        engine.pruneScrolledOff(trimmed: view.getTerminal().buffer.totalLinesTrimmed)
+        if engine.revision != shownRevision { refreshGraphics() }
+    }
+
+    private var shownRevision: UInt64 = .max
+
+    /// Lays the engine's visible placements onto the layers above and beneath the text.
+    func refreshGraphics() {
+        let terminal = view.getTerminal()
+        // a synchronized update draws its text in one go, so its images wait for the same moment
+        guard !terminal.synchronizedOutputActive else { return }
+        engine.bufferSwitched(toAlternate: terminal.isCurrentBufferAlternate)
+        shownRevision = engine.revision
+        let store = engine.activeStore
+        guard !store.images.isEmpty || !store.virtualPlacements.isEmpty else {
+            if painted {
+                painter.removeAll()
+                painted = false
+            }
+            return
+        }
+        let buffer = terminal.buffer
+        let top = buffer.yDisp + buffer.totalLinesTrimmed
+        let cell = cellPoints
+        let geometry = GraphicsLayerPainter.Geometry(
+            top: top, cellWidth: cell.width, cellHeight: cell.height, scale: view.window?.backingScaleFactor ?? screenScale
+        )
+        painter.update(placements: engine.placements(visible: top..<(top + terminal.rows), host: graphicsHost), geometry: geometry)
+        painted = true
+    }
+
+    func graphicsReply(_ bytes: [UInt8]) {
+        guard !isReplaying else { return }
+        onInput(bytes)
     }
 
     func apply(dark: Bool) {
@@ -125,59 +242,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         view.pointerName = name
     }
 
-    func showFrame(_ image: NSImage?) {
-        guard let image else {
-            frameOverlay.cgImage = nil
-            framePixels = .zero
-            return
-        }
-        var pixels = image.size
-        for representation in image.representations where representation.pixelsWide > 0 && representation.pixelsHigh > 0 {
-            pixels = CGSize(width: representation.pixelsWide, height: representation.pixelsHigh)
-            break
-        }
-        framePixels = pixels
-        frameOverlay.cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-    }
-
-    /// Draws a shared-memory frame, leaving every other graphics command to the image decoder.
-    func present(_ command: KittyCommand, apc: [UInt8]) -> Bool {
-        let payload = KittyGraphicsScanner.payload(of: apc[...])
-        switch command.action {
-        case "q":
-            guard (command.medium ?? "d") == "s" else { return false }
-            let opened = FramePixels.openShared(command, payload: payload)
-            reply(command, opened ? "OK" : "ENOENT:No such file")
-            return true
-        case "d":
-            if command.deletesAll {
-                frameOverlay.cgImage = nil
-                framePixels = .zero
-            }
-            return true
-        case "T":
-            guard !command.more, command.compression == nil, (command.medium ?? "d") == "s" else { return false }
-            guard let made = FramePixels.sharedImage(command, payload: payload) else {
-                reply(command, "EBADF:Failed to read image file")
-                return true
-            }
-            framePixels = made.pixels
-            frameOverlay.cgImage = made.image
-            reply(command, "OK")
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func reply(_ command: KittyCommand, _ message: String) {
-        guard command.quiet == 0 || (command.quiet == 1 && message != "OK") else { return }
-        var control = ""
-        if let id = command.imageID { control = "i=\(id)" }
-        if let placement = command.placementID { control += control.isEmpty ? "p=\(placement)" : ",p=\(placement)" }
-        onInput(Array("\u{1B}_G\(control);\(message)\u{1B}\\".utf8))
-    }
-
     var grid: (cols: Int, rows: Int) {
         let terminal = view.getTerminal()
         return (terminal.cols, terminal.rows)
@@ -186,14 +250,26 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     func repaint() {
         view.getTerminal().updateFullScreen()
         view.needsDisplay = true
+        refreshGraphics()
+    }
+
+    /// Device pixels per point of the screen the pane is on, which is what programs are told the cells measure.
+    var screenScale: CGFloat {
+        view.window?.screen?.backingScaleFactor
+            ?? view.window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+    }
+
+    var cellPoints: (width: CGFloat, height: CGFloat) {
+        let measured = view.cellSizeInPixels(source: view.getTerminal()) ?? (width: 1, height: 1)
+        let drawnScale = view.window?.backingScaleFactor ?? 1
+        return (max(CGFloat(measured.width) / drawnScale, 1), max(CGFloat(measured.height) / drawnScale, 1))
     }
 
     var cellPixels: (width: Int, height: Int) {
         let measured = view.cellSizeInPixels(source: view.getTerminal()) ?? (width: 1, height: 1)
-        let screenScale = view.window?.screen?.backingScaleFactor
-            ?? view.window?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor
-            ?? 2
+        let screenScale = screenScale
         let drawnScale = view.window?.backingScaleFactor ?? 1
         guard drawnScale > 0, abs(drawnScale - screenScale) > 0.01 else {
             return (max(measured.width, 1), max(measured.height, 1))
@@ -205,8 +281,15 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         )
     }
 
+    /// The pane in the device pixels the program draws its frames in, for pixel mouse reports.
+    var panePixels: CGSize {
+        let size = view.bounds.size
+        return CGSize(width: size.width * screenScale, height: size.height * screenScale)
+    }
+
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         onResize(newCols, newRows)
+        refreshGraphics()
     }
 
     func setTerminalTitle(source: TerminalView, title: String) { onTitle(title) }
@@ -215,10 +298,12 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard !isReplaying else { return }
-        onInput(PixelMouse.scale(data, reportingPixels: reportsPixels, view: view.bounds.size, frame: framePixels))
+        onInput(PixelMouse.scale(data, reportingPixels: reportsPixels, view: view.bounds.size, frame: panePixels))
     }
 
-    func scrolled(source: TerminalView, position: Double) {}
+    func scrolled(source: TerminalView, position: Double) {
+        refreshGraphics()
+    }
 
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         guard let url = URL(string: link), LinkPolicy.allows(url, remote: remoteName != nil) else { return }
@@ -249,7 +334,11 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         onInput(bytes)
     }
 
-    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
+        let store = engine.activeStore
+        guard painted || !store.virtualPlacements.isEmpty || engine.revision != shownRevision else { return }
+        refreshGraphics()
+    }
 }
 
 final class FullScreenTerminalView: TerminalView {
@@ -257,11 +346,32 @@ final class FullScreenTerminalView: TerminalView {
     var onDragTarget: (Bool) -> Void = { _ in }
     var onMouseDown: () -> Void = {}
     var onWindow: () -> Void = {}
+    var onGeometry: () -> Void = {}
+    var onBufferSwitch: (Bool) -> Void = { _ in }
+    let graphicsBackdrop: GraphicsLayerView
+    let graphicsOverlay: GraphicsLayerView
     var pointerName: String? {
         didSet {
             guard oldValue != pointerName else { return }
             window?.invalidateCursorRects(for: self)
         }
+    }
+
+    init(frame: CGRect, font: NSFont?, options: TerminalOptions, underlay: CALayer, overlay: CALayer) {
+        graphicsBackdrop = GraphicsLayerView(content: underlay)
+        graphicsOverlay = GraphicsLayerView(content: overlay)
+        super.init(frame: frame, font: font, options: options)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("FullScreenTerminalView is created in code only")
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        let layer = ForwardedBackgroundLayer()
+        layer.onBackground = { [weak self] color in self?.graphicsBackdrop.fill = color }
+        return layer
     }
 
     private static let installPointerCursor: Void = {
@@ -277,12 +387,52 @@ final class FullScreenTerminalView: TerminalView {
         addCursorRect(bounds, cursor: PointerCursor.cursor(named: pointerName))
     }
 
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let superview else {
+            graphicsBackdrop.removeFromSuperview()
+            graphicsOverlay.removeFromSuperview()
+            return
+        }
+        superview.addSubview(graphicsBackdrop, positioned: .below, relativeTo: self)
+        if graphicsOverlay.superview !== superview { superview.addSubview(graphicsOverlay, positioned: .above, relativeTo: self) }
+        alignGraphics()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        alignGraphics()
+        onGeometry()
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        alignGraphics()
+    }
+
+    private func alignGraphics() {
+        for layerView in [graphicsBackdrop, graphicsOverlay] where layerView.superview === superview {
+            layerView.frame = frame
+        }
+    }
+
+    override func bufferActivated(source: Terminal) {
+        super.bufferActivated(source: source)
+        onBufferSwitch(source.isCurrentBufferAlternate)
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        onGeometry()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         registerForDraggedTypes(AttachmentStore.dragTypes)
         _ = Self.installPointerCursor
         window?.invalidateCursorRects(for: self)
         if window != nil { onWindow() }
+        onGeometry()
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -325,74 +475,6 @@ final class FullScreenTerminalView: TerminalView {
         } else {
             onFiles(urls)
         }
-    }
-}
-
-enum FramePixels {
-    static func openShared(_ command: KittyCommand, payload: ArraySlice<UInt8>) -> Bool {
-        guard let opened = map(command, payload: payload, minimum: 1) else { return false }
-        munmap(opened.base, opened.length)
-        return true
-    }
-
-    static func sharedImage(_ command: KittyCommand, payload: ArraySlice<UInt8>) -> (image: CGImage, pixels: CGSize)? {
-        let width = command.stateValue ?? 0
-        let height = command.loopValue ?? 0
-        let channels = (command.format ?? 32) == 24 ? 3 : 4
-        guard width > 0, height > 0, channels == 4 || channels == 3 else { return nil }
-        let count = width * height * channels
-        guard let opened = map(command, payload: payload, minimum: count) else { return nil }
-        defer { munmap(opened.base, opened.length) }
-        let rgba = channels == 4 ? Data(bytes: opened.start, count: count) : expand(opened.start, count: count)
-        guard let provider = CGDataProvider(data: rgba as CFData),
-              let image = CGImage(
-                width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
-              )
-        else { return nil }
-        return (image, CGSize(width: width, height: height))
-    }
-
-    private static func map(
-        _ command: KittyCommand, payload: ArraySlice<UInt8>, minimum: Int
-    ) -> (base: UnsafeMutableRawPointer, length: Int, start: UnsafeMutableRawPointer)? {
-        guard let encoded = Data(base64Encoded: Data(payload), options: .ignoreUnknownCharacters),
-              let name = String(data: encoded, encoding: .utf8), name.hasPrefix("/")
-        else { return nil }
-        let descriptor = name.withCString { frameSharedMemoryOpen($0, O_RDONLY, 0) }
-        guard descriptor >= 0 else { return nil }
-        defer {
-            close(descriptor)
-            name.withCString { shm_unlink($0) }
-        }
-        var info = stat()
-        guard fstat(descriptor, &info) == 0 else { return nil }
-        let length = Int(info.st_size)
-        let offset = command.dataOffset
-        guard length > offset, length - offset >= minimum else { return nil }
-        guard let base = mmap(nil, length, PROT_READ, MAP_SHARED, descriptor, 0), base != MAP_FAILED else { return nil }
-        return (base, length, base.advanced(by: offset))
-    }
-
-    private static func expand(_ bytes: UnsafeMutableRawPointer, count: Int) -> Data {
-        var rgba = Data(count: count / 3 * 4)
-        rgba.withUnsafeMutableBytes { raw in
-            guard let destination = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-            let source = bytes.assumingMemoryBound(to: UInt8.self)
-            var read = 0
-            var write = 0
-            while read + 2 < count {
-                destination[write] = source[read]
-                destination[write + 1] = source[read + 1]
-                destination[write + 2] = source[read + 2]
-                destination[write + 3] = 255
-                read += 3
-                write += 4
-            }
-        }
-        return rgba
     }
 }
 

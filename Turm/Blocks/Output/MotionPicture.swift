@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import TurmCore
 
 enum MotionPicture {
     struct Clip {

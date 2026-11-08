@@ -1,82 +1,82 @@
 import Foundation
 
-struct KittyCommand: Equatable {
-    var action: Character?
-    var imageID: UInt32?
-    var imageNumber: UInt32?
-    var placementID: UInt32?
-    var columns: Int?
-    var rows: Int?
-    var more = false
-    var deleteTarget: Character?
-    var zIndex = 0
-    var cursorPolicy = 0
-    var pixelX = 0
-    var pixelY = 0
-    var parentImage: UInt32?
-    var parentPlacement: UInt32?
-    var parentColumns = 0
-    var parentRows = 0
-    var x: Int?
-    var y: Int?
-    var quiet = 0
-    var virtual = false
-    var medium: Character?
-    var resolvedID: UInt32?
-    var format: Int?
-    var compression: Character?
-    var dataSize = 0
-    var dataOffset = 0
-    var hints = 0
-    var stateValue: Int?
-    var loopValue: Int?
-    var cropWidth = 0
-    var cropHeight = 0
+public struct KittyCommand: Equatable {
+    public var action: Character?
+    public var imageID: UInt32?
+    public var imageNumber: UInt32?
+    public var placementID: UInt32?
+    public var columns: Int?
+    public var rows: Int?
+    public var more = false
+    public var deleteTarget: Character?
+    public var zIndex = 0
+    public var cursorPolicy = 0
+    public var pixelX = 0
+    public var pixelY = 0
+    public var parentImage: UInt32?
+    public var parentPlacement: UInt32?
+    public var parentColumns = 0
+    public var parentRows = 0
+    public var x: Int?
+    public var y: Int?
+    public var quiet = 0
+    public var virtual = false
+    public var medium: Character?
+    public var resolvedID: UInt32?
+    public var format: Int?
+    public var compression: Character?
+    public var dataSize = 0
+    public var dataOffset = 0
+    public var hints = 0
+    public var stateValue: Int?
+    public var loopValue: Int?
+    public var cropWidth = 0
+    public var cropHeight = 0
 
-    var isCropped: Bool {
+    public var isCropped: Bool {
         cropWidth != 0 || cropHeight != 0 || (x ?? 0) != 0 || (y ?? 0) != 0
     }
 
-    var displays: Bool {
+    public var displays: Bool {
         action == "T" || action == "p"
     }
 
-    var transmits: Bool {
+    public var transmits: Bool {
         action == "T" || action == "t"
     }
 
-    var isRelative: Bool {
+    public var isRelative: Bool {
         (parentImage != nil || parentPlacement != nil) && !virtual
     }
 
-    var deletesAll: Bool {
+    public var deletesAll: Bool {
         action == "d" && (deleteTarget == nil || deleteTarget == "a" || deleteTarget == "A")
     }
 
-    var deletesByID: Bool {
+    public var deletesByID: Bool {
         action == "d" && (deleteTarget == "i" || deleteTarget == "I") && imageID != nil
     }
 }
 
-enum KittyGraphicsScanner {
-    enum ClearScope {
+public enum KittyGraphicsScanner {
+    public enum ClearScope {
         case visible
         case everything
         case reset
         case scrollback
     }
 
-    enum Kind {
+    public enum Kind {
         case text
         case graphics(KittyCommand)
         case clear(ClearScope)
     }
 
-    struct Piece {
-        let bytes: ArraySlice<UInt8>
-        let kind: Kind
+    public struct Piece {
+        public let bytes: ArraySlice<UInt8>
+        public let kind: Kind
 
-        var command: KittyCommand? {
+        public var command: KittyCommand? {
             if case .graphics(let command) = kind { return command }
             return nil
         }
@@ -85,7 +85,7 @@ enum KittyGraphicsScanner {
     private static let escape: UInt8 = 0x1B
 
     /// Removes kitty graphics commands and keeps an unfinished one in `pending`.
-    static func withoutGraphics(_ bytes: [UInt8], pending: inout [UInt8]) -> [UInt8] {
+    public static func withoutGraphics(_ bytes: [UInt8], pending: inout [UInt8]) -> [UInt8] {
         guard !pending.isEmpty || bytes.contains(escape) else { return bytes }
         pending.append(contentsOf: bytes)
         let split = split(pending)
@@ -98,7 +98,7 @@ enum KittyGraphicsScanner {
         return kept
     }
 
-    static func split(_ bytes: [UInt8]) -> (pieces: [Piece], remainder: ArraySlice<UInt8>) {
+    public static func split(_ bytes: [UInt8]) -> (pieces: [Piece], remainder: ArraySlice<UInt8>) {
         var pieces: [Piece] = []
         var start = 0
         var index = 0
@@ -163,13 +163,13 @@ enum KittyGraphicsScanner {
         return (pieces, bytes[index...])
     }
 
-    static func payload(of apc: ArraySlice<UInt8>) -> ArraySlice<UInt8> {
+    public static func payload(of apc: ArraySlice<UInt8>) -> ArraySlice<UInt8> {
         let bytes = Array(apc)
         guard bytes.count >= 5, let separator = bytes[3..<(bytes.count - 2)].firstIndex(of: 0x3B) else { return [] }
         return bytes[(separator + 1)..<(bytes.count - 2)]
     }
 
-    static func replacingPayload(_ apc: [UInt8], with payload: [UInt8]) -> [UInt8] {
+    public static func replacingPayload(_ apc: [UInt8], with payload: [UInt8]) -> [UInt8] {
         guard apc.count >= 5 else { return apc }
         let closing = apc.count - 2
         let end = apc[3..<closing].firstIndex(of: 0x3B) ?? closing
@@ -181,7 +181,7 @@ enum KittyGraphicsScanner {
     }
 
     /// Index of the `ESC \` that closes a command, or of the CAN or SUB byte that cancels it.
-    static func terminator(in bytes: [UInt8], from: Int) -> Int? {
+    public static func terminator(in bytes: [UInt8], from: Int) -> Int? {
         var end = max(from, 0)
         while end < bytes.count {
             if bytes[end] == 0x18 || bytes[end] == 0x1A { return end }
@@ -191,7 +191,7 @@ enum KittyGraphicsScanner {
         return nil
     }
 
-    static func parse(_ control: ArraySlice<UInt8>) -> KittyCommand {
+    public static func parse(_ control: ArraySlice<UInt8>) -> KittyCommand {
         var command = KittyCommand()
         for pair in control.split(separator: 0x2C) {
             let parts = pair.split(separator: 0x3D, maxSplits: 1)
@@ -240,7 +240,7 @@ enum KittyGraphicsScanner {
         return number
     }
 
-    static func rewrite(
+    public static func rewrite(
         _ apc: ArraySlice<UInt8>, dropping keys: Set<Character>, setting values: [(Character, String)]
     ) -> [UInt8] {
         let bytes = Array(apc)

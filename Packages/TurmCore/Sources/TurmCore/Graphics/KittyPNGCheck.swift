@@ -1,6 +1,6 @@
 import Foundation
 
-enum KittyPNGCheck {
+public enum KittyPNGCheck {
     private static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     private static let idat = Array("IDAT".utf8)
     private static let truncatedText = "PNG data is truncated: not enough bytes to satisfy read request"
@@ -44,7 +44,7 @@ enum KittyPNGCheck {
         return values[2] == 0 && values[3] == 0 && values[4] < 2
     }
 
-    static func rowLengths(width: Int, height: Int, depth: Int, color: Int, interlaced: Bool) -> [Int] {
+    public static func rowLengths(width: Int, height: Int, depth: Int, color: Int, interlaced: Bool) -> [Int] {
         let channels = [0: 1, 2: 3, 3: 1, 4: 2, 6: 4][color] ?? 1
         let pixelDepth = depth * channels
         func row(_ pixels: Int) -> Int { (pixels * pixelDepth + 7) / 8 + 1 }
@@ -60,7 +60,7 @@ enum KittyPNGCheck {
         return lengths
     }
 
-    static func validate(_ data: [UInt8], maxDimension: Int) -> KittyFailure? {
+    public static func validate(_ data: [UInt8], maxDimension: Int) -> KittyFailure? {
         let truncated = failure(truncatedText)
         guard data.count >= 8 else { return truncated }
         if Array(data[0..<8]) != signature {

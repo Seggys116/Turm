@@ -6,6 +6,7 @@ import Darwin
 import Foundation
 import SwiftTerm
 import Testing
+import TurmCore
 @testable import Turm
 
 private let pixel = "AAAA"
@@ -438,18 +439,6 @@ struct KittyQuietTests {
         emulator.feed(put("i=1,C=1") + apc("a=p,i=99"))
         #expect(replies.contain("i=1;OK"))
         #expect(replies.contain("ENOENT"))
-    }
-
-    @Test func filterClassifiesReplies() {
-        let ok = KittyReply.parse(Array("\u{1B}_Gi=3,I=4;OK\u{1B}\\".utf8)[...])
-        #expect(ok?.ok == true && ok?.imageID == 3 && ok?.imageNumber == 4)
-        let failure = KittyReply.parse(Array("\u{1B}_Gi=3;EINVAL:bad\u{1B}\\".utf8)[...])
-        #expect(failure?.ok == false)
-        #expect(KittyReply.parse(Array("\u{1B}[0c".utf8)[...]) == nil)
-        let quietOne = KittyReplyFilter(quiet: 1)
-        #expect(quietOne.filtered(Array("x".utf8)[...], reply: ok) == nil)
-        #expect(quietOne.filtered(Array("x".utf8)[...], reply: failure) != nil)
-        #expect(KittyReplyFilter(quiet: 2).filtered(Array("x".utf8)[...], reply: failure) == nil)
     }
 }
 
@@ -1222,14 +1211,6 @@ struct KittyErrorTests {
         emulator.feed(apc("a=p,i=9"))
         #expect(replies.contain("i=9;ENOENT:Put command refers to non-existent image with id: 9 and number: 0"))
     }
-
-    @Test func engineErrorsLoseTheSpaceAfterTheColon() {
-        let reply = KittyReply(control: "i=1", message: "EINVAL: bad thing")
-        #expect(reply.normalized(fileMedium: false, png: false).message == "EINVAL:bad thing")
-        #expect(reply.normalized(fileMedium: false, png: false) != reply)
-        let bad = KittyReply(control: "i=1", message: "EINVAL: bad path")
-        #expect(bad.normalized(fileMedium: true, png: false).message == "EBADF:Failed to read image file")
-    }
 }
 
 struct KittyStorageTests {
@@ -1246,7 +1227,6 @@ struct KittyStorageTests {
         #expect(emulator.usedStorage == 8)
         emulator.feed(transmitWord(3))
         #expect(emulator.sources.keys.sorted() == [3])
-        #expect(!emulator.engineHasImage(1))
     }
 
     @Test func referencedImagesAreEvictedOldestFirst() {
@@ -1285,65 +1265,6 @@ struct KittyStorageTests {
         emulator.feed(apc("a=f,f=32,s=2,v=2,i=1", sixteen))
         #expect(replies.contain("ENOSPC:Cache size exceeded cannot add new frames"))
         #expect(emulator.sources[1]?.frames.count == 5)
-    }
-}
-
-struct KittyEngineReleaseTests {
-    @Test func uppercaseDeleteFreesTheEngineCopy() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        let replies = capture(emulator)
-        emulator.feed(transmit(1))
-        #expect(emulator.engineHasImage(1))
-        emulator.feed(apc("a=d,d=I,i=1"))
-        #expect(emulator.sources[1] == nil)
-        #expect(!emulator.engineHasImage(1))
-        emulator.feed(apc("a=p,i=1"))
-        #expect(replies.contain("ENOENT"))
-        #expect(emulator.images.isEmpty)
-    }
-
-    @Test func lowercaseDeleteKeepsTheEngineCopy() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.feed(transmit(1) + apc("a=p,i=1,C=1") + apc("a=d,d=i,i=1"))
-        #expect(emulator.engineHasImage(1))
-        emulator.feed(apc("a=p,i=1,C=1"))
-        #expect(emulator.images.count == 1)
-    }
-
-    @Test func freeingOneImageKeepsTheOthersInTheEngine() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.feed(transmit(1) + transmit(2) + apc("a=d,d=I,i=1"))
-        #expect(!emulator.engineHasImage(1))
-        #expect(emulator.engineHasImage(2))
-    }
-
-    @Test func uppercaseDeleteAllFreesOnlyImagesWhosePlacementsWentAway() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.feed(transmit(1) + transmit(2) + apc("a=p,i=1,C=1") + apc("a=d,d=A"))
-        #expect(emulator.sources[1] == nil && emulator.sources[2] != nil)
-        #expect(!emulator.engineHasImage(1) && emulator.engineHasImage(2))
-    }
-
-    @Test func removingTheWholeImageWithDeleteFrameFreesIt() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.feed(put("i=1,C=1"))
-        emulator.feed(apc("a=d,d=F,i=1"))
-        #expect(!emulator.engineHasImage(1))
-    }
-
-    @Test func enteringAndLeavingTheAlternateScreenKeepsImages() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.feed(transmit(1))
-        emulator.feed(text("\u{1B}[?1049h\u{1B}[?1049l"))
-        #expect(emulator.engineHasImage(1))
-    }
-
-    @Test func evictedImagesAreFreedInTheEngine() {
-        let emulator = BlockEmulator(cols: 40, rows: 10)
-        emulator.storageLimit = 5
-        emulator.feed(apc("a=t,f=32,s=1,v=1,i=1", "AAAAAA==") + apc("a=t,f=32,s=1,v=1,i=2", "AAAAAA=="))
-        #expect(!emulator.engineHasImage(1))
-        #expect(emulator.engineHasImage(2) == (emulator.sources[2] != nil))
     }
 }
 
@@ -1505,7 +1426,6 @@ struct KittyBufferTests {
         #expect(emulator.sources.keys.sorted() == [7])
         leaveAlternate(emulator)
         #expect(emulator.sources.keys.sorted() == [1])
-        #expect(emulator.engineHasImage(1))
     }
 
     @Test func enteringTheAlternateScreenClearsItsImages() {
@@ -1553,7 +1473,6 @@ struct KittyClearTests {
         emulator.feed(text("\u{1B}[2J"))
         #expect(emulator.sources[1] != nil)
         #expect(emulator.images.count == 1)
-        #expect(emulator.engineHasImage(1))
         emulator.feed(apc("a=p,i=1,C=1"))
         #expect(emulator.images.count == 2)
     }
@@ -1564,7 +1483,6 @@ struct KittyClearTests {
         emulator.feed(put("i=1,C=1") + transmit(2))
         emulator.feed(text("\u{1B}[2J"))
         #expect(emulator.sources.isEmpty)
-        #expect(!emulator.engineHasImage(1) && !emulator.engineHasImage(2))
         emulator.feed(apc("a=p,i=1"))
         #expect(replies.contain("ENOENT"))
     }
@@ -1573,7 +1491,6 @@ struct KittyClearTests {
         let emulator = scrolledOff()
         emulator.feed(text("\u{1B}[3J"))
         #expect(emulator.sources.isEmpty && emulator.images.isEmpty)
-        #expect(!emulator.engineHasImage(1))
     }
 
     @Test func virtualPlacementsKeepTheirImageAcrossClears() {
@@ -1581,7 +1498,6 @@ struct KittyClearTests {
         emulator.feed(apc("a=T,U=1,f=24,s=1,v=1,i=42,c=1,r=1,q=2", pixel))
         emulator.feed(text("\u{1B}[2J\u{1B}[3J"))
         #expect(emulator.sources[42] != nil)
-        #expect(emulator.engineHasImage(42))
     }
 
     @Test func hardResetFreesTheAlternateBufferAndVisiblePlacements() {
@@ -1771,14 +1687,13 @@ nonisolated struct KittyFastInflateTests {
     }
 }
 
-struct KittyEngineNamespaceTests {
+struct KittyBufferIDTests {
     @Test func theSameClientIDInBothBuffersDoesNotCollide() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         emulator.feed(apc("a=t,f=24,s=1,v=1,i=1", pixel))
         emulator.feed(text("\u{1B}[?1049h"))
         emulator.feed(apc("a=t,f=24,s=2,v=1,i=1", "AAAAAAAA"))
-        #expect(emulator.normalStore.engineIDs[1] != nil && emulator.altStore.engineIDs[1] != nil)
-        #expect(emulator.normalStore.engineIDs[1] != emulator.altStore.engineIDs[1])
+        #expect(emulator.normalStore.sources[1]?.size.width == 1 && emulator.altStore.sources[1]?.size.width == 2)
         emulator.feed(text("\u{1B}[?1049l"))
         emulator.feed(apc("a=p,i=1,C=1"))
         #expect(emulator.images.count == 1)
@@ -1791,12 +1706,12 @@ struct KittyEngineNamespaceTests {
         emulator.feed(text("\u{1B}[?1049h"))
         emulator.feed(transmit(1))
         emulator.feed(apc("a=d,d=I,i=1"))
-        #expect(!emulator.engineHasImage(1))
+        #expect(emulator.sources[1] == nil)
         emulator.feed(text("\u{1B}[?1049l"))
-        #expect(emulator.engineHasImage(1))
+        #expect(emulator.sources[1] != nil)
     }
 
-    @Test func repliesShowTheClientsIDsNotTheEngines() {
+    @Test func repliesShowTheClientsIDs() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         emulator.feed(transmit(1))
         emulator.feed(text("\u{1B}[?1049h"))
@@ -1809,7 +1724,7 @@ struct KittyEngineNamespaceTests {
         #expect(replies.contain("i=77;ENOENT"))
     }
 
-    @Test func numberBasedTransmitsUseTheirOwnIDsWithoutTheEngine() {
+    @Test func numberBasedTransmitsGetTheirOwnIDs() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         let replies = capture(emulator)
         emulator.feed(apc("a=T,f=24,s=1,v=1,I=5,C=1", pixel))
@@ -1817,6 +1732,19 @@ struct KittyEngineNamespaceTests {
         #expect(replies.contain("i=1,I=5;OK"))
         #expect(replies.contain("i=1,I=5,p=2;OK"))
         #expect(emulator.images.map(\.kittyID) == [1, 1])
+    }
+}
+
+struct KittyForwardingTests {
+    @Test func kittyBytesNeverReachSwiftTerm() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        let replies = capture(emulator)
+        emulator.feed(put("i=1,C=1") + apc("a=q,f=24,s=1,v=1,i=31", pixel) + apc("a=T,f=24,s=1,v=1,q=2,C=1", pixel))
+        #expect(replies.lines == ["\u{1B}_Gi=1;OK\u{1B}\\", "\u{1B}_Gi=31;OK\u{1B}\\"])
+        let images = emulator.images
+        #expect(images.count == 2 && images.allSatisfy { $0.fromKitty })
+        let shown = String(emulator.render().characters)
+        #expect(shown.allSatisfy { $0.isWhitespace })
     }
 }
 
@@ -1835,7 +1763,7 @@ struct KittyRootEditTests {
         return drawn ? pixel : []
     }
 
-    @Test func editingTheRootFrameRefreshesTheEngineCopy() {
+    @Test func editingTheRootFrameShowsInNewPlacements() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         emulator.feed(put("i=1,C=1"))
         emulator.feed(apc("a=f,f=24,s=1,v=1,i=1,r=1", "/wAA"))
@@ -1844,7 +1772,7 @@ struct KittyRootEditTests {
         #expect(redPixel(emulator.images[1]) == [255, 0, 0, 255])
     }
 
-    @Test func composingOntoTheRootFrameRefreshesTheEngineCopy() {
+    @Test func composingOntoTheRootFrameShowsInNewPlacements() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         let blank = String(repeating: "A", count: 22) + "=="
         emulator.feed(apc("a=T,f=32,s=2,v=2,i=1,C=1", blank))
@@ -1855,7 +1783,7 @@ struct KittyRootEditTests {
         #expect(redPixel(emulator.images[1], 0, 0)[3] == 0)
     }
 
-    @Test func editingANonRootFrameLeavesTheEngineCopyAlone() {
+    @Test func editingANonRootFrameLeavesTheRootAlone() {
         let emulator = BlockEmulator(cols: 40, rows: 10)
         emulator.feed(put("i=1,C=1"))
         emulator.feed(apc("a=f,f=24,s=1,v=1,i=1", "/wAA"))
@@ -2164,7 +2092,6 @@ struct KittyDeleteNumberTests {
         emulator.feed(apc("a=d,d=N,I=5"))
         #expect(emulator.images.isEmpty)
         #expect(emulator.sources[1] == nil)
-        #expect(!emulator.engineHasImage(1))
     }
 
     @Test func lowercaseDeleteByNumberKeepsTheData() {

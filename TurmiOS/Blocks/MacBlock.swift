@@ -18,6 +18,7 @@ final class MacBlock: Identifiable {
     private(set) var isRunning: Bool
     private(set) var duration: TimeInterval?
     private(set) var output: NSAttributedString
+    private(set) var graphics = BlockGraphics.empty
     private(set) var revision = 0
     private(set) var progress: Terminal.ProgressReport?
 
@@ -41,6 +42,7 @@ final class MacBlock: Identifiable {
             emulator.macName = macName
             emulator.feed([UInt8](styled))
             output = emulator.render()
+            graphics = emulator.graphics
         } else {
             output = BlockStyle.plain(Self.trimmed(summary.text))
         }
@@ -109,6 +111,7 @@ final class MacBlock: Identifiable {
         refresh = nil
         guard let emulator, !emulator.isAlternate else { return }
         output = emulator.render()
+        graphics = emulator.graphics
         revision += 1
     }
 

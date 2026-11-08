@@ -95,7 +95,6 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     @ObservationIgnored private var reportsInBandResize = false
     @ObservationIgnored private var pointers = PointerStack()
     @ObservationIgnored private var controlHold: [UInt8] = []
-    @ObservationIgnored private var emulatorGraphicsHold: [UInt8] = []
     @ObservationIgnored private var publishedWindow: WindowPixels?
     @ObservationIgnored private var publishedInBand: WindowPixels?
     @ObservationIgnored private var paneFocused = false
@@ -643,7 +642,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         // once a full-screen view owns the screen it answers terminal queries itself
         emulator.onResponse = { [weak self] data in
             guard let self else { return }
-            if self.altScreen != nil, !Self.graphicsReply(data) { return }
+            if self.altScreen != nil { return }
             self.write(Array(data))
         }
         emulator.onBufferSwitch = { [weak self] in self?.bufferSwitched() }
@@ -801,7 +800,6 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         reportsInBandResize = false
         pointers.resetAll()
         controlHold = []
-        emulatorGraphicsHold = []
         publishedWindow = nil
         publishedInBand = nil
         mouseEncoding = .x10
@@ -934,16 +932,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func closeAltScreen() {
-        if let emulator = current?.emulator {
-            for store in [emulator.normalStore, emulator.altStore] {
-                let placed = Set(store.images.compactMap { $0.fromKitty ? $0.kittyID : nil })
-                store.images.removeAll { $0.fromKitty }
-                for id in placed { store.sources[id] = nil }
-            }
-        }
         altScreen = nil
         pointers.isAlternate = false
-        emulatorGraphicsHold = []
         if let grid = paneGrid, grid.cols != cols || grid.rows != rows {
             cols = grid.cols
             rows = grid.rows
@@ -962,40 +952,14 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private func deliver(_ bytes: [UInt8], to block: Block) {
         companionTap?(.output(blockID: block.id, bytes: Data(bytes)))
         if let altScreen {
-            // The text grid never sees a full-screen frame, so the picture cannot scroll away.
-            let scanned = emulatorGraphicsHold.count
-            emulatorGraphicsHold.append(contentsOf: bytes)
-            let hold = emulatorGraphicsHold
-            if scanned > 0, hold.count >= 3, hold[0] == 0x1B, hold[1] == 0x5F, hold[2] == 0x47,
-               KittyGraphicsScanner.terminator(in: hold, from: max(3, scanned - 1)) == nil {
-                return
+            // the full-screen view's own engine draws the program's images, so the block keeps only the text
+            let plain = altScreen.feed(bytes)
+            guard !plain.isEmpty else { return }
+            for request in TerminalRequestScanner.scan(plain[...]) {
+                if case .privateMode(1016, let enabled) = request { altScreen.reportsPixels = enabled }
             }
-            let split = KittyGraphicsScanner.split(hold)
-            emulatorGraphicsHold = Array(split.remainder)
-            var plain: [UInt8] = []
-            var fallback: [UInt8] = []
-            for piece in split.pieces {
-                if case .graphics(let command) = piece.kind {
-                    if !altScreen.present(command, apc: Array(piece.bytes)) {
-                        fallback.append(contentsOf: piece.bytes)
-                    }
-                } else {
-                    plain.append(contentsOf: piece.bytes)
-                }
-            }
-            if !plain.isEmpty {
-                for request in TerminalRequestScanner.scan(plain[...]) {
-                    if case .privateMode(1016, let enabled) = request { altScreen.reportsPixels = enabled }
-                }
-                altScreen.feed(plain)
-                block.append(plain)
-            }
-            if !fallback.isEmpty {
-                block.append(fallback)
-                altScreen.showFrame(block.emulator.images.last { $0.fromKitty }?.image)
-            }
+            block.append(plain)
         } else {
-            emulatorGraphicsHold = []
             block.append(bytes)
             outputProgress.feed(bytes)
             if textProgress != outputProgress.percent { textProgress = outputProgress.percent }
@@ -1054,11 +1018,6 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         onBlockFinished()
         startedAt = nil
         if block.command == "clear" { clearBlocks() }
-    }
-
-    private static func graphicsReply(_ data: ArraySlice<UInt8>) -> Bool {
-        let start = data.startIndex
-        return data.count >= 3 && data[start] == 0x1B && data[start + 1] == 0x5F && data[start + 2] == 0x47
     }
 
     private func scheduleRender() {

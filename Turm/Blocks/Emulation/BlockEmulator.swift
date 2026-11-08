@@ -9,15 +9,14 @@ final class BlockEmulator: TerminalDelegate {
     static let scrollback = 20_000
 
     private(set) var terminal: Terminal!
-    let normalStore = KittyStore()
-    let altStore = KittyStore()
-    var storeOverride: KittyStore?
-    var nextEngineID: UInt32 = 1
-    var pendingBufferSwitch = false
-    var activeJob: KittyJob?
-    var chunked: KittyJob?
-    var settled: (row: Int, rows: Int)?
-    var replyFilter = KittyReplyFilter()
+    let engine = KittyEngine()
+    private(set) lazy var graphicsHost = BlockGraphicsHost(emulator: self)
+    var inlineImages: [InlineImage] = []
+    var placementSizes: [UUID: (columns: Int, rows: Int)] = [:]
+    var graphicsSizing = (columns: 0, rows: 0)
+    var graphicsContinues = false
+    var skippingGraphics = false
+    var skipCarry: [UInt8] = []
     private var held: [UInt8] = []
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
@@ -63,55 +62,6 @@ final class BlockEmulator: TerminalDelegate {
         let chunk: TextChunk
     }
 
-    var store: KittyStore {
-        storeOverride ?? (terminal.isCurrentBufferAlternate ? altStore : normalStore)
-    }
-
-    var images: [InlineImage] {
-        get { store.images }
-        _modify { yield &store.images }
-    }
-
-    var virtualPlacements: [InlineImage] {
-        get { store.virtualPlacements }
-        _modify { yield &store.virtualPlacements }
-    }
-
-    var sources: [UInt32: KittyAnimation] {
-        get { store.sources }
-        _modify { yield &store.sources }
-    }
-
-    var imageNumbers: [UInt32: UInt32] {
-        get { store.imageNumbers }
-        _modify { yield &store.imageNumbers }
-    }
-
-    var nextImageID: UInt32 {
-        get { store.nextImageID }
-        set { store.nextImageID = newValue }
-    }
-
-    var nextInternalID: UInt32 {
-        get { store.nextInternalID }
-        set { store.nextInternalID = newValue }
-    }
-
-    var unloaded: Set<UInt32> {
-        get { store.unloaded }
-        _modify { yield &store.unloaded }
-    }
-
-    var accessClock: UInt64 {
-        get { store.accessClock }
-        set { store.accessClock = newValue }
-    }
-
-    var storageLimit: Int {
-        get { store.storageLimit }
-        set { store.storageLimit = newValue }
-    }
-
     private static let heldLimit = 128 * 1024 * 1024
     var onBufferSwitch: () -> Void = {}
     var onResponse: (ArraySlice<UInt8>) -> Void = { _ in }
@@ -135,7 +85,11 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     func feed(_ chunk: [UInt8]) {
-        let incoming = sgrRewriter.rewrite(chunk)
+        var incoming = sgrRewriter.rewrite(chunk)
+        if skippingGraphics {
+            guard let rest = skipGraphics(incoming) else { return }
+            incoming = rest
+        }
         var bytes = incoming
         if !held.isEmpty {
             let scanned = held.count
@@ -143,7 +97,8 @@ final class BlockEmulator: TerminalDelegate {
             let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
             if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
                 guard held.count > Self.heldLimit else { return }
-                feedTerminal(held)
+                skipCarry = held.last == 0x1B ? [0x1B] : []
+                skippingGraphics = true
                 held = []
                 return
             }
@@ -160,11 +115,9 @@ final class BlockEmulator: TerminalDelegate {
             switch piece.kind {
             case .text:
                 feedTerminal(piece.bytes.count == bytes.count ? bytes : Array(piece.bytes))
-                settleBufferSwitch()
             case .clear(let scope):
                 feedTerminal(Array(piece.bytes))
-                settleBufferSwitch()
-                clearPlacements(scope)
+                clearGraphics(scope)
             case .graphics(let command):
                 feedGraphics(piece.bytes, command)
             }
@@ -288,10 +241,6 @@ final class BlockEmulator: TerminalDelegate {
         return result
     }
 
-    func origin(of image: InlineImage) -> (row: Int, column: Int)? {
-        normalStore.images.origin(of: image, virtual: placeholderLayout().origins)
-    }
-
     private var cursorCell: (row: Int, column: Int)? {
         guard tracksCursor, !cursorHidden, !terminal.isCurrentBufferAlternate else { return nil }
         let buffer = terminal.buffer
@@ -302,18 +251,11 @@ final class BlockEmulator: TerminalDelegate {
         let cell = cursorCell
         let lines = collectLines(keepingThrough: cell?.row)
         let trimmed = terminal.buffer.totalLinesTrimmed
-        let holders = placeholderLayout()
-        let placements = normalStore.images.compactMap { image -> InlineImage? in
-            guard image.rowSpan > 0, let origin = normalStore.images.origin(of: image, virtual: holders.origins)
-            else { return nil }
-            var placed = image
-            placed.anchor = origin.row
-            placed.column = origin.column
-            return placed
-        } + holders.tiles
-        let tileRows = Set(holders.tiles.map(\.anchor))
+        let kitty = kittyPlacements(from: trimmed)
+        let placements = inlineImages.filter { $0.rowSpan > 0 } + kitty.images + kitty.tiles
+        let tileRows = Set(kitty.tiles.map(\.anchor))
         let bands = Self.bands(of: placements)
-        let legacy = normalStore.images.filter { $0.rowSpan <= 0 }
+        let legacy = inlineImages.filter { $0.rowSpan <= 0 }
         let lastRow = max(lines.last?.row ?? trimmed - 1, (bands.last?.range.upperBound ?? 0) - 1)
         var byRow = [RenderedLine?](repeating: nil, count: max(lastRow - trimmed + 1, 0))
         for line in lines where line.row >= trimmed && line.row <= lastRow {
@@ -650,13 +592,10 @@ final class BlockEmulator: TerminalDelegate {
               let image = NSImage(data: data)
         else { return }
         let motion = MotionPicture.decode(data)
-        let pixels = motion?.pixels ?? Self.pixelSize(of: image)
-        if !landKitty(image, pixels: pixels) {
-            record(
-                image, width: width, height: height, animation: motion?.animation, pixels: pixels,
-                preserveAspectRatio: preserveAspectRatio
-            )
-        }
+        record(
+            image, width: width, height: height, animation: motion?.animation,
+            pixels: motion?.pixels ?? Self.pixelSize(of: image), preserveAspectRatio: preserveAspectRatio
+        )
     }
 
     func createImageFromBitmap(source: Terminal, bytes: inout [UInt8], width: Int, height: Int) {
@@ -669,11 +608,8 @@ final class BlockEmulator: TerminalDelegate {
                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
               )
         else { return }
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
         let pixels = CGSize(width: width, height: height)
-        if !landKitty(image, pixels: pixels) {
-            record(image, width: .auto, height: .auto, pixels: pixels)
-        }
+        record(NSImage(cgImage: cgImage, size: pixels), width: .auto, height: .auto, pixels: pixels)
     }
 
     private func showSixel(_ sequence: ArraySlice<UInt8>) {
@@ -722,7 +658,7 @@ final class BlockEmulator: TerminalDelegate {
         let columns = max(1, min(terminal.cols, Int(ceil(size.width / TerminalMetrics.cellWidth))))
         placement.rowSpan = rows
         placement.columnSpan = columns
-        images.append(placement)
+        inlineImages.append(placement)
         if moveCursor { cursorAdvance += rows }
     }
 
@@ -731,11 +667,11 @@ final class BlockEmulator: TerminalDelegate {
     func setTerminalTitle(source: Terminal, title: String) { onTitle(title) }
     func setTerminalIconTitle(source: Terminal, title: String) {}
     func sizeChanged(source: Terminal) {}
-    func send(source: Terminal, data: ArraySlice<UInt8>) { deliver(data) }
+    func send(source: Terminal, data: ArraySlice<UInt8>) { onResponse(data) }
     func scrolled(source: Terminal, yDisp: Int) {}
     func linefeed(source: Terminal) {}
     func bufferActivated(source: Terminal) {
-        if terminal?.isCurrentBufferAlternate == true { pendingBufferSwitch = true }
+        engine.bufferSwitched(toAlternate: source.isCurrentBufferAlternate)
         onBufferSwitch()
     }
     func bell(source: Terminal) { Bell.ring() }
@@ -802,6 +738,14 @@ enum TerminalPalette {
         if attribute.style.contains(.blink) { container[BlinkKey.self] = true }
         if let link { container.link = link }
         return container
+    }
+
+    static func color(_ value: GraphicsColor) -> NSColor? {
+        switch value {
+        case .none: return nil
+        case .indexed(let code): return indexed(Int(code))
+        case .rgb(let red, let green, let blue): return rgb(red, green, blue)
+        }
     }
 
     private static func color(_ value: Attribute.Color) -> NSColor? {

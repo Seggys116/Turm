@@ -8,6 +8,30 @@ final class TurmTerminalView: TerminalView, UIGestureRecognizerDelegate {
     private let capture = TerminalCaptureField()
 
     var kittyFlags: Int { getTerminal().keyboardEnhancementFlags.rawValue }
+    var onScroll: (() -> Void)?
+    var onLayout: (() -> Void)?
+    /// The background shown behind a transparent default background, reported in its place to color queries.
+    var clearedBackground: UIColor?
+
+    override var contentOffset: CGPoint {
+        didSet { onScroll?() }
+    }
+
+    override func send(source: Terminal, data: ArraySlice<UInt8>) {
+        super.send(source: source, data: Self.report(data, background: clearedBackground))
+    }
+
+    private static let clearReport = Array("\u{1B}]11;rgb:0000/0000/0000\u{1B}\\".utf8)
+
+    static func report(_ data: ArraySlice<UInt8>, background: UIColor?) -> ArraySlice<UInt8> {
+        guard let background, data.elementsEqual(clearReport) else { return data }
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        background.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func channel(_ value: CGFloat) -> String {
+            String(format: "%04x", Int(UInt16(min(max(value, 0), 1) * 65535)))
+        }
+        return Array("\u{1B}]11;rgb:\(channel(red))/\(channel(green))/\(channel(blue))\u{1B}\\".utf8)[...]
+    }
 
     /// A full-screen program covers the command field. iOS only delivers typing to a text field, so a hidden one
     /// stays first responder and this view reports that focus, which keeps taps working as mouse input.
@@ -64,6 +88,7 @@ final class TurmTerminalView: TerminalView, UIGestureRecognizerDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        onLayout?()
         guard capturesKeyboard else { return }
         placeCapture()
     }

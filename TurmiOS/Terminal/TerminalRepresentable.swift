@@ -7,15 +7,18 @@ struct TerminalRepresentable: UIViewRepresentable {
     var focusOnAppear = true
     @Environment(\.colorScheme) private var colorScheme
 
-    func makeUIView(context: Context) -> TerminalView {
+    func makeUIView(context: Context) -> TerminalStage {
         surface.apply(dark: colorScheme == .dark)
         surface.apply(fontSize: fontSize)
+        let stage = surface.stage
+        stage.adopt()
         let view = surface.view
         if focusOnAppear { DispatchQueue.main.async { _ = view.becomeFirstResponder() } }
-        return view
+        return stage
     }
 
-    func updateUIView(_ view: TerminalView, context: Context) {
+    func updateUIView(_ stage: TerminalStage, context: Context) {
+        stage.adopt()
         surface.apply(dark: colorScheme == .dark)
         surface.apply(fontSize: fontSize)
     }

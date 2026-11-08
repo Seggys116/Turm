@@ -1,48 +1,48 @@
 import Darwin
 import Foundation
-import TurmCore
 
 @_silgen_name("shm_open")
 private func sharedMemoryOpen(_ name: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32
 
-struct KittyFailure: Error, Equatable {
-    let code: String
-    let message: String
+public struct KittyFailure: Error, Equatable {
+    public let code: String
+    public let message: String
 }
 
-struct KittyLoadState {
-    var received = 0
+public struct KittyLoadState {
+    public init() {}
+    public var received = 0
     var compressed = Data()
     var direct = Data()
     var fileData = Data()
-    var inflated: Data?
+    public var inflated: Data?
     var available = 0
-    var openedPath: String?
+    public var openedPath: String?
     var openedShared = false
-    var firstBytes: [UInt8] = []
+    public var firstBytes: [UInt8] = []
 }
 
-enum KittyLoadCheck {
+public enum KittyLoadCheck {
     static let maxDimension = 10_000
     static let maxData = 400_000_000
     static let fileFailure = KittyFailure(code: "EBADF", message: "Failed to read image file")
 
-    static func format(_ command: KittyCommand) -> Int {
+    public static func format(_ command: KittyCommand) -> Int {
         command.format ?? 32
     }
 
-    static func isFile(_ command: KittyCommand) -> Bool {
+    public static func isFile(_ command: KittyCommand) -> Bool {
         guard let medium = command.medium else { return false }
         return medium == "f" || medium == "t" || medium == "s"
     }
 
-    static func dataSize(_ command: KittyCommand) -> Int {
+    public static func dataSize(_ command: KittyCommand) -> Int {
         let fmt = format(command)
         if fmt == 100 { return command.dataSize > 0 ? command.dataSize : 100 * 1024 }
         return (command.stateValue ?? 0) * (command.loopValue ?? 0) * (fmt / 8)
     }
 
-    static func initialize(_ command: KittyCommand) -> KittyFailure? {
+    public static func initialize(_ command: KittyCommand) -> KittyFailure? {
         let width = command.stateValue ?? 0
         let height = command.loopValue ?? 0
         if width > maxDimension || height > maxDimension {
@@ -59,8 +59,9 @@ enum KittyLoadCheck {
         return nil
     }
 
-    static func accept(
-        _ state: inout KittyLoadState, chunk: ArraySlice<UInt8>, command: KittyCommand, more: Bool
+    public static func accept(
+        _ state: inout KittyLoadState, chunk: ArraySlice<UInt8>, command: KittyCommand, more: Bool,
+        allowsLocalMedia: Bool = true
     ) -> KittyFailure? {
         let decoded = Data(base64Encoded: Data(chunk), options: .ignoreUnknownCharacters) ?? Data()
         switch command.medium ?? "d" {
@@ -70,12 +71,13 @@ enum KittyLoadCheck {
             if state.received > capacity { return KittyFailure(code: "EFBIG", message: "Too much data") }
             if command.compression == "z" {
                 state.compressed.append(decoded)
-            } else if format(command) == 100 {
+            } else {
                 state.direct.append(decoded)
             }
             if more { return nil }
         case "f", "t", "s":
             if decoded.count > 2048 { return KittyFailure(code: "EINVAL", message: "Filename too long") }
+            guard allowsLocalMedia else { return fileFailure }
             if let failure = open(String(decoding: decoded, as: UTF8.self), command, &state) { return failure }
         default:
             return KittyFailure(code: "EINVAL", message: "Unknown transmission type: \(command.medium ?? "d")")
@@ -114,7 +116,7 @@ enum KittyLoadCheck {
         return nil
     }
 
-    static func sharedSlice(_ name: String, offset: Int, count: Int) -> Data? {
+    public static func sharedSlice(_ name: String, offset: Int, count: Int) -> Data? {
         let descriptor = name.withCString { sharedMemoryOpen($0, O_RDONLY, 0) }
         guard descriptor >= 0 else { return nil }
         defer { close(descriptor) }
@@ -152,7 +154,22 @@ enum KittyLoadCheck {
         return nil
     }
 
-    static func discardTransient(_ state: KittyLoadState, _ command: KittyCommand) {
+    public static func bytes(_ state: KittyLoadState, command: KittyCommand) -> Data? {
+        if let inflated = state.inflated { return inflated }
+        guard isFile(command) else { return state.direct.isEmpty ? nil : state.direct }
+        if !state.fileData.isEmpty { return state.fileData }
+        guard let path = state.openedPath, state.received > 0 else { return nil }
+        if state.openedShared {
+            return sharedSlice(path, offset: command.dataOffset, count: state.received)
+        }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard (try? handle.seek(toOffset: UInt64(command.dataOffset))) != nil,
+              let data = try? handle.read(upToCount: state.received), data.count == state.received else { return nil }
+        return data
+    }
+
+    public static func discardTransient(_ state: KittyLoadState, _ command: KittyCommand) {
         guard let path = state.openedPath else { return }
         if command.medium == "t", KittyFilePolicy.mayDelete(path) {
             unlink(path)

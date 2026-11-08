@@ -10,6 +10,13 @@ final class MacBlockEmulator: TerminalDelegate {
     var onProgress: (Terminal.ProgressReport?) -> Void = { _ in }
     var onResponse: (([UInt8]) -> Void)?
     var macName: String?
+    let engine = KittyEngine()
+    private(set) lazy var graphicsHost = MacBlockGraphicsHost(emulator: self)
+    private(set) var graphics = BlockGraphics.empty
+    private var held: [UInt8] = []
+    private var skippingGraphics = false
+    private var skipCarry: [UInt8] = []
+    private static let heldLimit = 128 * 1024 * 1024
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
     private var pictures: [Picture] = []
@@ -35,7 +42,49 @@ final class MacBlockEmulator: TerminalDelegate {
         terminal.isCurrentBufferAlternate
     }
 
-    func feed(_ bytes: [UInt8]) {
+    func feed(_ chunk: [UInt8]) {
+        var incoming = chunk
+        if skippingGraphics {
+            guard let rest = skipGraphics(incoming) else { return }
+            incoming = rest
+        }
+        var bytes = incoming
+        if !held.isEmpty {
+            let scanned = held.count
+            held.append(contentsOf: incoming)
+            let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
+            if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
+                guard held.count > Self.heldLimit else { return }
+                skipCarry = held.last == 0x1B ? [0x1B] : []
+                skippingGraphics = true
+                held = []
+                return
+            }
+            bytes = held
+            held = []
+        }
+        guard bytes.contains(0x1B) else {
+            feedTerminal(bytes)
+            pruneScrolledOff()
+            return
+        }
+        let split = KittyGraphicsScanner.split(bytes)
+        held = Array(split.remainder)
+        for piece in split.pieces {
+            switch piece.kind {
+            case .text:
+                feedTerminal(piece.bytes.count == bytes.count ? bytes : Array(piece.bytes))
+            case .clear(let scope):
+                feedTerminal(Array(piece.bytes))
+                clearGraphics(scope)
+            case .graphics:
+                engine.handle(piece.bytes, host: graphicsHost)
+            }
+        }
+        pruneScrolledOff()
+    }
+
+    private func feedTerminal(_ bytes: [UInt8]) {
         guard let ready = graphicHold.intake(bytes) else { return }
         let split = TerminalGraphics.split(ready)
         for piece in split.pieces {
@@ -48,10 +97,8 @@ final class MacBlockEmulator: TerminalDelegate {
             case .query(let reply):
                 if !reply.isEmpty { onResponse?(reply) }
             case .bytes(let raw):
-                let text = Array(raw)
-                if text.contains(0x1B) { noteClears(text) }
-                guard !text.isEmpty else { continue }
-                terminal.feed(byteArray: text)
+                guard !raw.isEmpty else { continue }
+                terminal.feed(buffer: raw)
             }
             advanceUnmovedImages()
         }
@@ -61,12 +108,15 @@ final class MacBlockEmulator: TerminalDelegate {
     func resize(cols: Int, rows: Int) {
         terminal.resize(cols: max(cols, 2), rows: max(rows, 2))
         forgetSettled()
+        pruneScrolledOff()
     }
 
     func render() -> NSAttributedString {
         guard !isAlternate else { return latest }
         prunePictures()
-        if !pictures.isEmpty { return renderWithImages() }
+        let placed = engine.placements(visible: terminal.buffer.totalLinesTrimmed..<Int.max, host: graphicsHost)
+        if !pictures.isEmpty || !placed.isEmpty { return renderWithImages(placed) }
+        graphics = .empty
         let buffer = terminal.buffer
         let trimmed = buffer.totalLinesTrimmed
         let settledEnd = trimmed + buffer.yDisp
@@ -126,37 +176,56 @@ final class MacBlockEmulator: TerminalDelegate {
 
     private var fontSize: Double { TerminalPreferences.shared.fontSize }
 
-    private var displayScale: CGFloat {
+    var displayScale: CGFloat {
         let scale = UITraitCollection.current.displayScale
         return scale > 0 ? scale : 2
     }
 
-    private var cursorRow: Int {
+    var cursorRow: Int {
         let buffer = terminal.buffer
         return buffer.totalLinesTrimmed + buffer.yDisp + buffer.y
     }
 
-    private func renderWithImages() -> NSAttributedString {
+    var cellPixels: (width: Int, height: Int) {
+        let cell = BlockStyle.cellSize(fontSize: fontSize)
+        let scale = displayScale
+        return (max(Int((cell.width * scale).rounded()), 1), max(Int((cell.height * scale).rounded()), 1))
+    }
+
+    private func renderWithImages(_ placed: [GraphicsPlacement]) -> NSAttributedString {
         let buffer = terminal.buffer
         let trimmed = buffer.totalLinesTrimmed
         let last = trimmed + buffer.yDisp + terminal.rows
+        let covered = placed.map { $0.origin.row + max($0.rowSpan, 1) }.max() ?? trimmed
         let result = NSMutableAttributedString()
+        var starts: [Int] = []
+        var kept = (length: 0, rows: 0)
         var row = trimmed
         var started = false
         while row < last {
             if let picture = pictures.first(where: { $0.row == row }) {
                 if started { result.append(Self.newline) }
+                let span = max(picture.rows, 1)
+                starts.append(contentsOf: repeatElement(result.length, count: span))
                 result.append(attachment(picture))
+                kept = (result.length, starts.count)
                 started = true
-                row += max(picture.rows, 1)
+                row += span
                 continue
             }
             guard let line = terminal.getScrollInvariantLine(row: row) else { break }
             if started, !line.isWrapped { result.append(Self.newline) }
-            result.append(render(line))
+            starts.append(result.length)
+            let text = render(line)
+            result.append(text)
+            if text.length > 0 || line.isWrapped || row < covered { kept = (result.length, starts.count) }
             started = true
             row += 1
         }
+        // blank rows below the last text and image are dropped, as the plain path does
+        if kept.length < result.length { result.deleteCharacters(in: NSRange(location: kept.length, length: result.length - kept.length)) }
+        starts.removeLast(starts.count - kept.rows)
+        graphics = placed.isEmpty ? .empty : BlockGraphics(placements: placed, firstRow: trimmed, rowStarts: starts)
         latest = result
         return result
     }
@@ -268,35 +337,56 @@ final class MacBlockEmulator: TerminalDelegate {
         pictures.removeAll { $0.row + $0.rows <= trimmed }
     }
 
-    private func noteClears(_ bytes: [UInt8]) {
-        var index = 0
-        while index + 1 < bytes.count {
-            guard bytes[index] == 0x1B else {
-                index += 1
-                continue
-            }
-            if bytes[index + 1] == 0x63 {
-                pictures.removeAll()
-                index += 2
-                continue
-            }
-            if bytes[index + 1] == 0x5B {
-                var cursor = index + 2
-                while cursor < bytes.count, bytes[cursor] < 0x40 { cursor += 1 }
-                if cursor < bytes.count, bytes[cursor] == 0x4A {
-                    let parameter = bytes[(index + 2)..<cursor]
-                    if parameter.elementsEqual([0x33]) {
-                        pictures.removeAll()
-                    } else if parameter.elementsEqual([0x32]) {
-                        let top = terminal.buffer.totalLinesTrimmed + terminal.buffer.yDisp
-                        pictures.removeAll { $0.row + $0.rows > top }
-                    }
-                }
-                index = cursor < bytes.count ? cursor + 1 : cursor
-                continue
-            }
-            index += 1
+    private func pruneScrolledOff() {
+        let trimmed = terminal.buffer.totalLinesTrimmed
+        guard trimmed > 0 else { return }
+        engine.pruneScrolledOff(trimmed: trimmed)
+        prunePictures()
+    }
+
+    /// Drops the rest of a graphics command that outgrew the hold, up to its terminator.
+    private func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
+        let bytes = skipCarry + bytes
+        skipCarry = []
+        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
+            if bytes.last == 0x1B { skipCarry = [0x1B] }
+            return nil
         }
+        skippingGraphics = false
+        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
+    }
+
+    private func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
+        if scope == .scrollback {
+            pushScreenIntoScrollback()
+            terminal.feed(byteArray: Array("\u{1B}[2J".utf8))
+        }
+        engine.clear(scope, host: graphicsHost)
+        guard scope == .reset || !terminal.isCurrentBufferAlternate else { return }
+        switch scope {
+        case .everything, .reset:
+            pictures.removeAll()
+        case .visible, .scrollback:
+            let top = terminal.buffer.totalLinesTrimmed + terminal.buffer.yDisp
+            pictures.removeAll { $0.row + $0.rows > top }
+        }
+    }
+
+    private func pushScreenIntoScrollback() {
+        guard !terminal.isCurrentBufferAlternate else { return }
+        func blank(_ row: Int) -> Bool {
+            guard let line = terminal.getLine(row: row) else { return true }
+            for column in 0..<line.count {
+                let character = terminal.getCharacter(for: line[column])
+                if character != " " && character != "\u{0}" { return false }
+            }
+            return true
+        }
+        var count = terminal.rows
+        while count > 0, blank(count - 1) { count -= 1 }
+        guard count > 0 else { return }
+        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
+        terminal.feed(byteArray: Array(sequence.utf8))
     }
 
     private func render(_ line: BufferLine) -> NSAttributedString {
@@ -331,7 +421,7 @@ final class MacBlockEmulator: TerminalDelegate {
                 started = true
             }
             let character = terminal.getCharacter(for: cell)
-            run.append(character == "\u{0}" ? " " : character)
+            run.append(character == "\u{0}" || KittyPlaceholders.isPlaceholder(character) ? " " : character)
         }
         flush()
         return result
@@ -346,9 +436,11 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? {
-        let cell = BlockStyle.cellSize(fontSize: fontSize)
-        let scale = displayScale
-        return (max(Int((cell.width * scale).rounded()), 1), max(Int((cell.height * scale).rounded()), 1))
+        cellPixels
+    }
+
+    func bufferActivated(source: Terminal) {
+        engine.bufferSwitched(toAlternate: source.isCurrentBufferAlternate)
     }
 
     func createImage(

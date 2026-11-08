@@ -2,23 +2,10 @@ import AppKit
 import CoreGraphics
 import Foundation
 import SwiftTerm
-
-struct KittyParent: Equatable {
-    let imageID: UInt32
-    let placementID: UInt32
-    let columns: Int
-    let rows: Int
-}
-
-struct KittyTile: Equatable {
-    let columns: Int
-    let rows: Int
-    let partColumn: Int
-    let partRow: Int
-}
+import TurmCore
 
 struct InlineImage: Identifiable {
-    let id = UUID()
+    var id = UUID()
     let image: NSImage
     let width: ImageSizeRequest
     let height: ImageSizeRequest
@@ -70,6 +57,59 @@ struct InlineImage: Identifiable {
         case .percent(let count): return pane > 0 ? pane * CGFloat(count) / 100 : nil
         case .auto: return nil
         }
+    }
+}
+
+extension InlineImage {
+    init(placement: GraphicsPlacement, requested: (columns: Int, rows: Int) = (0, 0)) {
+        let root: CGImage
+        var animation: KittyAnimation?
+        switch placement.source {
+        case .still(let image):
+            root = image
+        case .animated(let clip):
+            root = clip.frames[0].image
+            animation = clip
+        }
+        let shown = placement.crop.flatMap { root.cropping(to: $0) } ?? root
+        self.init(
+            image: NSImage(cgImage: shown, size: NSSize(width: shown.width, height: shown.height)),
+            width: requested.columns > 0 ? .cells(requested.columns) : .auto,
+            height: requested.rows > 0 ? .cells(requested.rows) : .auto,
+            anchor: placement.origin.row, kittyID: placement.kittyID, fromKitty: placement.fromKitty
+        )
+        id = placement.id
+        placementID = placement.placementID
+        zIndex = placement.zIndex
+        column = placement.origin.column
+        rowSpan = placement.rowSpan
+        columnSpan = placement.columnSpan
+        pixelOffset = placement.pixelOffset
+        pixelSize = placement.pixelSize
+        scale = placement.scale
+        parent = placement.parent
+        self.animation = animation
+        crop = placement.crop
+        tile = placement.tile
+        background = TerminalPalette.color(placement.background)
+    }
+}
+
+extension AttributedString {
+    func maskingPlaceholders() -> AttributedString {
+        var result = AttributedString()
+        var index = startIndex
+        while index < endIndex {
+            let next = self.index(afterCharacter: index)
+            let piece = self[index..<next]
+            if KittyPlaceholders.isPlaceholder(self.characters[index]) {
+                result.append(AttributedString(" ", attributes: piece.runs.first?.attributes ?? AttributeContainer()))
+            } else {
+                result.append(AttributedString(piece))
+            }
+            index = next
+        }
+        return result
     }
 }
 

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SwiftTerm
 import Testing
+import TurmCore
 @testable import Turm
 
 struct KittyInflateSizeTests {

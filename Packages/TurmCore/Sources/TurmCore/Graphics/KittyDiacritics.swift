@@ -1,6 +1,6 @@
 import Foundation
 
-enum KittyDiacritics {
+public enum KittyDiacritics {
     static let scalars: [UInt32] = [
         0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F,
         0x0346, 0x034A, 0x034B, 0x034C, 0x0350, 0x0351, 0x0352, 0x0357,
@@ -42,7 +42,7 @@ enum KittyDiacritics {
         0x1D244,
     ]
 
-    static let index: [UInt32: Int] = {
+    public static let index: [UInt32: Int] = {
         var map: [UInt32: Int] = [:]
         for (position, scalar) in scalars.enumerated() { map[scalar] = position }
         return map

@@ -162,7 +162,8 @@ private struct MacBlockRow<Session: BlockSession>: View {
                 }
                 if block.hasOutput {
                     OutputTextView(
-                        id: block.id, text: block.output, revision: block.revision, fontSize: fontSize, actions: actions
+                        id: block.id, text: block.output, revision: block.revision, fontSize: fontSize, graphics: block.graphics,
+                        actions: actions
                     )
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)

@@ -1,16 +1,16 @@
 import Compression
 import Foundation
 
-nonisolated enum KittyDeflate {
-    enum Failure: Error, Equatable {
+public nonisolated enum KittyDeflate {
+    public enum Failure: Error, Equatable {
         case data(String)
         case buffer
     }
 
-    struct Outcome {
-        var output: [UInt8]
+    public struct Outcome {
+        public var output: [UInt8]
         var end: Int
-        var failure: Failure?
+        public var failure: Failure?
     }
 
     private struct Table {
@@ -85,7 +85,7 @@ nonisolated enum KittyDeflate {
         }
     }
 
-    static func inflate(_ input: [UInt8], from start: Int, capacity: Int) -> Outcome {
+    public static func inflate(_ input: [UInt8], from start: Int, capacity: Int) -> Outcome {
         var reader = Reader(input: input, position: start)
         var output: [UInt8] = []
         output.reserveCapacity(min(capacity, 1 << 24))
@@ -192,17 +192,17 @@ nonisolated enum KittyDeflate {
         }
     }
 
-    static func prefersFast(_ body: ArraySlice<UInt8>) -> Bool {
+    public static func prefersFast(_ body: ArraySlice<UInt8>) -> Bool {
         body.count > 256 * 1024 && (body[body.startIndex] & 0x06) != 0
     }
 
-    static func trailerMatches(_ stream: [UInt8], _ output: [UInt8]) -> Bool {
+    public static func trailerMatches(_ stream: [UInt8], _ output: [UInt8]) -> Bool {
         guard stream.count >= 6 else { return false }
         let trailer = stream.suffix(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
         return trailer == KittyInflate.adler32(output)
     }
 
-    static func fast(_ body: ArraySlice<UInt8>, capacity: Int) -> [UInt8]? {
+    public static func fast(_ body: ArraySlice<UInt8>, capacity: Int) -> [UInt8]? {
         let scratchOut = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
         let scratchIn = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
         defer {
@@ -246,8 +246,8 @@ nonisolated enum KittyDeflate {
     }
 }
 
-nonisolated enum KittyInflate {
-    static func adler32(_ bytes: [UInt8]) -> UInt32 {
+public nonisolated enum KittyInflate {
+    public static func adler32(_ bytes: [UInt8]) -> UInt32 {
         var low: UInt32 = 1
         var high: UInt32 = 0
         var index = 0
@@ -273,7 +273,7 @@ nonisolated enum KittyInflate {
     }
 
     /// `exact` is false when the output size is not known up front, as for a compressed PNG, so the stream decides where it ends.
-    static func inflate(_ input: Data, capacity: Int, exact: Bool = true) -> Result<Data, KittyFailure> {
+    public static func inflate(_ input: Data, capacity: Int, exact: Bool = true) -> Result<Data, KittyFailure> {
         func failed(_ name: String) -> Result<Data, KittyFailure> {
             .failure(KittyFailure(code: "EINVAL", message: "Failed to inflate image data with error: \(name)"))
         }
