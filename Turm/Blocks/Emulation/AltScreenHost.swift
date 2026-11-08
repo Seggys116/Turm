@@ -3,13 +3,11 @@ import SwiftTerm
 import TurmCore
 
 final class AltScreenHost: NSObject, TerminalViewDelegate {
-    private static let heldLimit = 128 * 1024 * 1024
-
     let view: FullScreenTerminalView
     let engine = KittyEngine()
     let painter = GraphicsLayerPainter()
     /// The images drawn above the text; `view` keeps it and the backdrop beneath the text aligned with itself.
-    var frameOverlay: GraphicsLayerView { view.graphicsOverlay }
+    var graphicsOverlay: GraphicsLayerView { view.graphicsOverlay }
     private(set) lazy var graphicsHost = AltScreenGraphicsHost(host: self)
     var onFiles: ([URL]) -> Void = { _ in } {
         didSet { view.onFiles = onFiles }
@@ -25,9 +23,7 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     private var isReplaying = false
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
-    private var kittyHold: [UInt8] = []
-    private var skippingGraphics = false
-    private var skipCarry: [UInt8] = []
+    private var intake = KittyStreamIntake()
     private var painted = false
 
     let remoteName: String?
@@ -43,8 +39,10 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         view.notifyUpdateChanges = true
         view.onWindow = { [weak self] in self?.onWindow() }
         view.onGeometry = { [weak self] in self?.refreshGraphics() }
+        graphicsHost.noteBuffer()
         view.onBufferSwitch = { [weak self] alternate in
             guard let self else { return }
+            graphicsHost.noteBuffer()
             engine.bufferSwitched(toAlternate: alternate)
             refreshGraphics()
         }
@@ -64,36 +62,15 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
 
     @discardableResult
     private func process(_ bytes: [UInt8], live: Bool) -> [UInt8] {
-        var incoming = bytes
-        if skippingGraphics {
-            guard let rest = skipGraphics(incoming) else { return [] }
-            incoming = rest
-        }
-        if !kittyHold.isEmpty {
-            let scanned = kittyHold.count
-            kittyHold.append(contentsOf: incoming)
-            let opensGraphics = kittyHold.count >= 3 && kittyHold[0] == 0x1B && kittyHold[1] == 0x5F && kittyHold[2] == 0x47
-            if opensGraphics, KittyGraphicsScanner.terminator(in: kittyHold, from: max(3, scanned - 1)) == nil {
-                if kittyHold.count > Self.heldLimit {
-                    skipCarry = kittyHold.last == 0x1B ? [0x1B] : []
-                    skippingGraphics = true
-                    kittyHold = []
-                }
-                return []
-            }
-            incoming = kittyHold
-            kittyHold = []
-        }
+        guard let incoming = intake.take(bytes) else { return [] }
         guard incoming.contains(0x1B) else {
             feedText(incoming[...], answering: live)
             afterFeed()
             return incoming
         }
-        let split = KittyGraphicsScanner.split(incoming)
-        kittyHold = Array(split.remainder)
         var kept: [UInt8] = []
         kept.reserveCapacity(incoming.count)
-        for piece in split.pieces {
+        for piece in intake.split(incoming) {
             switch piece.kind {
             case .text:
                 feedText(piece.bytes, answering: live)
@@ -111,17 +88,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         }
         afterFeed()
         return kept
-    }
-
-    private func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
-        let bytes = skipCarry + bytes
-        skipCarry = []
-        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
-            if bytes.last == 0x1B { skipCarry = [0x1B] }
-            return nil
-        }
-        skippingGraphics = false
-        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
     }
 
     private func feedText(_ bytes: ArraySlice<UInt8>, answering: Bool) {
@@ -166,28 +132,10 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
 
     private func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
         if scope == .scrollback {
-            pushScreenIntoScrollback()
+            if let push = view.getTerminal().scrollbackPush() { view.feed(byteArray: push[...]) }
             view.feed(byteArray: Array("\u{1B}[2J".utf8)[...])
         }
         engine.clear(scope, host: graphicsHost)
-    }
-
-    private func pushScreenIntoScrollback() {
-        let terminal = view.getTerminal()
-        guard !terminal.isCurrentBufferAlternate else { return }
-        func blank(_ row: Int) -> Bool {
-            guard let line = terminal.getLine(row: row) else { return true }
-            for column in 0..<line.count {
-                let character = terminal.getCharacter(for: line[column])
-                if character != " " && character != "\u{0}" { return false }
-            }
-            return true
-        }
-        var count = terminal.rows
-        while count > 0, blank(count - 1) { count -= 1 }
-        guard count > 0 else { return }
-        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
-        view.feed(byteArray: Array(sequence.utf8)[...])
     }
 
     private func afterFeed() {

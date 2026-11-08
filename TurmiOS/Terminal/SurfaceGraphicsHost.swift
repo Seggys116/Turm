@@ -5,6 +5,7 @@ import UIKit
 
 final class SurfaceGraphicsHost: GraphicsHost {
     unowned let surface: TerminalSurface
+    private let screens = ScreenBuffers<Buffer>()
 
     init(surface: TerminalSurface) {
         self.surface = surface
@@ -69,28 +70,11 @@ final class SurfaceGraphicsHost: GraphicsHost {
         return high
     }
 
-    func placeholderCells(rows: Range<Int>) -> [GraphicsCell] {
-        let terminal = terminal
-        let lower = max(rows.lowerBound, terminal.buffer.totalLinesTrimmed)
-        let upper = min(rows.upperBound, lineEnd)
-        guard lower < upper else { return [] }
-        var cells: [GraphicsCell] = []
-        for row in lower..<upper {
-            guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
-            for column in 0..<line.count {
-                let data = line[column]
-                if data.width == 0 { continue }
-                let character = terminal.getCharacter(for: data)
-                guard KittyPlaceholders.isPlaceholder(character) else { continue }
-                let attribute = data.attribute
-                cells.append(GraphicsCell(
-                    point: GridPoint(row: row, column: column), character: character,
-                    foreground: MacBlockGraphicsHost.color(attribute.fg),
-                    underline: attribute.underlineColor.map(MacBlockGraphicsHost.color) ?? .none,
-                    background: MacBlockGraphicsHost.color(attribute.style.contains(.inverse) ? attribute.fg : attribute.bg)
-                ))
-            }
-        }
-        return cells
+    func placeholderCells(rows: Range<Int>, buffer: GraphicsBuffer) -> [GraphicsCell] {
+        terminal.placeholderCells(rows: rows, of: buffer, screens: screens, activeEnd: lineEnd)
+    }
+
+    func noteBuffer() {
+        screens.note(terminal)
     }
 }

@@ -13,10 +13,7 @@ final class MacBlockEmulator: TerminalDelegate {
     let engine = KittyEngine()
     private(set) lazy var graphicsHost = MacBlockGraphicsHost(emulator: self)
     private(set) var graphics = BlockGraphics.empty
-    private var held: [UInt8] = []
-    private var skippingGraphics = false
-    private var skipCarry: [UInt8] = []
-    private static let heldLimit = 128 * 1024 * 1024
+    private var intake = KittyStreamIntake()
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
     private var pictures: [Picture] = []
@@ -36,6 +33,7 @@ final class MacBlockEmulator: TerminalDelegate {
         options.scrollback = Self.scrollback
         options.termName = "xterm-256color"
         terminal = Terminal(delegate: self, options: options)
+        graphicsHost.noteBuffer()
     }
 
     var isAlternate: Bool {
@@ -43,34 +41,13 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     func feed(_ chunk: [UInt8]) {
-        var incoming = chunk
-        if skippingGraphics {
-            guard let rest = skipGraphics(incoming) else { return }
-            incoming = rest
-        }
-        var bytes = incoming
-        if !held.isEmpty {
-            let scanned = held.count
-            held.append(contentsOf: incoming)
-            let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
-            if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
-                guard held.count > Self.heldLimit else { return }
-                skipCarry = held.last == 0x1B ? [0x1B] : []
-                skippingGraphics = true
-                held = []
-                return
-            }
-            bytes = held
-            held = []
-        }
+        guard let bytes = intake.take(chunk) else { return }
         guard bytes.contains(0x1B) else {
             feedTerminal(bytes)
             pruneScrolledOff()
             return
         }
-        let split = KittyGraphicsScanner.split(bytes)
-        held = Array(split.remainder)
-        for piece in split.pieces {
+        for piece in intake.split(bytes) {
             switch piece.kind {
             case .text:
                 feedTerminal(piece.bytes.count == bytes.count ? bytes : Array(piece.bytes))
@@ -112,7 +89,7 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     func render() -> NSAttributedString {
-        guard !isAlternate else { return latest }
+        guard !isAlternate else { return renderBehindProgram() }
         prunePictures()
         let placed = engine.placements(visible: terminal.buffer.totalLinesTrimmed..<Int.max, host: graphicsHost)
         if !pictures.isEmpty || !placed.isEmpty { return renderWithImages(placed) }
@@ -159,6 +136,13 @@ final class MacBlockEmulator: TerminalDelegate {
         }
         latest = result
         return result
+    }
+
+    // SwiftTerm hides the main screen's lines while a program runs, so the last text stays and only its images are laid out again
+    private func renderBehindProgram() -> NSAttributedString {
+        let normal = engine.placements(visible: graphics.firstRow..<Int.max, host: graphicsHost, buffer: .normal)
+        graphics = normal.isEmpty ? .empty : BlockGraphics(placements: normal, firstRow: graphics.firstRow, rowStarts: graphics.rowStarts)
+        return latest
     }
 
     private func forgetSettled() {
@@ -344,21 +328,9 @@ final class MacBlockEmulator: TerminalDelegate {
         prunePictures()
     }
 
-    /// Drops the rest of a graphics command that outgrew the hold, up to its terminator.
-    private func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
-        let bytes = skipCarry + bytes
-        skipCarry = []
-        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
-            if bytes.last == 0x1B { skipCarry = [0x1B] }
-            return nil
-        }
-        skippingGraphics = false
-        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
-    }
-
     private func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
         if scope == .scrollback {
-            pushScreenIntoScrollback()
+            if let push = terminal.scrollbackPush() { terminal.feed(byteArray: push) }
             terminal.feed(byteArray: Array("\u{1B}[2J".utf8))
         }
         engine.clear(scope, host: graphicsHost)
@@ -370,23 +342,6 @@ final class MacBlockEmulator: TerminalDelegate {
             let top = terminal.buffer.totalLinesTrimmed + terminal.buffer.yDisp
             pictures.removeAll { $0.row + $0.rows > top }
         }
-    }
-
-    private func pushScreenIntoScrollback() {
-        guard !terminal.isCurrentBufferAlternate else { return }
-        func blank(_ row: Int) -> Bool {
-            guard let line = terminal.getLine(row: row) else { return true }
-            for column in 0..<line.count {
-                let character = terminal.getCharacter(for: line[column])
-                if character != " " && character != "\u{0}" { return false }
-            }
-            return true
-        }
-        var count = terminal.rows
-        while count > 0, blank(count - 1) { count -= 1 }
-        guard count > 0 else { return }
-        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
-        terminal.feed(byteArray: Array(sequence.utf8))
     }
 
     private func render(_ line: BufferLine) -> NSAttributedString {
@@ -440,6 +395,7 @@ final class MacBlockEmulator: TerminalDelegate {
     }
 
     func bufferActivated(source: Terminal) {
+        graphicsHost.noteBuffer()
         engine.bufferSwitched(toAlternate: source.isCurrentBufferAlternate)
     }
 

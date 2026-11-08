@@ -45,6 +45,14 @@ public final class KittyEngine {
         isAlternate ? alternateStore : store
     }
 
+    public var activeBuffer: GraphicsBuffer {
+        isAlternate ? .alternate : .normal
+    }
+
+    public func imageStore(for buffer: GraphicsBuffer) -> KittyImageStore {
+        buffer == .alternate ? alternateStore : store
+    }
+
     public init(storageLimit: Int = 320 << 20, now: @escaping () -> Date = Date.init) {
         store = KittyImageStore()
         alternateStore = KittyImageStore()
@@ -68,12 +76,14 @@ public final class KittyEngine {
         if command.action != "q", chunked == nil || chunked?.landing == .discard { changed() }
     }
 
-    public func placements(visible rows: Range<Int>, host: any GraphicsHost) -> [GraphicsPlacement] {
+    /// Placements of `buffer` (the active one when nil) that reach into `rows`, placeholder tiles included.
+    public func placements(visible rows: Range<Int>, host: any GraphicsHost, buffer: GraphicsBuffer? = nil) -> [GraphicsPlacement] {
         self.host = host
         defer { self.host = nil }
         sync(host)
-        let store = activeStore
-        let holders = layout(store, rows: rows)
+        let buffer = buffer ?? activeBuffer
+        let store = imageStore(for: buffer)
+        let holders = layout(buffer, rows: rows)
         var result: [GraphicsPlacement] = []
         for image in store.images where image.rowSpan > 0 {
             guard let origin = store.images.origin(of: image, virtual: holders.origins),
@@ -89,18 +99,29 @@ public final class KittyEngine {
             .map(\.element)
     }
 
+    /// Where a placement of `buffer` sits once its parents, virtual ones included, are resolved.
+    public func origin(of placementID: UUID, host: any GraphicsHost, buffer: GraphicsBuffer? = nil) -> GridPoint? {
+        self.host = host
+        defer { self.host = nil }
+        sync(host)
+        let buffer = buffer ?? activeBuffer
+        let images = imageStore(for: buffer).images
+        guard let placement = images.first(where: { $0.id == placementID }) else { return nil }
+        return images.origin(of: placement, virtual: layout(buffer, rows: 0..<Int.max).origins)
+    }
+
     public func clear(_ scope: KittyGraphicsScanner.ClearScope, host: any GraphicsHost) {
         self.host = host
         defer { self.host = nil }
         sync(host)
         switch scope {
         case .visible, .scrollback:
-            clearGraphics(activeStore, all: false)
+            clearGraphics(activeBuffer, all: false)
         case .everything:
-            clearGraphics(activeStore, all: true)
+            clearGraphics(activeBuffer, all: true)
         case .reset:
-            clearGraphics(store, all: false)
-            clearGraphics(alternateStore, all: true)
+            clearGraphics(.normal, all: false)
+            clearGraphics(.alternate, all: true)
         }
         changed()
     }
@@ -126,7 +147,7 @@ public final class KittyEngine {
         guard toAlternate != isAlternate else { return }
         isAlternate = toAlternate
         // a program entering the alternate screen starts from an empty image table, as kitty does
-        if toAlternate { clearGraphics(alternateStore, all: true) }
+        if toAlternate { clearGraphics(.alternate, all: true) }
         changed()
     }
 
@@ -506,6 +527,7 @@ public final class KittyEngine {
         placement.columnSpan = grid.columns
         placement.pixelOffset = offset
         placement.pixelSize = pixels
+        placement.requested = GraphicsCellRequest(columns: columns, rows: rows)
         placement.scale = CGFloat(screen.scale)
         placement.crop = crop
         if command.isRelative, let parent = command.parentImage {
@@ -609,6 +631,7 @@ public final class KittyEngine {
         placement.rowSpan = grid.rows
         placement.columnSpan = grid.columns
         placement.pixelSize = pixels
+        placement.requested = GraphicsCellRequest(columns: columns, rows: rows)
         placement.scale = CGFloat(host?.screen.scale ?? 1)
         placement.crop = crop
         store.virtualPlacements.removeAll { $0.kittyID == id && $0.placementID == command.placementID }
@@ -640,13 +663,14 @@ public final class KittyEngine {
         _ = activeStore.deletePlacements(command, cursor: host.cursor, screen: host.screen)
     }
 
-    private func clearGraphics(_ store: KittyImageStore, all: Bool) {
+    private func clearGraphics(_ buffer: GraphicsBuffer, all: Bool) {
+        let store = imageStore(for: buffer)
         if all {
             store.images.removeAll()
         } else if let screen = host?.screen {
             let top = screen.top
             let snapshot = store.images
-            let virtual = layout(store, rows: 0..<max(top + screen.rows, 0)).origins
+            let virtual = layout(buffer, rows: 0..<max(top + screen.rows, 0)).origins
             store.images.removeAll { image in
                 let origin = snapshot.origin(of: image, virtual: virtual)?.row ?? image.origin.row
                 return origin + max(image.rowSpan, 1) > top
@@ -657,9 +681,10 @@ public final class KittyEngine {
         for id in Array(store.sources.keys) where !placed.contains(id) { store.evict(id) }
     }
 
-    private func layout(_ store: KittyImageStore, rows: Range<Int>) -> (tiles: [GraphicsPlacement], origins: [KittyKey: GridPoint]) {
+    private func layout(_ buffer: GraphicsBuffer, rows: Range<Int>) -> (tiles: [GraphicsPlacement], origins: [KittyKey: GridPoint]) {
+        let store = imageStore(for: buffer)
         guard !store.virtualPlacements.isEmpty, let host else { return ([], [:]) }
-        let cells = KittyPlaceholders.decode(host.placeholderCells(rows: rows))
+        let cells = KittyPlaceholders.decode(host.placeholderCells(rows: rows, buffer: buffer))
         var backgrounds: [GridPoint: GraphicsColor] = [:]
         for cell in cells { backgrounds[GridPoint(row: cell.row, column: cell.column)] = cell.background }
         let result = KittyPlaceholders.tiles(of: cells, placements: store.virtualPlacements)

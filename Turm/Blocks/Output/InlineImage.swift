@@ -61,7 +61,7 @@ struct InlineImage: Identifiable {
 }
 
 extension InlineImage {
-    init(placement: GraphicsPlacement, requested: (columns: Int, rows: Int) = (0, 0)) {
+    init(placement: GraphicsPlacement) {
         let root: CGImage
         var animation: KittyAnimation?
         switch placement.source {
@@ -74,8 +74,8 @@ extension InlineImage {
         let shown = placement.crop.flatMap { root.cropping(to: $0) } ?? root
         self.init(
             image: NSImage(cgImage: shown, size: NSSize(width: shown.width, height: shown.height)),
-            width: requested.columns > 0 ? .cells(requested.columns) : .auto,
-            height: requested.rows > 0 ? .cells(requested.rows) : .auto,
+            width: placement.requested.columns > 0 ? .cells(placement.requested.columns) : .auto,
+            height: placement.requested.rows > 0 ? .cells(placement.requested.rows) : .auto,
             anchor: placement.origin.row, kittyID: placement.kittyID, fromKitty: placement.fromKitty
         )
         id = placement.id

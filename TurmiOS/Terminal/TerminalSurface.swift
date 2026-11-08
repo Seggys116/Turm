@@ -20,14 +20,11 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
     private var inlineGraphics = InlineGraphicsSession()
     private(set) lazy var graphicsHost = SurfaceGraphicsHost(surface: self)
     private let painter = GraphicsLayerPainter()
-    private var held: [UInt8] = []
-    private var skippingGraphics = false
-    private var skipCarry: [UInt8] = []
+    private var intake = KittyStreamIntake()
     private var graphicsQueued = false
     private var paintedRows: Range<Int>?
     var replays = false
     private static let resizeSettle = Duration.milliseconds(120)
-    private static let heldLimit = 128 * 1024 * 1024
 
     init(preferences: TerminalPreferences = .shared, capturesKeyboard: Bool = false) {
         self.preferences = preferences
@@ -38,6 +35,8 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
         stage.underlay.addSublayer(painter.underlay)
         view.onScroll = { [weak self] in self?.followScroll() }
         view.onLayout = { [weak self] in self?.setNeedsGraphics() }
+        view.onBufferSwitch = { [weak self] in self?.graphicsHost.noteBuffer() }
+        graphicsHost.noteBuffer()
         view.terminalDelegate = self
         view.autocorrectionType = .no
         view.autocapitalizationType = .none
@@ -66,30 +65,9 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
     }
 
     func feed(_ bytes: ArraySlice<UInt8>) {
-        var incoming = Array(bytes)
-        if skippingGraphics {
-            guard let rest = skipGraphics(incoming) else { return }
-            incoming = rest
-        }
-        var chunk = incoming
-        if !held.isEmpty {
-            let scanned = held.count
-            held.append(contentsOf: incoming)
-            let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
-            if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
-                guard held.count > Self.heldLimit else { return }
-                skipCarry = held.last == 0x1B ? [0x1B] : []
-                skippingGraphics = true
-                held = []
-                return
-            }
-            chunk = held
-            held = []
-        }
+        guard let chunk = intake.take(Array(bytes)) else { return }
         if chunk.contains(0x1B) {
-            let split = KittyGraphicsScanner.split(chunk)
-            held = Array(split.remainder)
-            for piece in split.pieces {
+            for piece in intake.split(chunk) {
                 switch piece.kind {
                 case .text:
                     feedTerminal(piece.bytes)
@@ -134,43 +112,12 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
         graphicHold.hold(split.remainder)
     }
 
-    /// Drops the rest of a graphics command that outgrew the hold, up to its terminator.
-    private func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
-        let bytes = skipCarry + bytes
-        skipCarry = []
-        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
-            if bytes.last == 0x1B { skipCarry = [0x1B] }
-            return nil
-        }
-        skippingGraphics = false
-        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
-    }
-
     private func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
         if scope == .scrollback {
-            pushScreenIntoScrollback()
+            if let push = view.getTerminal().scrollbackPush(screenTop: graphicsHost.screenTop) { view.feed(byteArray: push[...]) }
             view.feed(byteArray: Array("\u{1B}[2J".utf8)[...])
         }
         engine.clear(scope, host: graphicsHost)
-    }
-
-    private func pushScreenIntoScrollback() {
-        let terminal = view.getTerminal()
-        guard !terminal.isCurrentBufferAlternate else { return }
-        let top = graphicsHost.screenTop
-        func blank(_ row: Int) -> Bool {
-            guard let line = terminal.getScrollInvariantLine(row: top + row) else { return true }
-            for column in 0..<line.count {
-                let character = terminal.getCharacter(for: line[column])
-                if character != " " && character != "\u{0}" { return false }
-            }
-            return true
-        }
-        var count = terminal.rows
-        while count > 0, blank(count - 1) { count -= 1 }
-        guard count > 0 else { return }
-        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
-        view.feed(byteArray: Array(sequence.utf8)[...])
     }
 
     private func settle() {

@@ -53,13 +53,18 @@ public struct GraphicsScreen: Sendable {
     }
 }
 
+public enum GraphicsBuffer: Hashable, Sendable {
+    case normal
+    case alternate
+}
+
 public protocol GraphicsHost: AnyObject {
     var cursor: GridPoint { get }
     var screen: GraphicsScreen { get }
     var allowsLocalMedia: Bool { get }
     func feedTerminal(_ bytes: ArraySlice<UInt8>)
     func reply(_ bytes: [UInt8])
-    func placeholderCells(rows: Range<Int>) -> [GraphicsCell]
+    func placeholderCells(rows: Range<Int>, buffer: GraphicsBuffer) -> [GraphicsCell]
 }
 
 public struct KittyParent: Equatable, Sendable {
@@ -90,6 +95,17 @@ public struct KittyTile: Equatable, Sendable {
     }
 }
 
+/// The cell size a placement asked for; zero leaves that side to follow the image.
+public struct GraphicsCellRequest: Hashable, Sendable {
+    public var columns: Int
+    public var rows: Int
+
+    public init(columns: Int = 0, rows: Int = 0) {
+        self.columns = max(columns, 0)
+        self.rows = max(rows, 0)
+    }
+}
+
 public enum GraphicsSource {
     case still(CGImage)
     case animated(KittyAnimation)
@@ -105,6 +121,7 @@ public struct GraphicsPlacement: Identifiable {
     public var columnSpan = 0
     public var pixelOffset = CGSize.zero
     public var pixelSize = CGSize.zero
+    public var requested = GraphicsCellRequest()
     public var scale: CGFloat = 1
     public var crop: CGRect?
     public var tile: KittyTile?

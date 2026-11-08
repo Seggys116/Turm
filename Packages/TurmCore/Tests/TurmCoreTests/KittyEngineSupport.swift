@@ -28,6 +28,8 @@ final class FakeGraphicsHost: GraphicsHost {
     let replies = Replies()
     var terminalBytes: [UInt8] = []
     var cells: [GraphicsCell] = []
+    var alternateCells: [GraphicsCell] = []
+    var scanned: [GraphicsBuffer] = []
 
     init(columns: Int = 40, rows: Int = 10) {
         screen.columns = columns
@@ -38,8 +40,9 @@ final class FakeGraphicsHost: GraphicsHost {
         replies.lines.append(String(decoding: bytes, as: UTF8.self))
     }
 
-    func placeholderCells(rows: Range<Int>) -> [GraphicsCell] {
-        cells.filter { rows.contains($0.point.row) }
+    func placeholderCells(rows: Range<Int>, buffer: GraphicsBuffer) -> [GraphicsCell] {
+        scanned.append(buffer)
+        return (buffer == .alternate ? alternateCells : cells).filter { rows.contains($0.point.row) }
     }
 
     func feedTerminal(_ bytes: ArraySlice<UInt8>) {

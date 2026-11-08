@@ -4,6 +4,7 @@ import TurmCore
 
 final class AltScreenGraphicsHost: GraphicsHost {
     unowned let host: AltScreenHost
+    private let screens = ScreenBuffers<Buffer>()
 
     init(host: AltScreenHost) {
         self.host = host
@@ -40,31 +41,12 @@ final class AltScreenGraphicsHost: GraphicsHost {
         host.graphicsReply(bytes)
     }
 
-    func placeholderCells(rows: Range<Int>) -> [GraphicsCell] {
-        let terminal = terminal
-        let buffer = terminal.buffer
-        let trimmed = buffer.totalLinesTrimmed
-        let lower = max(rows.lowerBound, trimmed)
-        let upper = min(rows.upperBound, trimmed + buffer.yDisp + terminal.rows)
-        guard lower < upper else { return [] }
-        var cells: [GraphicsCell] = []
-        for row in lower..<upper {
-            guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
-            for column in 0..<line.count {
-                let data = line[column]
-                if data.width == 0 { continue }
-                let character = terminal.getCharacter(for: data)
-                guard KittyPlaceholders.isPlaceholder(character) else { continue }
-                let attribute = data.attribute
-                cells.append(GraphicsCell(
-                    point: GridPoint(row: row, column: column), character: character,
-                    foreground: BlockGraphicsHost.color(attribute.fg),
-                    underline: attribute.underlineColor.map(BlockGraphicsHost.color) ?? .none,
-                    background: BlockGraphicsHost.color(attribute.style.contains(.inverse) ? attribute.fg : attribute.bg)
-                ))
-            }
-        }
-        return cells
+    func placeholderCells(rows: Range<Int>, buffer: GraphicsBuffer) -> [GraphicsCell] {
+        terminal.placeholderCells(rows: rows, of: buffer, screens: screens)
+    }
+
+    func noteBuffer() {
+        screens.note(terminal)
     }
 }
 

@@ -899,3 +899,110 @@ struct KittyPruneTests {
         #expect(rig.virtualPlacements.count == 1)
     }
 }
+
+struct KittyCellRequestTests {
+    @Test func placementCarriesTheRequestedCells() {
+        let rig = KittyRig()
+        rig.feed(put("i=1,c=3,r=2"))
+        #expect(rig.images[0].requested == GraphicsCellRequest(columns: 3, rows: 2))
+    }
+
+    @Test func unsizedPlacementFollowsTheImage() {
+        let rig = KittyRig()
+        rig.feed(put("i=1"))
+        #expect(rig.images[0].requested == GraphicsCellRequest())
+    }
+
+    @Test func putKeepsItsOwnRequest() {
+        let rig = KittyRig()
+        rig.feed(transmit(5))
+        rig.feed(apc("a=p,i=5,p=1,c=6"))
+        rig.feed(apc("a=p,i=5,p=2,r=4"))
+        #expect(rig.images.map(\.requested) == [GraphicsCellRequest(columns: 6), GraphicsCellRequest(rows: 4)])
+    }
+
+    @Test func chunkedTransferTakesTheRequestFromItsFirstChunk() {
+        let rig = KittyRig()
+        rig.feed(apc("a=T,f=24,s=2,v=1,i=6,c=5,r=3,m=1", "AAAA"))
+        #expect(rig.images.isEmpty)
+        rig.feed(apc("m=0", "AAAA"))
+        #expect(rig.images.count == 1)
+        #expect(rig.images[0].requested == GraphicsCellRequest(columns: 5, rows: 3))
+    }
+
+    @Test func virtualPlacementAndItsTilesCarryTheRequest() {
+        let rig = KittyRig()
+        rig.feed(apc("a=T,U=1,f=24,s=1,v=1,i=42,c=2,r=1,q=2", pixel))
+        rig.host.cells = [cell(0, 0, glyph(0, 0)), cell(0, 1, glyph(0, 1))]
+        #expect(rig.virtualPlacements[0].requested == GraphicsCellRequest(columns: 2, rows: 1))
+        let tiles = rig.tiles()
+        #expect(!tiles.isEmpty)
+        #expect(tiles.allSatisfy { $0.requested == GraphicsCellRequest(columns: 2, rows: 1) })
+    }
+
+    @Test func negativeRequestsClampToZero() {
+        #expect(GraphicsCellRequest(columns: -2, rows: -1) == GraphicsCellRequest())
+    }
+}
+
+struct KittyNormalBufferLayoutTests {
+    private func mainScreen() -> KittyRig {
+        let rig = KittyRig()
+        rig.feed(put("i=1,C=1"))
+        rig.feed(apc("a=T,U=1,f=24,s=1,v=1,i=42,c=2,r=2,q=2", pixel))
+        rig.host.cells = [
+            cell(4, 0, glyph(0, 0)), cell(4, 1, glyph(0, 1)),
+            cell(5, 0, glyph(1, 0)), cell(5, 1, glyph(1, 1)),
+        ]
+        return rig
+    }
+
+    @Test func normalBufferIsLaidOutWhileTheAlternateIsUp() {
+        let rig = mainScreen()
+        rig.enterAlternate()
+        rig.host.alternateCells = [cell(0, 0, glyph(0, 0))]
+        rig.host.scanned = []
+        let placed = rig.engine.placements(visible: 0..<20, host: rig.host, buffer: .normal)
+        #expect(rig.engine.isAlternate)
+        #expect(rig.host.scanned == [.normal])
+        #expect(placed.filter { $0.tile == nil }.compactMap(\.kittyID) == [1])
+        let tiles = placed.filter { $0.tile != nil }.sorted { $0.origin.row < $1.origin.row }
+        #expect(tiles.map(\.origin) == [GridPoint(row: 4, column: 0), GridPoint(row: 5, column: 0)])
+        #expect(tiles.allSatisfy { $0.kittyID == 42 && $0.columnSpan == 2 })
+    }
+
+    @Test func activeLayoutStaysOnTheAlternateScreen() {
+        let rig = mainScreen()
+        rig.enterAlternate()
+        rig.host.scanned = []
+        #expect(rig.engine.placements(visible: 0..<20, host: rig.host).isEmpty)
+        #expect(rig.host.scanned.allSatisfy { $0 == .alternate })
+    }
+
+    @Test func alternateBufferCanBeAskedForByName() {
+        let rig = KittyRig()
+        rig.enterAlternate()
+        rig.feed(apc("a=T,U=1,f=24,s=1,v=1,i=9,c=1,r=1,q=2", pixel))
+        rig.host.alternateCells = [cell(2, 3, glyph(0, 0), foreground: .indexed(9))]
+        let tiles = rig.engine.placements(visible: 0..<10, host: rig.host, buffer: .alternate).filter { $0.tile != nil }
+        #expect(tiles.map(\.origin) == [GridPoint(row: 2, column: 3)])
+        #expect(rig.engine.placements(visible: 0..<10, host: rig.host, buffer: .normal).isEmpty)
+    }
+
+    @Test func originFollowsAVirtualParentOfTheNormalBuffer() throws {
+        let rig = mainScreen()
+        rig.feed(apc("a=T,f=24,s=1,v=1,i=7,p=1,P=42,Q=0,H=1,V=1", pixel))
+        let child = try #require(rig.images.first { $0.kittyID == 7 })
+        rig.enterAlternate()
+        #expect(rig.engine.origin(of: child.id, host: rig.host, buffer: .normal) == GridPoint(row: 5, column: 1))
+        #expect(rig.engine.origin(of: child.id, host: rig.host) == nil)
+    }
+
+    @Test func hardResetOnTheAlternateScreenReadsNormalPlaceholders() {
+        let rig = mainScreen()
+        rig.enterAlternate()
+        rig.host.scanned = []
+        rig.feed(text("\u{1B}c"))
+        #expect(rig.host.scanned.contains(.normal))
+    }
+}

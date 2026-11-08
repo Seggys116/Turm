@@ -10,11 +10,17 @@ final class TurmTerminalView: TerminalView, UIGestureRecognizerDelegate {
     var kittyFlags: Int { getTerminal().keyboardEnhancementFlags.rawValue }
     var onScroll: (() -> Void)?
     var onLayout: (() -> Void)?
+    var onBufferSwitch: (() -> Void)?
     /// The background shown behind a transparent default background, reported in its place to color queries.
     var clearedBackground: UIColor?
 
     override var contentOffset: CGPoint {
         didSet { onScroll?() }
+    }
+
+    override func bufferActivated(source: Terminal) {
+        super.bufferActivated(source: source)
+        onBufferSwitch?()
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {

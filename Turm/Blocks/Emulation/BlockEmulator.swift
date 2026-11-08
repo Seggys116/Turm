@@ -12,12 +12,7 @@ final class BlockEmulator: TerminalDelegate {
     let engine = KittyEngine()
     private(set) lazy var graphicsHost = BlockGraphicsHost(emulator: self)
     var inlineImages: [InlineImage] = []
-    var placementSizes: [UUID: (columns: Int, rows: Int)] = [:]
-    var graphicsSizing = (columns: 0, rows: 0)
-    var graphicsContinues = false
-    var skippingGraphics = false
-    var skipCarry: [UInt8] = []
-    private var held: [UInt8] = []
+    private var intake = KittyStreamIntake()
     private var graphicHold = GraphicHold()
     private var inlineGraphics = InlineGraphicsSession()
     private var cursorAdvance = 0
@@ -62,7 +57,6 @@ final class BlockEmulator: TerminalDelegate {
         let chunk: TextChunk
     }
 
-    private static let heldLimit = 128 * 1024 * 1024
     var onBufferSwitch: () -> Void = {}
     var onResponse: (ArraySlice<UInt8>) -> Void = { _ in }
     var onProgress: (Terminal.ProgressReport?) -> Void = { _ in }
@@ -78,6 +72,7 @@ final class BlockEmulator: TerminalDelegate {
         options.scrollback = scrollback
         options.termName = "xterm-256color"
         terminal = Terminal(delegate: self, options: options)
+        graphicsHost.noteBuffer()
     }
 
     var isAlternate: Bool {
@@ -85,41 +80,20 @@ final class BlockEmulator: TerminalDelegate {
     }
 
     func feed(_ chunk: [UInt8]) {
-        var incoming = sgrRewriter.rewrite(chunk)
-        if skippingGraphics {
-            guard let rest = skipGraphics(incoming) else { return }
-            incoming = rest
-        }
-        var bytes = incoming
-        if !held.isEmpty {
-            let scanned = held.count
-            held.append(contentsOf: incoming)
-            let opensGraphics = held.count >= 3 && held[0] == 0x1B && held[1] == 0x5F && held[2] == 0x47
-            if opensGraphics, KittyGraphicsScanner.terminator(in: held, from: max(3, scanned - 1)) == nil {
-                guard held.count > Self.heldLimit else { return }
-                skipCarry = held.last == 0x1B ? [0x1B] : []
-                skippingGraphics = true
-                held = []
-                return
-            }
-            bytes = held
-            held = []
-        }
+        guard let bytes = intake.take(sgrRewriter.rewrite(chunk)) else { return }
         guard bytes.contains(0x1B) else {
             feedTerminal(bytes)
             return
         }
-        let split = KittyGraphicsScanner.split(bytes)
-        held = Array(split.remainder)
-        for piece in split.pieces {
+        for piece in intake.split(bytes) {
             switch piece.kind {
             case .text:
                 feedTerminal(piece.bytes.count == bytes.count ? bytes : Array(piece.bytes))
             case .clear(let scope):
                 feedTerminal(Array(piece.bytes))
                 clearGraphics(scope)
-            case .graphics(let command):
-                feedGraphics(piece.bytes, command)
+            case .graphics:
+                engine.handle(piece.bytes, host: graphicsHost)
             }
         }
         pruneScrolledOff()
@@ -671,6 +645,7 @@ final class BlockEmulator: TerminalDelegate {
     func scrolled(source: Terminal, yDisp: Int) {}
     func linefeed(source: Terminal) {}
     func bufferActivated(source: Terminal) {
+        graphicsHost.noteBuffer()
         engine.bufferSwitched(toAlternate: source.isCurrentBufferAlternate)
         onBufferSwitch()
     }

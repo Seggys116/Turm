@@ -59,11 +59,27 @@ struct AltScreenGraphicsTests {
         let order = container.subviews
         let backdrop = try #require(order.firstIndex { $0 === host.view.graphicsBackdrop })
         let text = try #require(order.firstIndex { $0 === host.view })
-        let overlay = try #require(order.firstIndex { $0 === host.frameOverlay })
+        let overlay = try #require(order.firstIndex { $0 === host.graphicsOverlay })
         #expect(backdrop < text)
         #expect(overlay > text)
         #expect(host.view.graphicsBackdrop.frame == host.view.frame)
-        #expect(host.frameOverlay.frame == host.view.frame)
+        #expect(host.graphicsOverlay.frame == host.view.frame)
+    }
+
+    @Test func placeholderTilesOfTheAlternateScreenAreDrawn() {
+        let host = makeHost()
+        host.feed(apc("a=T,U=1,f=32,s=1,v=1,i=42,c=1,r=1,q=2", rgbaPixel))
+        host.feed(Array("\u{1B}[38;5;42m\u{10EEEE}\u{0305}\u{0305}\u{1B}[39m".utf8))
+        host.refreshGraphics()
+        #expect(host.painter.overlay.sublayers?.count == 1)
+    }
+
+    @Test func mainScreenCellsStayReadableBehindTheProgram() {
+        let host = AltScreenHost(cols: 40, rows: 12)
+        host.feed(Array("\u{1B}[38;5;7m\u{10EEEE}\u{0305}\u{0305}\u{1B}[39m".utf8))
+        host.feed(Array("\u{1B}[?1049h\u{1B}[38;5;9m\u{10EEEE}\u{0305}\u{0305}\u{1B}[39m".utf8))
+        #expect(host.graphicsHost.placeholderCells(rows: 0..<12, buffer: .normal).map(\.foreground) == [.indexed(7)])
+        #expect(host.graphicsHost.placeholderCells(rows: 0..<12, buffer: .alternate).map(\.foreground) == [.indexed(9)])
     }
 
     @Test func splitCommandIsHeldUntilItEnds() {

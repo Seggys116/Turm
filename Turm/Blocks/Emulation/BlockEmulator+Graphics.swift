@@ -21,12 +21,12 @@ extension BlockEmulator {
     }
 
     var images: [InlineImage] {
-        let kitty = activeStore.images.map(kittyImage)
+        let kitty = activeStore.images.map { InlineImage(placement: $0) }
         return terminal.isCurrentBufferAlternate ? kitty : inlineImages + kitty
     }
 
     var virtualPlacements: [InlineImage] {
-        activeStore.virtualPlacements.map(kittyImage)
+        activeStore.virtualPlacements.map { InlineImage(placement: $0) }
     }
 
     var sources: [UInt32: KittyAnimation] {
@@ -50,42 +50,9 @@ extension BlockEmulator {
         set { activeStore.storageLimit = newValue }
     }
 
-    func kittyImage(_ placement: GraphicsPlacement) -> InlineImage {
-        InlineImage(placement: placement, requested: placementSizes[placement.id] ?? (0, 0))
-    }
-
-    func feedGraphics(_ apc: ArraySlice<UInt8>, _ command: KittyCommand) {
-        // placements land on the last chunk, but take their requested size from the first
-        if command.action != nil || !graphicsContinues {
-            graphicsSizing = (max(command.columns ?? 0, 0), max(command.rows ?? 0, 0))
-        }
-        graphicsContinues = command.more
-        let known = Set(activeStore.images.map(\.id))
-        engine.handle(apc, host: graphicsHost)
-        for placement in activeStore.images where !known.contains(placement.id) {
-            placementSizes[placement.id] = graphicsSizing
-        }
-        let live = normalStore.images.count + altStore.images.count
-        guard placementSizes.count > live * 2 + 64 else { return }
-        let kept = Set(normalStore.images.map(\.id)).union(altStore.images.map(\.id))
-        placementSizes = placementSizes.filter { kept.contains($0.key) }
-    }
-
-    /// Drops the rest of a graphics command that outgrew the hold, up to its terminator.
-    func skipGraphics(_ bytes: [UInt8]) -> [UInt8]? {
-        let bytes = skipCarry + bytes
-        skipCarry = []
-        guard let end = KittyGraphicsScanner.terminator(in: bytes, from: 0) else {
-            if bytes.last == 0x1B { skipCarry = [0x1B] }
-            return nil
-        }
-        skippingGraphics = false
-        return Array(bytes[(bytes[end] == 0x1B ? end + 2 : end + 1)...])
-    }
-
     func clearGraphics(_ scope: KittyGraphicsScanner.ClearScope) {
         if scope == .scrollback {
-            pushScreenIntoScrollback()
+            if let push = terminal.scrollbackPush() { terminal.feed(byteArray: push) }
             terminal.feed(byteArray: Array("\u{1B}[2J".utf8))
         }
         engine.clear(scope, host: graphicsHost)
@@ -98,23 +65,6 @@ extension BlockEmulator {
         }
     }
 
-    private func pushScreenIntoScrollback() {
-        guard !terminal.isCurrentBufferAlternate else { return }
-        func blank(_ row: Int) -> Bool {
-            guard let line = terminal.getLine(row: row) else { return true }
-            for column in 0..<line.count {
-                let character = terminal.getCharacter(for: line[column])
-                if character != " " && character != "\u{0}" { return false }
-            }
-            return true
-        }
-        var count = terminal.rows
-        while count > 0, blank(count - 1) { count -= 1 }
-        guard count > 0 else { return }
-        let sequence = "\u{1B}7\u{1B}[\(terminal.rows);1H" + String(repeating: "\n", count: count) + "\u{1B}8"
-        terminal.feed(byteArray: Array(sequence.utf8))
-    }
-
     func pruneScrolledOff() {
         let trimmed = terminal.buffer.totalLinesTrimmed
         guard trimmed > 0 else { return }
@@ -123,41 +73,24 @@ extension BlockEmulator {
         inlineImages.removeAll { $0.rowSpan > 0 && $0.anchor + $0.rowSpan <= trimmed }
     }
 
-    /// Kitty placements of the main screen from `top` down, with placeholder tiles kept apart.
+    /// Kitty placements of the main screen from `top` down, with placeholder tiles kept apart, also while a program holds the alternate screen.
     func kittyPlacements(from top: Int) -> (images: [InlineImage], tiles: [InlineImage]) {
-        guard !terminal.isCurrentBufferAlternate else {
-            // the engine lays out the active screen only; the main screen's cells are not on show here
-            let store = normalStore
-            let placed = store.images.compactMap { image -> InlineImage? in
-                guard image.rowSpan > 0, let origin = store.images.origin(of: image) else { return nil }
-                var moved = image
-                moved.origin = origin
-                return kittyImage(moved)
-            }
-            return (placed, [])
-        }
         var images: [InlineImage] = []
         var tiles: [InlineImage] = []
-        for placement in engine.placements(visible: top..<Int.max, host: graphicsHost) {
+        for placement in engine.placements(visible: top..<Int.max, host: graphicsHost, buffer: .normal) {
             if placement.tile == nil {
-                images.append(kittyImage(placement))
+                images.append(InlineImage(placement: placement))
             } else {
-                tiles.append(kittyImage(placement))
+                tiles.append(InlineImage(placement: placement))
             }
         }
         return (images, tiles)
     }
 
     func origin(of image: InlineImage) -> (row: Int, column: Int)? {
-        let store = normalStore
-        guard let placement = store.images.first(where: { $0.id == image.id }) else {
+        guard normalStore.images.contains(where: { $0.id == image.id }) else {
             return image.parent == nil ? (image.anchor, image.column) : nil
         }
-        var virtual: [KittyKey: GridPoint] = [:]
-        if !store.virtualPlacements.isEmpty {
-            let cells = KittyPlaceholders.decode(graphicsHost.placeholderCells(rows: 0..<Int.max))
-            virtual = KittyPlaceholders.tiles(of: cells, placements: store.virtualPlacements).origins
-        }
-        return store.images.origin(of: placement, virtual: virtual).map { ($0.row, $0.column) }
+        return engine.origin(of: image.id, host: graphicsHost, buffer: .normal).map { ($0.row, $0.column) }
     }
 }

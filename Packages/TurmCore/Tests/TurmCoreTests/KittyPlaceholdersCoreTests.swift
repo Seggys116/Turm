@@ -208,3 +208,70 @@ struct KittyPlaceholderTileTests {
         #expect(result.tiles[0].origin == GridPoint(row: 4, column: 6))
     }
 }
+
+struct GraphicsCellScanTests {
+    private struct Slot {
+        let character: Character?
+        let shade: UInt8
+    }
+
+    private func grid(_ placed: [GridPoint: Character]) -> (GridPoint) -> Slot {
+        { point in Slot(character: placed[point] ?? " ", shade: UInt8(point.row * 10 + point.column)) }
+    }
+
+    @Test func scanKeepsOnlyPlaceholdersWithTheirColours() {
+        let read = grid([GridPoint(row: 1, column: 2): glyph(0, 0), GridPoint(row: 1, column: 0): "x"])
+        let cells = KittyPlaceholders.scan(
+            rows: 0..<3, within: 0..<3, columns: 4, cell: read, character: \.character,
+            colors: { (.indexed($0.shade), .rgb(1, 2, 3), .none) }
+        )
+        #expect(cells.map(\.point) == [GridPoint(row: 1, column: 2)])
+        #expect(cells.first?.foreground == .indexed(12))
+        #expect(cells.first?.underline == .rgb(1, 2, 3))
+        #expect(cells.first?.character == glyph(0, 0))
+    }
+
+    @Test func scanStaysInsideTheStoredRows() {
+        var read: [GridPoint] = []
+        _ = KittyPlaceholders.scan(
+            rows: 0..<Int.max, within: 5..<7, columns: 2, cell: { point -> Slot in
+                read.append(point)
+                return Slot(character: " ", shade: 0)
+            }, character: \.character, colors: { _ in (.none, .none, .none) }
+        )
+        #expect(Set(read.map(\.row)) == [5, 6])
+        #expect(read.count == 4)
+    }
+
+    @Test func scanSkipsCellsWithoutACharacter() {
+        let cells = KittyPlaceholders.scan(
+            rows: 0..<1, within: 0..<1, columns: 1, cell: { _ in Slot(character: nil, shade: 0) },
+            character: \.character, colors: { _ in (.none, .none, .none) }
+        )
+        #expect(cells.isEmpty)
+    }
+
+    @Test func emptyOverlapScansNothing() {
+        let cells = KittyPlaceholders.scan(
+            rows: 0..<4, within: 8..<9, columns: 3, cell: { _ -> Slot in Issue.record("read outside the stored rows"); return Slot(character: nil, shade: 0) },
+            character: \.character, colors: { _ in (.none, .none, .none) }
+        )
+        #expect(cells.isEmpty)
+    }
+
+    @Test func screenBuffersRememberEachScreen() {
+        final class Screen {}
+        let buffers = ScreenBuffers<Screen>()
+        let normal = Screen()
+        let alternate = Screen()
+        #expect(buffers[.normal] == nil)
+        buffers.note(normal, alternate: false)
+        buffers.note(alternate, alternate: true)
+        #expect(buffers[.normal] === normal)
+        #expect(buffers[.alternate] === alternate)
+        let replaced = Screen()
+        buffers.note(replaced, alternate: false)
+        #expect(buffers[.normal] === replaced)
+        #expect(buffers[.alternate] === alternate)
+    }
+}

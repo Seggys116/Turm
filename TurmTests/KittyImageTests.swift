@@ -867,6 +867,96 @@ struct KittyPlaceholderTests {
         emulator.feed(apc("a=d,d=i,i=42"))
         #expect(emulator.images.isEmpty)
     }
+
+    @Test func tilesStayInTheBlockOutputWhileAProgramHoldsTheAlternateScreen() {
+        let emulator = drawn()
+        emulator.feed(text("\u{1B}[?1049h"))
+        #expect(emulator.isAlternate)
+        let found = tiles(emulator)
+        #expect(found.map(\.anchor) == [0, 1])
+        #expect(found.allSatisfy { $0.kittyID == 42 && $0.tile?.columns == 2 })
+    }
+
+    @Test func mainScreenPlaceholdersCanBeReadBehindTheAlternateScreen() {
+        let emulator = drawn()
+        emulator.feed(text("\u{1B}[?1049h\u{1B}[38;5;9m\u{10EEEE}\(mark0)\(mark0)\u{1B}[39m"))
+        let normal = emulator.graphicsHost.placeholderCells(rows: 0..<10, buffer: .normal)
+        let alternate = emulator.graphicsHost.placeholderCells(rows: 0..<10, buffer: .alternate)
+        #expect(normal.count == 4)
+        #expect(normal.allSatisfy { $0.foreground == .indexed(42) })
+        #expect(alternate.map(\.foreground) == [.indexed(9)])
+    }
+
+    @Test func virtualParentStillPlacesItsChildBehindTheAlternateScreen() throws {
+        let emulator = drawn()
+        emulator.feed(apc("a=T,f=24,s=1,v=1,i=7,p=1,P=42,Q=0,H=1,V=1", pixel))
+        let child = InlineImage(placement: try #require(emulator.normalStore.images.first))
+        emulator.feed(text("\u{1B}[?1049h"))
+        let origin = emulator.origin(of: child)
+        #expect(origin?.row == 1 && origin?.column == 1)
+    }
+
+    @Test func returningToTheMainScreenKeepsItsTiles() {
+        let emulator = drawn()
+        emulator.feed(text("\u{1B}[?1049h"))
+        emulator.feed(text("\u{1B}[?1049l"))
+        #expect(tiles(emulator).map(\.anchor) == [0, 1])
+    }
+}
+
+struct KittyCellRequestTests {
+    private func blockImages(_ emulator: BlockEmulator) -> [InlineImage] {
+        emulator.renderSegments().flatMap { segment -> [InlineImage] in
+            switch segment {
+            case .image(let image): return [image]
+            case .stack(let stack): return stack.images
+            case .text: return []
+            }
+        }
+    }
+
+    @Test func requestedCellsSizeTheImage() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(put("i=1,c=4,r=2"))
+        #expect(emulator.images[0].requestedSize(cellWidth: 10, lineHeight: 20) == CGSize(width: 40, height: 40))
+    }
+
+    @Test func oneRequestedSideKeepsTheAspect() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,f=24,s=2,v=1,i=1,c=3", "AAAAAAAA"))
+        #expect(emulator.images[0].requestedSize(cellWidth: 10, lineHeight: 20) == CGSize(width: 30, height: 15))
+    }
+
+    @Test func unsizedImageKeepsItsNaturalSize() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(put("i=1"))
+        let image = emulator.images[0]
+        #expect(image.requestedSize(cellWidth: 10, lineHeight: 20) == image.naturalSize)
+    }
+
+    @Test func chunkedTransferIsSizedByItsFirstChunk() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(apc("a=T,f=24,s=2,v=1,i=6,c=5,r=1,m=1", "AAAA"))
+        emulator.feed(apc("m=0", "AAAA"))
+        #expect(emulator.images.count == 1)
+        #expect(emulator.images[0].requestedSize(cellWidth: 10, lineHeight: 20) == CGSize(width: 50, height: 20))
+    }
+
+    @Test func blockOutputCarriesTheRequest() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(put("i=1,c=6,r=3") + text("after"))
+        let shown = blockImages(emulator).filter { $0.kittyID == 1 }
+        #expect(shown.count == 1)
+        #expect(shown.first?.requestedSize(cellWidth: 10, lineHeight: 20) == CGSize(width: 60, height: 60))
+    }
+
+    @Test func mainScreenImageKeepsItsRequestBehindTheAlternateScreen() {
+        let emulator = BlockEmulator(cols: 40, rows: 10)
+        emulator.feed(put("i=1,c=2,r=2"))
+        emulator.feed(text("\u{1B}[?1049h"))
+        let shown = blockImages(emulator).filter { $0.kittyID == 1 }
+        #expect(shown.first?.requestedSize(cellWidth: 10, lineHeight: 20) == CGSize(width: 20, height: 40))
+    }
 }
 
 struct KittyStackTextTests {

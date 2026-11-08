@@ -4,6 +4,7 @@ import TurmCore
 
 final class BlockGraphicsHost: GraphicsHost {
     unowned let emulator: BlockEmulator
+    private let screens = ScreenBuffers<Buffer>()
 
     init(emulator: BlockEmulator) {
         self.emulator = emulator
@@ -39,37 +40,12 @@ final class BlockGraphicsHost: GraphicsHost {
         emulator.onResponse(bytes[...])
     }
 
-    func placeholderCells(rows: Range<Int>) -> [GraphicsCell] {
-        let buffer = terminal.buffer
-        let trimmed = buffer.totalLinesTrimmed
-        let lower = max(rows.lowerBound, trimmed)
-        let upper = min(rows.upperBound, trimmed + buffer.yDisp + terminal.rows)
-        guard lower < upper else { return [] }
-        var cells: [GraphicsCell] = []
-        for row in lower..<upper {
-            guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
-            for column in 0..<line.count {
-                let data = line[column]
-                if data.width == 0 { continue }
-                let character = terminal.getCharacter(for: data)
-                guard KittyPlaceholders.isPlaceholder(character) else { continue }
-                let attribute = data.attribute
-                cells.append(GraphicsCell(
-                    point: GridPoint(row: row, column: column), character: character,
-                    foreground: Self.color(attribute.fg),
-                    underline: attribute.underlineColor.map(Self.color) ?? .none,
-                    background: Self.color(attribute.style.contains(.inverse) ? attribute.fg : attribute.bg)
-                ))
-            }
-        }
-        return cells
+    func placeholderCells(rows: Range<Int>, buffer: GraphicsBuffer) -> [GraphicsCell] {
+        terminal.placeholderCells(rows: rows, of: buffer, screens: screens)
     }
 
-    nonisolated static func color(_ value: Attribute.Color) -> GraphicsColor {
-        switch value {
-        case .ansi256(let code): return .indexed(code)
-        case .trueColor(let red, let green, let blue): return .rgb(red, green, blue)
-        case .defaultColor, .defaultInvertedColor: return .none
-        }
+    /// Records the active buffer, so the main screen can still be read once a program switches away from it.
+    func noteBuffer() {
+        screens.note(terminal)
     }
 }
