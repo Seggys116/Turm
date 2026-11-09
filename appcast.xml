@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Turm</title><item>
+            <title>2.1.0</title>
+            <pubDate>Mon, 09 Nov 2026 22:56:14 +0000</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>2.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Seggys116/Turm/releases/download/v2.1.0/Turm-2.1.0-arm64.dmg" length="9878860" type="application/octet-stream" sparkle:edSignature="paLhBHmDbwInhuHvflByjg1zX0B2KpJns5ShZe2tK1TUV4LXT8mZuqUX7FxXgGzHGo25XKOF31xqcXoB+TuxAQ=="></enclosure>
+        </item>
+    <item>
             <title>2.0.2</title>
             <pubDate>Thu, 05 Nov 2026 11:21:23 +0000</pubDate>
             <sparkle:version>13</sparkle:version>
@@ -81,16 +90,7 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Seggys116/Turm/releases/download/v1.2.0/Turm-1.2.0-arm64.dmg" length="7760324" type="application/octet-stream" sparkle:edSignature="/f2naGOnJ0QxdBOMBexcRInt5htoYuDoxGDt8shUkYp+PoaDUHp5Q9o72HUJMFl57h7k36e3FYfrOvanZrviBg=="></enclosure>
         </item>
-    <item>
-            <title>1.1.0</title>
-            <pubDate>Tue, 29 Sep 2026 21:07:48 +0000</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Seggys116/Turm/releases/download/v1.1.0/Turm-1.1.0-arm64.dmg" length="6390864" type="application/octet-stream" sparkle:edSignature="bBKFXJmSe0Dd+gh6z+LtoTyXFvshyGXQZnXOr8z2CtcjpeNYb4SSW9EUo0WeI943ndY02WWmYHqC9ox7+fs2AQ=="></enclosure>
-        </item>
     </channel></rss><!-- sparkle-signatures:
-edSignature: r8WmMCIibLsWPvzF9n6aJxoKqWb9D+N1PKh+wRgS/oL1QrzfRh2eBsz0I4tYGF6vaQVdhiVm+PJzrfQ4U3K0Bg==
-length: 7266
+edSignature: J1Ig8OSjzEgISKq5hlLLxbAw2/DeXKOvQ3M4zFwNkOQmqkTVtm0+aK/kDQRAUom6y5pcAu+RA2pUS85AxmknAw==
+length: 7267
 -->
