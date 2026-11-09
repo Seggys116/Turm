@@ -6,7 +6,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
     let view: FullScreenTerminalView
     let engine = KittyEngine()
     let painter = GraphicsLayerPainter()
-    /// The images drawn above the text; `view` keeps it and the backdrop beneath the text aligned with itself.
     var graphicsOverlay: GraphicsLayerView { view.graphicsOverlay }
     private(set) lazy var graphicsHost = AltScreenGraphicsHost(host: self)
     var onFiles: ([URL]) -> Void = { _ in } {
@@ -48,7 +47,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         }
     }
 
-    /// Feeds program output and returns it without kitty graphics commands, which never reach SwiftTerm.
     @discardableResult
     func feed(_ bytes: [UInt8]) -> [UInt8] {
         process(bytes, live: true)
@@ -81,7 +79,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
                 if scope == .scrollback { kept.append(contentsOf: Array("\u{1B}[22J".utf8)) }
                 clearGraphics(scope)
             case .graphics:
-                // replayed output rebuilds only what the full-screen program drew, not the shell's main screen
                 guard live || view.getTerminal().isCurrentBufferAlternate else { continue }
                 engine.handle(piece.bytes, host: graphicsHost)
             }
@@ -145,10 +142,8 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
 
     private var shownRevision: UInt64 = .max
 
-    /// Lays the engine's visible placements onto the layers above and beneath the text.
     func refreshGraphics() {
         let terminal = view.getTerminal()
-        // a synchronized update draws its text in one go, so its images wait for the same moment
         guard !terminal.synchronizedOutputActive else { return }
         engine.bufferSwitched(toAlternate: terminal.isCurrentBufferAlternate)
         shownRevision = engine.revision
@@ -201,7 +196,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         refreshGraphics()
     }
 
-    /// Device pixels per point of the screen the pane is on, which is what programs are told the cells measure.
     var screenScale: CGFloat {
         view.window?.screen?.backingScaleFactor
             ?? view.window?.backingScaleFactor
@@ -229,7 +223,6 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         )
     }
 
-    /// The pane in the device pixels the program draws its frames in, for pixel mouse reports.
     var panePixels: CGSize {
         let size = view.bounds.size
         return CGSize(width: size.width * screenScale, height: size.height * screenScale)

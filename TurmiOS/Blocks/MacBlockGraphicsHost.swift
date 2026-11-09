@@ -40,7 +40,6 @@ final class MacBlockGraphicsHost: GraphicsHost {
         )
     }
 
-    // the shell runs on another machine, so its paths and shared memory never name anything here
     var allowsLocalMedia: Bool {
         false
     }
@@ -57,7 +56,6 @@ final class MacBlockGraphicsHost: GraphicsHost {
         terminal.placeholderCells(rows: rows, of: buffer, screens: screens)
     }
 
-    /// Records the active buffer, so the main screen can still be read once a program switches away from it.
     func noteBuffer() {
         screens.note(terminal)
     }

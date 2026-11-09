@@ -22,7 +22,9 @@ final class MacConnection: Identifiable {
         let message: String
     }
 
-    private static let handshakeDeadline: Duration = .seconds(10)
+    private static let handshakeDeadline: Duration = .seconds(12)
+    private static let raceStagger: Duration = .milliseconds(300)
+    private static let retryDelays: [Duration] = [.milliseconds(300), .milliseconds(700), .seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(15), .seconds(30)]
     private static let heartbeatInterval: Duration = .seconds(15)
     private static let silenceLimit: TimeInterval = 50
 
@@ -38,6 +40,11 @@ final class MacConnection: Identifiable {
     @ObservationIgnored private let keychain: CompanionKeychain
     @ObservationIgnored private var connection: CompanionConnection?
     @ObservationIgnored private var connectedHost: String?
+    @ObservationIgnored private var racers: [CompanionConnection] = []
+    @ObservationIgnored private var unstarted: [CompanionConnection] = []
+    @ObservationIgnored private var racerHosts: [ObjectIdentifier: String] = [:]
+    @ObservationIgnored private var round = 0
+    @ObservationIgnored private var staggerTask: Task<Void, Never>?
     @ObservationIgnored private var wanted = false
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var authenticated = false
@@ -184,6 +191,7 @@ final class MacConnection: Identifiable {
         return list
     }
 
+    // every known address is tried at once, a little apart, and the first Mac to answer wins
     private func open() {
         let candidates = endpoints()
         guard !candidates.isEmpty else {
@@ -192,42 +200,115 @@ final class MacConnection: Identifiable {
         }
         state = .connecting
         authenticated = false
-        let target = candidates[attempt % candidates.count]
-        if case .hostPort(let host, _) = target { connectedHost = "\(host)" } else { connectedHost = nil }
-        let created = CompanionConnection(
-            endpoint: target,
-            parameters: CompanionTLS.clientParameters(identity: CompanionDevice.id.uuidString, key: record.key)
-        )
-        connection = created
-        created.onState = { [weak self, weak created] state in
-            guard let self, let created, created === connection else { return }
-            handle(state)
+        round += 1
+        let current = round
+        var made: [CompanionConnection] = []
+        for target in candidates {
+            let racer = CompanionConnection(
+                endpoint: target,
+                parameters: CompanionTLS.clientParameters(identity: CompanionDevice.id.uuidString, key: record.key)
+            )
+            if case .hostPort(let host, _) = target { racerHosts[ObjectIdentifier(racer)] = "\(host)" }
+            racer.onState = { [weak self, weak racer] state in
+                guard let self, let racer else { return }
+                racerState(state, of: racer)
+            }
+            racer.onMessage = { [weak self, weak racer] message in
+                guard let self, let racer else { return }
+                racerMessage(message, from: racer)
+            }
+            made.append(racer)
         }
-        created.onMessage = { [weak self, weak created] message in
-            guard let self, let created, created === connection else { return }
-            lastReceived = Date()
-            handle(message)
+        racers = made
+        unstarted = Array(made.dropFirst())
+        made[0].start()
+        staggerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.raceStagger)
+                guard !Task.isCancelled, let self, round == current, connection == nil, !unstarted.isEmpty else { return }
+                startNextRacer()
+            }
         }
         handshakeTask?.cancel()
-        handshakeTask = Task { [weak self, weak created] in
+        handshakeTask = Task { [weak self] in
             try? await Task.sleep(for: Self.handshakeDeadline)
-            guard !Task.isCancelled, let self, let created, created === connection, !authenticated else { return }
+            guard !Task.isCancelled, let self, round == current, !authenticated else { return }
             connectionEnded("The Mac did not answer.")
         }
-        created.start()
+    }
+
+    private func startNextRacer() {
+        guard !unstarted.isEmpty else { return }
+        unstarted.removeFirst().start()
+    }
+
+    private func racerState(_ state: CompanionConnection.State, of racer: CompanionConnection) {
+        if racer === connection {
+            handle(state)
+            return
+        }
+        guard connection == nil, racers.contains(where: { $0 === racer }) else { return }
+        switch state {
+        case .ready:
+            let proof = CompanionCrypto.helloProof(key: record.key, deviceID: CompanionDevice.id)
+            racer.send(.hello(version: .current, deviceID: CompanionDevice.id, name: CompanionDevice.name, proof: proof))
+        case .failed, .closed:
+            racers.removeAll { $0 === racer }
+            unstarted.removeAll { $0 === racer }
+            racerHosts[ObjectIdentifier(racer)] = nil
+            if racers.isEmpty {
+                connectionEnded("Could not reach the Mac.")
+            } else {
+                startNextRacer()
+            }
+        case .preparing, .waiting:
+            break
+        }
+    }
+
+    private func racerMessage(_ message: CompanionMessage, from racer: CompanionConnection) {
+        if racer !== connection {
+            guard connection == nil, racers.contains(where: { $0 === racer }) else { return }
+            switch message {
+            case .welcome, .incompatible, .error:
+                adopt(racer)
+            default:
+                return
+            }
+        }
+        lastReceived = Date()
+        handle(message)
+    }
+
+    private func adopt(_ winner: CompanionConnection) {
+        connection = winner
+        connectedHost = racerHosts[ObjectIdentifier(winner)]
+        staggerTask?.cancel()
+        staggerTask = nil
+        for racer in racers where racer !== winner { racer.cancel() }
+        racers = [winner]
+        unstarted = []
+        racerHosts = [:]
     }
 
     private func teardown() {
         retryTask?.cancel()
         handshakeTask?.cancel()
         heartbeatTask?.cancel()
+        staggerTask?.cancel()
         retryTask = nil
         handshakeTask = nil
         heartbeatTask = nil
+        staggerTask = nil
+        round += 1
         let held = connection
         connection = nil
         authenticated = false
         held?.cancel()
+        for racer in racers where racer !== held { racer.cancel() }
+        racers = []
+        unstarted = []
+        racerHosts = [:]
     }
 
     private func handle(_ state: CompanionConnection.State) {
@@ -251,11 +332,11 @@ final class MacConnection: Identifiable {
             state = .offline
             return
         }
-        let delay = min(30, 1 << min(attempt, 5))
+        let delay = Self.retryDelays[min(attempt, Self.retryDelays.count - 1)]
         attempt += 1
         state = .retrying(reason)
         retryTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, wanted, !suspended, connection == nil else { return }
             open()
         }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0
+
+- With the sidebar collapsed, a top bar shows the space menu, a chip for each shell and a dock button. The sidebar can also pop out over the card. Appearance settings turn either one off, but not both, and the sidebar has a hide button at its top.
+- One graphics engine now draws Kitty images on macOS and iOS, in block output and in full-screen programs. It handles animation, image quotas, cropped Unicode placeholders, every delete mode, and shared memory images sent with an offset or size. Images can sit above or beneath the text, and block output stays complete while a full-screen program is up.
+- Sixel images are decoded by Turm, with size limits checked before anything is drawn. Programs that ask about graphics support get an answer, and iTerm2 images accept percent sizes and the option to leave the cursor where it was.
+- Pairing a phone asks you to compare the check code on both devices, and the Mac stores the device only after the phone confirms. A device that is already paired is refused before anything is stored, and the plain AES cipher suite is no longer offered.
+- Remote access is stricter. Uploads only land in the folders you chose, file reads are bounded, idle connections are cut off after repeated strikes, terminal sizes from a phone are clamped, and links and clipboard writes from remote output ask first.
+- The iPhone and iPad app tries every known address of a Mac at once and keeps the first one that answers, and it reconnects sooner after a drop. The Mac retries its listener faster when the port is still busy, and a successful pairing clears earlier failed attempts.
+- Saving the workspace happens off the main thread, and output rendering and escape scanning do less work.
+
 ## 2.0.2
 
 - A full-screen program such as Claude Code no longer opens as a black pane that only fills in after the pane is resized. The program is told the size the pane really ends up at, even when the pane changes size several times while it opens, and the pane is redrawn once it has its final size.

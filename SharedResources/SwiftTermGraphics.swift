@@ -2,7 +2,6 @@ import SwiftTerm
 import TurmCore
 
 extension Terminal {
-    /// Placeholder cells of `buffer`, which need not be the active one; `end` overrides its last stored row.
     func placeholderCells(rows: Range<Int>, in buffer: Buffer, end: Int? = nil) -> [GraphicsCell] {
         let top = buffer.totalLinesTrimmed
         return KittyPlaceholders.scan(
@@ -19,8 +18,6 @@ extension Terminal {
         )
     }
 
-    /// Placeholder cells of the screen `which`, using the buffer `screens` kept for it while it is hidden;
-    /// `activeEnd` overrides the last stored row when `which` is the screen on show.
     func placeholderCells(
         rows: Range<Int>, of which: GraphicsBuffer, screens: ScreenBuffers<Buffer>, activeEnd: Int? = nil
     ) -> [GraphicsCell] {
@@ -31,7 +28,6 @@ extension Terminal {
 }
 
 extension Terminal {
-    /// Line feeds that scroll the screen's text into history with the cursor kept, ahead of a scrollback clear.
     func scrollbackPush(screenTop: Int? = nil) -> [UInt8]? {
         guard !isCurrentBufferAlternate else { return nil }
         let top = screenTop ?? buffer.totalLinesTrimmed + buffer.yDisp

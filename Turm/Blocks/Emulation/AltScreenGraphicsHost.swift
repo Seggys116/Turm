@@ -50,7 +50,6 @@ final class AltScreenGraphicsHost: GraphicsHost {
     }
 }
 
-/// Holds one painter layer over the whole terminal, y running down from the top row.
 final class GraphicsLayerView: NSView {
     private let content: CALayer
 
@@ -91,8 +90,6 @@ final class GraphicsLayerView: NSView {
     }
 }
 
-/// SwiftTerm paints the default background through its layer colour; this hands that colour to the
-/// view behind the text instead, so images under the text show wherever no cell background is drawn.
 final class ForwardedBackgroundLayer: CALayer {
     var onBackground: (CGColor?) -> Void = { _ in }
 

@@ -275,9 +275,14 @@ final class MacPairing {
                     }
                     var storedHosts = hosts
                     var storedPort = port
-                    if storedHosts.isEmpty, let host = paired.host, let resolvedPort = paired.port {
-                        storedHosts = [host]
-                        storedPort = resolvedPort
+                    if let host = paired.host, let resolvedPort = paired.port {
+                        if storedHosts.isEmpty {
+                            storedHosts = [host]
+                            storedPort = resolvedPort
+                        } else if resolvedPort == storedPort {
+                            storedHosts.removeAll { $0 == host }
+                            storedHosts.insert(host, at: 0)
+                        }
                     }
                     if let refusal = manager.addPaired(macID: paired.macID, name: paired.macName, key: paired.key, hosts: storedHosts, port: storedPort) {
                         state = .failed(refusal)

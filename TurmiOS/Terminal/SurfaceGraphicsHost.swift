@@ -29,7 +29,6 @@ final class SurfaceGraphicsHost: GraphicsHost {
         )
     }
 
-    // the shell runs on another machine, so its paths and shared memory never name anything here
     var allowsLocalMedia: Bool {
         false
     }
@@ -43,12 +42,10 @@ final class SurfaceGraphicsHost: GraphicsHost {
         surface.onInput?(ArraySlice(bytes))
     }
 
-    /// Absolute row of the screen's first line, which stays put while the user scrolls back.
     var screenTop: Int {
         lineEnd - terminal.rows
     }
 
-    /// One past the last stored line. SwiftTerm keeps the line count internal, so the end is found by probing.
     var lineEnd: Int {
         let terminal = terminal
         let buffer = terminal.buffer

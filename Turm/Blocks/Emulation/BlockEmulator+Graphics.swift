@@ -73,7 +73,6 @@ extension BlockEmulator {
         inlineImages.removeAll { $0.rowSpan > 0 && $0.anchor + $0.rowSpan <= trimmed }
     }
 
-    /// Kitty placements of the main screen from `top` down, with placeholder tiles kept apart, also while a program holds the alternate screen.
     func kittyPlacements(from top: Int) -> (images: [InlineImage], tiles: [InlineImage]) {
         var images: [InlineImage] = []
         var tiles: [InlineImage] = []

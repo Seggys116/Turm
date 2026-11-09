@@ -1,7 +1,6 @@
 import SwiftTerm
 import UIKit
 
-/// SwiftTerm draws text into its own layer, so images beneath the text live here, behind a transparent terminal.
 final class TerminalStage: UIView {
     let terminal: TurmTerminalView
     let underlay = CALayer()
@@ -23,7 +22,6 @@ final class TerminalStage: UIView {
         fatalError("init(coder:) is not supported")
     }
 
-    /// Takes the terminal view back after a window detached it.
     func adopt() {
         guard terminal.superview !== self else { return }
         terminal.frame = bounds
@@ -67,7 +65,6 @@ final class TerminalStage: UIView {
         }
     }
 
-    /// Follows what the program changed in SwiftTerm's colors: a new background (OSC 11) or reverse video.
     func reconcile() {
         let native = terminal.nativeBackgroundColor
         guard seeThrough else {
@@ -104,7 +101,6 @@ final class TerminalStage: UIView {
             terminal.backgroundColor = background.withAlphaComponent(0)
             return
         }
-        // reverse video draws text in the background color, which SwiftTerm takes from an opaque native background
         reversed = true
         reverseFill = fill
         terminal.nativeBackgroundColor = background

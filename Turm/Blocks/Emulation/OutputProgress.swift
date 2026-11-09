@@ -13,7 +13,6 @@ struct OutputProgress {
 
     private static let lineLimit = 512
 
-    // line holds up to twice the limit so trimming is amortised; recent is the logical line
 
     private var line: [UInt8] = []
     private var lastLine: [UInt8] = []

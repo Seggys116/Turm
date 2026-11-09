@@ -20,7 +20,6 @@ private extension Int {
 }
 
 public nonisolated enum CompanionPeerAddress {
-    // one key per client: IPv4-mapped IPv6 becomes the IPv4 form and any other IPv6 address is reduced to its /64
     public static func key(_ host: String) -> String {
         var address = in6_addr()
         guard inet_pton(AF_INET6, host, &address) == 1 else { return host }
@@ -46,7 +45,6 @@ public nonisolated enum CompanionUploads {
         }
     }
 
-    // the folders a write may land in; none at all unless uploads are on and a folder is chosen
     public static func roots(uploadsEnabled: Bool, uploadRoot: String, shellDirectory: String?) -> Result<[String], Refusal> {
         guard uploadsEnabled else { return .failure(.disabled) }
         guard !uploadRoot.isEmpty else { return .failure(.noFolder) }

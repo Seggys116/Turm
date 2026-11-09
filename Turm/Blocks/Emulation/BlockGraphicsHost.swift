@@ -44,7 +44,6 @@ final class BlockGraphicsHost: GraphicsHost {
         terminal.placeholderCells(rows: rows, of: buffer, screens: screens)
     }
 
-    /// Records the active buffer, so the main screen can still be read once a program switches away from it.
     func noteBuffer() {
         screens.note(terminal)
     }

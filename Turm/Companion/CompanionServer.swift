@@ -299,7 +299,6 @@ final class CompanionServer {
             listener?.cancel()
             listener = nil
             status = .failed(describe(error))
-            if case .posix(.EADDRINUSE) = error { return }
             scheduleRetry()
         case .waiting(let error):
             status = .failed(describe(error))
@@ -338,10 +337,11 @@ final class CompanionServer {
     }
 
     private func scheduleRetry() {
-        guard retries < 3, isEnabled else { return }
+        guard retries < 6, isEnabled else { return }
         retries += 1
+        let delay = Duration.milliseconds(retries <= 2 ? 150 : 1000)
         retryTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.rebuildListener()
         }
@@ -590,6 +590,8 @@ final class CompanionServer {
         peer.timeout?.cancel()
         peers[peer.id] = nil
         let stored = devices.device(deviceID)?.name ?? name
+        strikes = [:]
+        blockedUntil = [:]
         endPairing(outcome: .paired(stored))
     }
 

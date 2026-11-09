@@ -11,7 +11,6 @@ final class TurmTerminalView: TerminalView, UIGestureRecognizerDelegate {
     var onScroll: (() -> Void)?
     var onLayout: (() -> Void)?
     var onBufferSwitch: (() -> Void)?
-    /// The background shown behind a transparent default background, reported in its place to color queries.
     var clearedBackground: UIColor?
 
     override var contentOffset: CGPoint {

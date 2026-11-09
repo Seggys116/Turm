@@ -13,7 +13,6 @@ public enum GraphicsBounds {
     }
 
 #if canImport(ImageIO)
-    /// Reads the size from the image header, so an oversized picture is refused before anything is decoded.
     public static func admits(imageData data: Data) -> Bool {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -25,7 +24,6 @@ public enum GraphicsBounds {
 #endif
 }
 
-/// Walks a complete `DCS ... q ... ST` sequence without allocating and checks the size it declares or draws.
 public enum SixelPrescan {
     public static let maxRegister = 1023
     private static let saturation = 1_000_000_000
@@ -118,7 +116,6 @@ public enum SixelPrescan {
     }
 }
 
-/// Answers `CSI ? Pi ; Pa ; Pv S` (XTSMGRAPHICS) for the graphics this terminal supports.
 public enum GraphicsAttributes {
     public static let colorRegisters = 256
 
@@ -146,7 +143,6 @@ public enum GraphicsAttributes {
     }
 }
 
-/// Rules for the file transmission mediums of the kitty graphics protocol.
 public enum KittyFilePolicy {
     private static let forbidden = ["/proc", "/sys", "/dev"]
     private static let marker = "tty-graphics-protocol"
@@ -174,7 +170,6 @@ public enum KittyFilePolicy {
         return !forbidden.contains { contains(target, in: $0) } && !forbidden.contains { contains(path, in: $0) }
     }
 
-    /// A transient file is only removed when it sits in a temporary directory and was named for the protocol.
     public static func mayDelete(_ path: String, temporaryDirectories directories: [String]? = nil) -> Bool {
         guard mayRead(path) else { return false }
         let target = resolve(path)
@@ -191,7 +186,6 @@ public enum KittyFilePolicy {
 public enum LinkPolicy {
     private static let remoteSchemes: Set<String> = ["http", "https", "mailto", "ssh"]
 
-    /// One list of schemes a program's output may ask the app to open. Local files are only reachable from a local session.
     public static func allows(_ url: URL, remote: Bool) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         if remoteSchemes.contains(scheme) { return true }

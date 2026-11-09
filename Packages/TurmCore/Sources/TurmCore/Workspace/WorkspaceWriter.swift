@@ -72,7 +72,6 @@ public nonisolated struct BlockWriteLedger: Sendable, Equatable {
         return hasher.finalize()
     }
 
-    /// Returns the panes whose signature differs from the last one claimed and records the new ones.
     public mutating func claim(_ current: [UUID: Int]) -> Set<UUID> {
         var changed: Set<UUID> = []
         for (pane, value) in current where written[pane] != value {
@@ -108,7 +107,6 @@ extension WorkspaceDocument {
         }
     }
 
-    /// Drops a scratch space, including one that was written before it was marked temporary.
     public mutating func purgeScratch(ids: Set<UUID>) -> Bool {
         let purged = discardingTemporarySpaces()
         let kept = purged.windows.filter { !ids.contains($0.id) }
@@ -148,7 +146,6 @@ public nonisolated final class WorkspaceWriter: @unchecked Sendable {
         self.store = store
     }
 
-    /// The body returns true when it changed the document and it should be written.
     public func update(
         wait: Bool, createIfMissing: Bool = false, blocks: [UUID: [SavedBlock]] = [:],
         _ body: (@Sendable (inout WorkspaceDocument) -> Bool)? = nil

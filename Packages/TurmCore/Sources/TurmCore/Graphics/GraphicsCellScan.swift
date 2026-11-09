@@ -1,6 +1,5 @@
 import Foundation
 
-/// Keeps each screen's buffer while it is on show, for terminals that hide the inactive one.
 public final class ScreenBuffers<Buffer: AnyObject> {
     public private(set) var normal: Buffer?
     public private(set) var alternate: Buffer?
@@ -21,7 +20,6 @@ public final class ScreenBuffers<Buffer: AnyObject> {
 }
 
 extension KittyPlaceholders {
-    /// Placeholder cells of `rows` that lie in `stored`, read one grid cell at a time through the closures.
     public static func scan<Cell>(
         rows: Range<Int>,
         within stored: Range<Int>,

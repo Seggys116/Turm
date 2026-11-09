@@ -1,6 +1,5 @@
 import Foundation
 
-/// Holds a kitty graphics command that arrives over several reads, and drops one that outgrows `limit`.
 public struct KittyStreamIntake {
     public static let defaultLimit = 128 * 1024 * 1024
 
@@ -13,7 +12,6 @@ public struct KittyStreamIntake {
         self.limit = limit
     }
 
-    /// The bytes ready to be split, or nil while a command is still arriving or being dropped.
     public mutating func take(_ chunk: [UInt8]) -> [UInt8]? {
         var incoming = chunk
         if isSkipping {
@@ -37,7 +35,6 @@ public struct KittyStreamIntake {
         return ready
     }
 
-    /// Splits ready bytes, keeping an unfinished command at the end for the next read.
     public mutating func split(_ bytes: [UInt8]) -> [KittyGraphicsScanner.Piece] {
         let split = KittyGraphicsScanner.split(bytes)
         held = Array(split.remainder)

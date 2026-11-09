@@ -12,7 +12,6 @@ struct TurmWindow<Sidebar: View, Content: View, TopBar: View>: View {
     @AppStorage(CollapsedSidebarMode.topBarKey) private var topBarEnabled = true
     @AppStorage(CollapsedSidebarMode.popOutKey) private var popOutEnabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The column is laid out docked. It follows `isSidebarVisible`, a beat late when the sidebar is shown, so the top bar can leave first.
     @State private var isDocked: Bool
     @State private var topBarShown: Bool
     @State private var dockTask: Task<Void, Never>?
@@ -119,7 +118,6 @@ struct TurmWindow<Sidebar: View, Content: View, TopBar: View>: View {
         }
     }
 
-    /// Hiding closes the column first and fades the top bar in once it is gone. Showing fades the top bar out first, then opens the column.
     private func applyDocking(_ visible: Bool) {
         dockTask?.cancel()
         if reduceMotion {

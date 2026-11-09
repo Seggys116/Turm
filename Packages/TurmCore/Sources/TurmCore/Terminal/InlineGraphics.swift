@@ -171,7 +171,6 @@ public struct InlineGraphicsSession: Sendable {
         case "file":
             return Self.file(value)
         default:
-            // CurrentDir, RemoteHost, SetUserVar and SetMark have no consumer in the terminal views, so they are dropped
             return nil
         }
     }
@@ -267,7 +266,6 @@ public enum TerminalGraphics {
         case bytes(ArraySlice<UInt8>)
         case osc(ArraySlice<UInt8>)
         case sixel(ArraySlice<UInt8>)
-        /// The reply to a `CSI ? Pi ; Pa ; Pv S` graphics attribute query, which the terminal engine must never see.
         case query([UInt8])
     }
 
@@ -326,7 +324,6 @@ public enum TerminalGraphics {
         case cancelled(sequenceEnd: Int)
     }
 
-    /// Where the terminator search of a held image sequence begins, once its header is complete.
     fileprivate static func bodyStart(of held: [UInt8]) -> (index: Int, allowBell: Bool)? {
         guard held.count >= 2, held[0] == 0x1B else { return nil }
         switch held[1] {
@@ -439,7 +436,6 @@ public struct GraphicHold: Sendable {
             discarding = false
             return intake(Array(incoming[end...]))
         }
-        // a held sequence still waiting for its terminator is extended in place and only the new bytes are searched
         if let from = scanned {
             pending.append(contentsOf: incoming)
             if TerminalGraphics.terminator(pending, from: from, allowBell: bellEnds) == nil {

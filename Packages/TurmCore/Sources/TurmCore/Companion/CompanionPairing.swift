@@ -75,7 +75,6 @@ public nonisolated struct CompanionPairingClient {
         }
     }
 
-    // a typed code is guessable offline, so the key is held until the user has compared the check code
     public mutating func approve() -> Step {
         switch stage {
         case .awaitingDone(let macID, let macName, let result, _, let confirms):
@@ -94,7 +93,6 @@ public nonisolated struct CompanionPairingClient {
         return .failed("The check codes did not match, so pairing was stopped. Someone may be intercepting the connection.")
     }
 
-    // a Mac that asked for confirmation stores the device only once it has seen it
     private mutating func release(macID: UUID, macName: String, key: Data, confirms: Bool) -> Step {
         guard confirms else { return .finished(macID: macID, macName: macName, key: key) }
         stage = .awaitingStored(macID: macID, macName: macName, key: key)
