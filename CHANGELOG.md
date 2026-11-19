@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1
+
+- Full-screen programs such as Claude Code, vim and less draw their text again. Since 2.1.0 the pane stayed black with only the cursor showing, because the full-screen view never redrew its text.
+
 ## 2.1.0
 
 - With the sidebar collapsed, a top bar shows the space menu, a chip for each shell and a dock button. The sidebar can also pop out over the card. Appearance settings turn either one off, but not both, and the sidebar has a hide button at its top.
