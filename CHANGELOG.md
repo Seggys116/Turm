@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.4
+
+- Control+C copies selected output, as in other terminals, and drops the selection so the next Control+C interrupts as usual. It works in block output, while a command runs and in full-screen programs; with nothing selected it still clears the line or interrupts, and it no longer beeps.
+- The completion list narrows as you type instead of keeping entries your typing ruled out, and Tab only takes an entry that still fits what is on the line.
+
 ## 2.1.3
 
 - Tab completion comes from your own shell, loaded with your configuration: zsh's completion system, bash's programmable completion or fish's completions, with their descriptions. Turm's own completions cover its SSH and shortcut syntax and anything the shell has nothing for.
