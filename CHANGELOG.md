@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2
+
+- Programs that draw their whole window as kitty images, such as terminal-browser and t3-term, show every frame instead of a black pane. A frame sent again under the same image ids now replaces the picture, and so does a frame edited in place.
+- Requests for terminal settings (DECRQSS) are answered instead of being mistaken for Sixel images, and the alternate screen modes report whether they are on.
+- Colours 16 to 255 use the standard xterm palette everywhere, so a program looks the same in block output and full screen, and colour queries report the colours that are drawn.
+- Programs that ask through XTGETTCAP learn that styled and coloured underlines, cursor shapes, synchronized output and clipboard writes are supported.
+
 ## 2.1.1
 
 - Full-screen programs such as Claude Code, vim and less draw their text again. Since 2.1.0 the pane stayed black with only the cursor showing, because the full-screen view never redrew its text.
