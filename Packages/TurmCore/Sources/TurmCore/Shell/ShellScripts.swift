@@ -179,7 +179,8 @@ precmd_functions=() preexec_functions=() chpwd_functions=()
 unset HISTFILE
 zstyle ':completion:*' list-grouped false
 zstyle ':completion:*' insert-tab false
-(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C -d "${TURM_COMPLETION_DUMP:-${TMPDIR:-/tmp}/turm-zcompdump}" }
+# -i skips insecure directories instead of stopping to ask, which nobody would see
+(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C -i -d "${TURM_COMPLETION_DUMP:-${TMPDIR:-/tmp}/turm-zcompdump}" }
 
 # compadd options that take a value, either joined to the letter or as the next word
 typeset -g _turm_valued=PpSsiIWdJVXxrRMFOADE
@@ -232,8 +233,11 @@ compadd() {
   [[ $flags == *Q* ]] && quoted=0
   [[ $flags == *f* ]] && file=1
   local -i i
-  local description kind
+  local description kind hit
   for (( i = 1; i <= $#hits; i++ )); do
+    # quote the way zsh would when inserting, leaving its prefixes such as $ alone; inside quotes the text goes in bare
+    hit=$hits[i]
+    (( quoted )) && [[ -z ${compstate[quote]} ]] && hit=${(q)hit}
     description=${descriptions[i]-}
     # display strings look like "name  -- what it does"
     if [[ $description == (#b)(*[^ ])[[:space:]]##--[[:space:]]##(*) ]]; then
@@ -243,7 +247,7 @@ compadd() {
     fi
     kind=$terminator
     (( file )) && [[ -d $prefix$hits[i] ]] && kind=/
-    print -rn -- $'\x1e'"$prefix$hits[i]$suffix"$'\x1f'"$description"$'\x1f'"$kind"$'\x1f'"$quoted"$'\x1f'"$file"$'\x1f'"${curtag-}"
+    print -rn -- $'\x1e'"$prefix$hit$suffix"$'\x1f'"$description"$'\x1f'"$kind"$'\x1f'0$'\x1f'"$file"$'\x1f'"${curtag-}"
   done
   (( $#hits ))
 }

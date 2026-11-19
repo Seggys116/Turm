@@ -126,8 +126,10 @@ nonisolated enum ShellCompletionMapper {
         return open
     }
 
+    /// Inside an open quote the shell hands back bare text, which goes in escaped for that quote; elsewhere a word
+    /// the shell already quoted goes in as it is, and bash and fish words are escaped here.
     static func inserted(_ offer: ShellOffer, quote: Character?) -> String {
-        guard offer.needsQuoting else { return offer.word }
+        guard quote != nil || offer.needsQuoting else { return offer.word }
         switch quote {
         case "'":
             return "'" + offer.word.replacingOccurrences(of: "'", with: "'\\''")
@@ -148,7 +150,7 @@ nonisolated enum ShellCompletionMapper {
         case "/":
             return ""
         case " ":
-            if let quote, offer.needsQuoting { return String(quote) + " " }
+            if let quote { return String(quote) + " " }
             return " "
         default:
             return offer.terminator

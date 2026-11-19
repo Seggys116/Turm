@@ -54,6 +54,17 @@ struct ShellCompletionMapperTests {
         #expect(result.items.first?.terminator == "\" ")
     }
 
+    @Test func bareTextFromInsideAQuoteKeepsTheQuote() throws {
+        let result = try #require(complete([offer("alpha one.txt", quoted: false, file: true)], "cat \"al"))
+        #expect(result.items.first?.insert == "\"alpha one.txt")
+        #expect(result.items.first?.terminator == "\" ")
+    }
+
+    @Test func aWordTheShellAlreadyQuotedIsNotQuotedAgain() throws {
+        let result = try #require(complete([offer("alpha\\ one.txt", quoted: false, file: true)], "cat al"))
+        #expect(result.items.first?.insert == "alpha\\ one.txt")
+    }
+
     @Test func anOpenSingleQuoteIsKept() throws {
         let result = try #require(complete([offer("it's", file: true)], "cat 'it"))
         #expect(result.items.first?.insert == "'it'\\''s")
@@ -121,14 +132,17 @@ struct ShellCompletionHelperTests {
         return service
     }
 
-    /// The first answer waits for the user's configuration to load.
+    /// The first answer waits for the user's configuration to load. Other suites can hold the main actor for a long
+    /// while on a busy runner, so a few attempts are always made after the deadline passes.
     private static func answer(_ service: ShellCompletionService, _ line: String, in folder: URL) async -> CompletionResult? {
-        let deadline = ContinuousClock.now + .seconds(20)
-        while ContinuousClock.now < deadline {
-            if let result = await service.complete(line: line, cursor: line.endIndex, directory: folder.path, timeout: .seconds(3)) {
+        let deadline = ContinuousClock.now + .seconds(90)
+        var late = 0
+        while ContinuousClock.now < deadline || late < 5 {
+            if ContinuousClock.now >= deadline { late += 1 }
+            if let result = await service.complete(line: line, cursor: line.endIndex, directory: folder.path, timeout: .seconds(5)) {
                 return result
             }
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(for: .milliseconds(200))
         }
         return nil
     }
@@ -150,6 +164,11 @@ struct ShellCompletionHelperTests {
         try await Self.expectFiles(service, in: folder)
         let directories = try #require(await Self.answer(service, "cd al", in: folder))
         #expect(directories.items.map(\.insert) == ["alpha-dir/"])
+        let quoted = try #require(await Self.answer(service, "cat \"alpha o", in: folder))
+        #expect(quoted.items.map(\.insert) == ["\"alpha one.txt"])
+        #expect(quoted.items.first?.terminator == "\" ")
+        let variables = try #require(await Self.answer(service, "echo $HO", in: folder))
+        #expect(variables.items.contains { $0.insert == "$HOME" }, "\(variables.items)")
         if FileManager.default.isExecutableFile(atPath: "/usr/bin/git") {
             let subcommands = try #require(await Self.answer(service, "git chec", in: folder))
             let checkout = try #require(subcommands.items.first { $0.insert == "checkout" })
