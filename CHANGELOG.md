@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.3
+
+- Tab completion comes from your own shell, loaded with your configuration: zsh's completion system, bash's programmable completion or fish's completions, with their descriptions. Turm's own completions cover its SSH and shortcut syntax and anything the shell has nothing for.
+- The completion list opens by itself while you type. Tab takes the grey suggestion first, then the highlighted item, and Enter still runs the line.
+- History suggestions only offer commands that can work where you are: a line whose folder, script, command or file paths do not exist here is skipped, and commands you ran in the current folder come first. History is read from your shell's own history file, and Turm remembers the folder of each command it ran.
+
 ## 2.1.2
 
 - Programs that draw their whole window as kitty images, such as terminal-browser and t3-term, show every frame instead of a black pane. A frame sent again under the same image ids now replaces the picture, and so does a frame edited in place.
