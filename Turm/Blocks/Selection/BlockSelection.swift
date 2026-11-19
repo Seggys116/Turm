@@ -102,11 +102,23 @@ final class BlockSelection {
         return text.isEmpty ? nil : text
     }
 
+    /// Control+C with output selected copies it, as in other terminals, and drops the selection so the next one interrupts.
+    func copyForControlC(to pasteboard: NSPasteboard = .general) -> Bool {
+        guard copySelection(to: pasteboard) else { return false }
+        clear()
+        return true
+    }
+
+    static func isControlC(_ event: NSEvent) -> Bool {
+        event.modifierFlags.intersection([.control, .command, .option, .shift]) == .control
+            && event.charactersIgnoringModifiers?.lowercased() == "c"
+    }
+
     @discardableResult
-    func copySelection() -> Bool {
+    func copySelection(to pasteboard: NSPasteboard = .general) -> Bool {
         guard let text = selectedText() else { return false }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
         return true
     }
 

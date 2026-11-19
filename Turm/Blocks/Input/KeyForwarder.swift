@@ -44,6 +44,7 @@ final class KeyView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if BlockSelection.isControlC(event), session?.selection.copyForControlC() == true { return }
         forward(event, type: event.isARepeat ? .repeated : .press)
     }
 

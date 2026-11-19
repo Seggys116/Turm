@@ -14,6 +14,8 @@ struct InputEditor: NSViewRepresentable {
     var stillFocused: () -> Bool = { true }
     let onAttach: ([URL]) -> Void
     let onDragTarget: (Bool) -> Void
+    /// Copies the selected output for Control+C; false when nothing is selected, so Control+C clears the line instead.
+    var onCopySelection: () -> Bool = { false }
     var onSelectAllBlocks: () -> Void = {}
     var isRemote = false
     var remoteChannel: RemoteChannel?
@@ -329,6 +331,7 @@ struct InputEditor: NSViewRepresentable {
                 completion.close()
                 return
             }
+            narrowOpenList(in: view)
             if completion.isOpen, completion.engaged {
                 request(.refresh)
                 return
@@ -346,6 +349,35 @@ struct InputEditor: NSViewRepresentable {
             }
         }
 
+        /// Drops what the new typing ruled out at once; the shell's fresh answer replaces the list when it comes.
+        private func narrowOpenList(in view: EditorTextView) {
+            let completion = parent.completion
+            guard completion.isOpen else { return }
+            let length = (view.string as NSString).length
+            guard completionRange.location <= length, view.selectedRange() == NSRange(location: length, length: 0) else {
+                completion.close()
+                return
+            }
+            let word = NSRange(location: completionRange.location, length: length - completionRange.location)
+            let kept = SuggestionList.narrow(completion.items, typed: typed(in: word, of: view.string))
+            if kept.isEmpty {
+                completion.close()
+            } else if kept.count != completion.items.count {
+                completionRange = word
+                completion.show(kept, engaged: completion.engaged)
+            } else {
+                completionRange = word
+            }
+        }
+
+        /// Whether an item from the open list still fits the word being typed.
+        private func stillFits(_ item: CompletionItem, in view: EditorTextView) -> Bool {
+            let length = (view.string as NSString).length
+            guard completionRange.location <= length else { return false }
+            let word = NSRange(location: completionRange.location, length: length - completionRange.location)
+            return !SuggestionList.narrow([item], typed: typed(in: word, of: view.string)).isEmpty
+        }
+
         func textViewDidChangeSelection(_ notification: Notification) {
             updateGhost()
             refreshTags()
@@ -361,6 +393,7 @@ struct InputEditor: NSViewRepresentable {
             guard let view = textView else { return }
             switch key {
             case "c":
+                if parent.onCopySelection() { return }
                 set("")
             case "l":
                 parent.onClear()
@@ -553,7 +586,8 @@ struct InputEditor: NSViewRepresentable {
             guard !view.ghost.isEmpty else {
                 if completion.isOpen, completion.items.indices.contains(completion.selected),
                    completion.items[completion.selected].kind != .history,
-                   view.selectedRange().location == (view.string as NSString).length {
+                   view.selectedRange().location == (view.string as NSString).length,
+                   stillFits(completion.items[completion.selected], in: view) {
                     accept(completion.selected)
                 } else {
                     request(.tab)
@@ -574,7 +608,8 @@ struct InputEditor: NSViewRepresentable {
             let completion = parent.completion
             guard completion.isOpen, completion.engaged, completion.items.indices.contains(completion.selected),
                   completion.items[completion.selected].kind != .history,
-                  let view = textView, view.selectedRange().location == (view.string as NSString).length
+                  let view = textView, view.selectedRange().location == (view.string as NSString).length,
+                  stillFits(completion.items[completion.selected], in: view)
             else { return false }
             accept(completion.selected)
             return true

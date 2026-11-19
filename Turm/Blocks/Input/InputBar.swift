@@ -67,6 +67,7 @@ struct InputBar: View {
                     stillFocused: { session.isPaneFocused },
                     onAttach: attach,
                     onDragTarget: { session.isDropTargeted = $0 },
+                    onCopySelection: { session.selection.copyForControlC() },
                     onSelectAllBlocks: {
                         session.selection.selectAll()
                         session.selection.claimFocus()

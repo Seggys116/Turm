@@ -125,6 +125,12 @@ nonisolated enum SuggestionList {
         return String(item.insert.dropFirst(typed.count))
     }
 
+    /// The items that still fit the word as typed so far, so an open list never shows or offers an entry the typing ruled out.
+    static func narrow(_ items: [CompletionItem], typed: String) -> [CompletionItem] {
+        let lowered = typed.lowercased()
+        return items.filter { $0.kind != .history && $0.insert.lowercased().hasPrefix(lowered) }
+    }
+
     static func sole(_ items: [CompletionItem]) -> CompletionItem? {
         let candidates = items.filter { $0.kind != .history }
         return candidates.count == 1 ? candidates[0] : nil

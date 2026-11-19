@@ -372,6 +372,7 @@ final class FullScreenTerminalView: TerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        watchControlC()
         registerForDraggedTypes(AttachmentStore.dragTypes)
         _ = Self.installPointerCursor
         window?.invalidateCursorRects(for: self)
@@ -380,6 +381,34 @@ final class FullScreenTerminalView: TerminalView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// SwiftTerm's keyDown cannot be overridden, so Control+C over a selection is caught before it gets there.
+    private var copyMonitor: Any?
+
+    isolated deinit {
+        if let copyMonitor { NSEvent.removeMonitor(copyMonitor) }
+    }
+
+    private func watchControlC() {
+        if let copyMonitor { NSEvent.removeMonitor(copyMonitor) }
+        copyMonitor = nil
+        guard window != nil else { return }
+        copyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.window, self.window?.firstResponder === self, self.copySelectionForControlC(event) else {
+                return event
+            }
+            return nil
+        }
+    }
+
+    /// With text selected, Control+C copies it instead of reaching the program, and the next one does reach it.
+    func copySelectionForControlC(_ event: NSEvent, to pasteboard: NSPasteboard = .general) -> Bool {
+        guard BlockSelection.isControlC(event), selectionActive, let text = getSelection(), !text.isEmpty else { return false }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        selectNone()
+        return true
+    }
 
     override func mouseDown(with event: NSEvent) {
         onMouseDown()

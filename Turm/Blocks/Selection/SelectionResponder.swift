@@ -48,8 +48,10 @@ final class SelectionResponderView: NSView, NSUserInterfaceValidations {
     }
 
     override func keyDown(with event: NSEvent) {
+        if BlockSelection.isControlC(event), selection?.copyForControlC() == true { return }
         release()
-        if let responder = window?.firstResponder, responder !== self {
+        // the window itself has nothing to do with a key and would only beep
+        if let responder = window?.firstResponder, responder !== self, !(responder is NSWindow) {
             responder.keyDown(with: event)
         }
     }

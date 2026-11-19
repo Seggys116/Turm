@@ -95,6 +95,32 @@ struct InputEditorCompletionTests {
         #expect(rig.textView?.string == "cat " + chosen.insert + chosen.terminator)
     }
 
+    /// Typing on from a folder whose list is already open must narrow it at once, and Tab must never take an entry
+    /// the typing ruled out, even before the shell's fresh answer arrives.
+    @Test func typingOnNarrowsTheOpenListAndTabTakesOnlyWhatFits() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("turm-narrow-\(UUID().uuidString)")
+        for name in ["Caches", "Calendars", "iTunes", "com.apple.x"] {
+            try FileManager.default.createDirectory(at: folder.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let rig = EditorRig(folder: folder)
+        defer { rig.close() }
+        var opened = false
+        for _ in 0..<10 where !opened {
+            rig.textView?.string = ""
+            rig.type("cd \(folder.path)/")
+            opened = await rig.wait(timeout: .seconds(3)) { rig.completion.items.count >= 4 }
+        }
+        #expect(opened, "\(rig.completion.items)")
+        rig.type("ca")
+        let shown = rig.completion.items.map(\.display)
+        #expect(!shown.contains { $0.contains("iTunes") || $0.contains("com.apple") }, "\(shown)")
+        rig.press(#selector(NSResponder.insertTab(_:)))
+        let line = rig.textView?.string ?? ""
+        #expect(line.hasSuffix("/Caches/") || line.hasSuffix("/Calendars/") || line.hasSuffix("/Ca"), "\(line)")
+        #expect(!line.contains("iTunes") && !line.contains("com.apple"), "\(line)")
+    }
+
     @Test func tabStillTakesTheGreySuggestionFirst() async throws {
         let folder = try Self.folder()
         defer { try? FileManager.default.removeItem(at: folder) }
