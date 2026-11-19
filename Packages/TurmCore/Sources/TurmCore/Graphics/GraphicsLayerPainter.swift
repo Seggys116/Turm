@@ -31,6 +31,15 @@ public final class GraphicsLayerPainter {
         let layer: CALayer
         var source: GraphicsSource
         var shown: Int
+        var shownImage: CGImage?
+
+        // an image retransmitted under the same ids starts again at frame 0, so the picture itself is compared too
+        mutating func show(_ image: CGImage, frame: Int) {
+            guard frame != shown || image !== shownImage || layer.contents == nil else { return }
+            layer.contents = image
+            shown = frame
+            shownImage = image
+        }
     }
 
     public let overlay = CALayer()
@@ -126,13 +135,9 @@ public final class GraphicsLayerPainter {
 
         if case .animated(let animation) = placement.source {
             let index = animation.frameIndex(at: date)
-            if index != entry.shown || layer.contents == nil {
-                layer.contents = animation.frames[index].image
-                entry.shown = index
-            }
+            entry.show(animation.frames[index].image, frame: index)
         } else if case .still(let image) = placement.source {
-            layer.contents = image
-            entry.shown = 0
+            entry.show(image, frame: 0)
         }
     }
 
@@ -188,9 +193,7 @@ public final class GraphicsLayerPainter {
         for (key, var entry) in entries {
             guard case .animated(let animation) = entry.source else { continue }
             let index = animation.frameIndex(at: date)
-            guard index != entry.shown else { continue }
-            entry.layer.contents = animation.frames[index].image
-            entry.shown = index
+            entry.show(animation.frames[index].image, frame: index)
             entries[key] = entry
         }
         CATransaction.commit()

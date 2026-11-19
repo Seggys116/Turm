@@ -31,6 +31,8 @@ final class TerminalSurface: NSObject, TerminalViewDelegate {
         view = TurmTerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         stage = TerminalStage(terminal: view)
         super.init()
+        // the block renderer draws the xterm cube, so the full-screen view must too
+        view.getTerminal().ansi256PaletteStrategy = .xterm
         view.layer.insertSublayer(painter.overlay, at: 0)
         stage.underlay.addSublayer(painter.underlay)
         view.onScroll = { [weak self] in self?.followScroll() }

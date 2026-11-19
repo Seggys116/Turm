@@ -32,6 +32,7 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         var options = TerminalOptions.default
         options.cols = cols
         options.rows = rows
+        options.ansi256PaletteStrategy = TerminalPalette.extendedStrategy
         view = FullScreenTerminalView(frame: .zero, font: nil, options: options, underlay: painter.underlay, overlay: painter.overlay)
         super.init()
         view.terminalDelegate = self

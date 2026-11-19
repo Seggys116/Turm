@@ -76,12 +76,20 @@ enum TerminalRequestScanner {
 }
 
 enum TerminalReply {
+    // only what the emulator really does: styled and coloured underlines, cursor shapes, synchronized output and OSC 52
     private static let capabilities: [String: String?] = [
         "TN": "xterm-256color",
         "Co": "256",
         "colors": "256",
         "RGB": "8/8/8",
         "Tc": nil,
+        "Su": nil,
+        "Smulx": "\u{1B}[4:%p1%dm",
+        "Setulc": "\u{1B}[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m",
+        "Ss": "\u{1B}[%p1%d q",
+        "Se": "\u{1B}[0 q",
+        "Sync": "\u{1B}[?2026%?%p1%{1}%-%tl%eh%;",
+        "Ms": "\u{1B}]52;%p1%s;%p2%s\u{07}",
     ]
 
     static func colorScheme(dark: Bool) -> [UInt8] {

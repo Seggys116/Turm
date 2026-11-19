@@ -21,6 +21,22 @@ struct GraphicsLayerPainterTests {
         GraphicsPlacement(source: .still(still ?? Self.solid(40, 20)), origin: GridPoint(row: row, column: column))
     }
 
+    @Test func retransmittedImageUnderTheSameIDsReplacesThePicture() throws {
+        let painter = GraphicsLayerPainter()
+        let first = Self.solid(4, 4, red: 0)
+        let second = Self.solid(4, 4, red: 1)
+        for image in [first, second] {
+            var item = GraphicsPlacement(source: .animated(KittyAnimation(root: image)), origin: GridPoint(row: 10, column: 0))
+            item.kittyID = 1
+            item.placementID = 1
+            item.fromKitty = true
+            painter.update(placements: [item], geometry: geometry)
+            let layer = try #require(painter.overlay.sublayers?.first)
+            #expect(painter.overlay.sublayers?.count == 1)
+            #expect((layer.contents as! CGImage) === image)
+        }
+    }
+
     @Test func positionsAndSizesFromSpans() {
         let painter = GraphicsLayerPainter()
         var item = placement(row: 12, column: 3)

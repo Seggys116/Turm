@@ -610,7 +610,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func write(_ bytes: [UInt8]) {
-        let cleaned = ResponseFilter.rewrite(bytes, colorSchemeReporting: reportsColorScheme)
+        let cleaned = ResponseFilter.rewrite(bytes, colorSchemeReporting: reportsColorScheme, alternateScreen: altScreen != nil)
         process.send(data: cleaned[...])
     }
 

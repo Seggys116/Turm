@@ -71,6 +71,7 @@ final class BlockEmulator: TerminalDelegate {
         options.rows = max(rows, 2)
         options.scrollback = scrollback
         options.termName = "xterm-256color"
+        options.ansi256PaletteStrategy = TerminalPalette.extendedStrategy
         terminal = Terminal(delegate: self, options: options)
         graphicsHost.noteBuffer()
     }
@@ -657,6 +658,9 @@ final class BlockEmulator: TerminalDelegate {
 }
 
 enum TerminalPalette {
+    /// Colours 16 to 255 are the xterm cube and grey ramp, which the block renderer draws and colour queries report.
+    static let extendedStrategy = Ansi256PaletteStrategy.xterm
+
     static func engineColor(_ color: NSColor) -> SwiftTerm.Color {
         let rgb = color.usingColorSpace(.sRGB) ?? color
         func channel(_ value: CGFloat) -> UInt16 {

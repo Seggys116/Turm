@@ -449,6 +449,17 @@ struct ResponseFilterTests {
         #expect(ResponseFilter.rewrite(original) == Array("\u{1B}P>|\(TerminalIdentity.xtVersion)\u{1B}\\".utf8))
     }
 
+    @Test func reportsTheAlternateScreenModes() {
+        for mode in [47, 1047, 1049] {
+            let unknown = Array("\u{1B}[?\(mode);0$y".utf8)
+            #expect(ResponseFilter.rewrite(unknown) == Array("\u{1B}[?\(mode);2$y".utf8))
+            #expect(ResponseFilter.rewrite(unknown, alternateScreen: true) == Array("\u{1B}[?\(mode);1$y".utf8))
+        }
+        #expect(ResponseFilter.rewrite(Array("\u{1B}[?1048;0$y".utf8), alternateScreen: true) == Array("\u{1B}[?1048;2$y".utf8))
+        let other = Array("\u{1B}[?1000;2$y".utf8)
+        #expect(ResponseFilter.rewrite(other, alternateScreen: true) == other)
+    }
+
     @Test func leavesOtherInputAlone() {
         let keys = Array("ls -la\r".utf8)
         #expect(ResponseFilter.rewrite(keys) == keys)

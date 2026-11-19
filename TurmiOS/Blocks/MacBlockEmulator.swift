@@ -32,6 +32,7 @@ final class MacBlockEmulator: TerminalDelegate {
         options.rows = max(rows, 2)
         options.scrollback = Self.scrollback
         options.termName = "xterm-256color"
+        options.ansi256PaletteStrategy = .xterm
         terminal = Terminal(delegate: self, options: options)
         graphicsHost.noteBuffer()
     }

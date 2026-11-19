@@ -90,6 +90,12 @@ public enum OSC1337 {
 }
 
 public enum SixelSequence {
+    /// Sixel takes only parameter bytes before its final `q`; an intermediate byte such as `$` (DECRQSS) or `+` (XTGETTCAP)
+    /// makes it a different request that SwiftTerm has to see.
+    public static func isParameter(_ byte: UInt8) -> Bool {
+        byte >= 0x30 && byte <= 0x3F
+    }
+
     public enum Piece: Sendable {
         case bytes(ArraySlice<UInt8>)
         case image(ArraySlice<UInt8>)
@@ -117,7 +123,7 @@ public enum SixelSequence {
 
     private static func isSixel(_ bytes: [UInt8], at index: Int) -> Bool {
         var cursor = index + 2
-        while cursor < bytes.count, bytes[cursor] >= 0x20, bytes[cursor] <= 0x3F { cursor += 1 }
+        while cursor < bytes.count, SixelSequence.isParameter(bytes[cursor]) { cursor += 1 }
         return cursor < bytes.count && bytes[cursor] == 0x71
     }
 
@@ -332,7 +338,7 @@ public enum TerminalGraphics {
             return (2 + marker.count, true)
         case 0x50:
             var cursor = 2
-            while cursor < held.count, held[cursor] >= 0x20, held[cursor] <= 0x3F { cursor += 1 }
+            while cursor < held.count, SixelSequence.isParameter(held[cursor]) { cursor += 1 }
             guard cursor < held.count, held[cursor] == 0x71 else { return nil }
             return (cursor + 1, false)
         default:
@@ -391,7 +397,7 @@ public enum TerminalGraphics {
 
     private static func sixel(_ bytes: [UInt8], at index: Int) -> Mark {
         var cursor = index + 2
-        while cursor < bytes.count, bytes[cursor] >= 0x20, bytes[cursor] <= 0x3F { cursor += 1 }
+        while cursor < bytes.count, SixelSequence.isParameter(bytes[cursor]) { cursor += 1 }
         guard cursor < bytes.count else { return .incomplete }
         guard bytes[cursor] == 0x71 else { return .text }
         switch terminator(bytes, from: cursor + 1, allowBell: false) {

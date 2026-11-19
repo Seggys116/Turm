@@ -200,6 +200,19 @@ enum KittySharedMemory {
         return true
     }
 
+    static func create(_ name: String, bytes: [UInt8]) -> Bool {
+        let descriptor = name.withCString { sharedMemoryCreate($0, mode: 0o600) }
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        guard ftruncate(descriptor, off_t(bytes.count)) == 0 else { return false }
+        guard let map = mmap(nil, bytes.count, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0), map != MAP_FAILED else {
+            return false
+        }
+        bytes.withUnsafeBytes { map.copyMemory(from: $0.baseAddress!, byteCount: bytes.count) }
+        munmap(map, bytes.count)
+        return true
+    }
+
     static func exists(_ name: String) -> Bool {
         let descriptor = name.withCString { sharedMemoryOpen($0, O_RDONLY, 0) }
         guard descriptor >= 0 else { return false }
