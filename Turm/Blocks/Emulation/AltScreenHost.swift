@@ -302,6 +302,8 @@ final class FullScreenTerminalView: TerminalView {
         graphicsBackdrop = GraphicsLayerView(content: underlay)
         graphicsOverlay = GraphicsLayerView(content: overlay)
         super.init(frame: frame, font: font, options: options)
+        // AppKit gives a custom backing layer the .never policy, which leaves the text undrawn; match the stock view
+        layerContentsRedrawPolicy = .duringViewResize
     }
 
     @available(*, unavailable)

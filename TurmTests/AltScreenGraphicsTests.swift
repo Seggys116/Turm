@@ -52,6 +52,20 @@ struct AltScreenGraphicsTests {
         #expect(host.view.graphicsBackdrop.fill == Theme.terminalBackground.resolved(dark: false).cgColor)
     }
 
+    @Test @MainActor func textIsDrawnIntoTheTerminalLayer() throws {
+        let host = makeHost()
+        host.feed(Array("hello world".utf8))
+        #expect(host.view.layerContentsRedrawPolicy == .duringViewResize)
+        let container = AltContainer(host: host)
+        container.setFrameSize(NSSize(width: 400, height: 300))
+        let layer = try #require(host.view.layer)
+        layer.displayIfNeeded()
+        host.view.needsDisplay = true
+        #expect(layer.needsDisplay())
+        layer.displayIfNeeded()
+        #expect(layer.contents != nil)
+    }
+
     @Test func backdropSitsBelowAndOverlayAboveTheTerminal() throws {
         let host = makeHost()
         let container = AltContainer(host: host)
