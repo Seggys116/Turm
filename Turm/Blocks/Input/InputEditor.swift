@@ -154,9 +154,7 @@ struct InputEditor: NSViewRepresentable {
             super.init()
             parent.completion.onAccept = { [weak self] in self?.accept($0) }
             parent.completion.onPresentation = { [weak self] in self?.refreshTags() }
-            if !parent.isRemote {
-                Task.detached(priority: .utility) { ShellCompletionService.shared.prepare() }
-            }
+            if !parent.isRemote { ShellCompletionService.shared.prepare() }
             NotificationCenter.default.addObserver(
                 self, selector: #selector(environmentChanged), name: .completionEnvironmentChanged, object: nil
             )

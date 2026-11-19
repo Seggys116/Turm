@@ -15,6 +15,7 @@ private func conformanceWait(timeout: Duration = .seconds(60), until condition: 
 }
 
 /// Sends each query from a real shell in a real session and checks the reply programs rely on to detect features.
+/// Replies come from the main actor, which another suite can hold for a long while on a busy runner, so each read waits long.
 @MainActor
 struct TerminalReplyConformanceTests {
     private struct Probe {
@@ -57,7 +58,7 @@ struct TerminalReplyConformanceTests {
         var body = "stty -echo\n"
         for probe in Self.probes {
             let terminator = probe.terminator == "\\" ? #"'\\'"# : "'\(probe.terminator)'"
-            body += "printf '\(probe.query)'; reply=; IFS= read -rs -t 3 -d \(terminator) reply; "
+            body += "printf '\(probe.query)'; reply=; IFS= read -rs -t 30 -d \(terminator) reply; "
             body += "printf 'REPLY %s\\n' \"${reply//$'\\e'/ESC}\"\(probe.terminator == "\\" ? "'\\'" : "'\(probe.terminator)'")\n"
         }
         body += "stty echo\n"
@@ -67,7 +68,7 @@ struct TerminalReplyConformanceTests {
         defer { session.terminate() }
         #expect(await conformanceWait { session.phase == .ready })
         session.submit("bash '\(script.path)'")
-        #expect(await conformanceWait(timeout: .seconds(120)) { session.blocks.first?.isRunning == false })
+        #expect(await conformanceWait(timeout: .seconds(300)) { session.blocks.first?.isRunning == false })
         let output = try #require(session.blocks.first).plainOutput
         let replies = output.split(separator: "\n").filter { $0.hasPrefix("REPLY ") }.map { String($0.dropFirst("REPLY ".count)) }
         #expect(replies.count == Self.probes.count, "\(output)")

@@ -124,8 +124,8 @@ struct ShellCompletionHelperTests {
     }
 
     private static func service(shell: String) -> ShellCompletionService? {
-        guard FileManager.default.isExecutableFile(atPath: shell), let kind = ShellIntegration.Kind(path: shell) else { return nil }
-        let service = ShellCompletionService(kind: kind)
+        guard FileManager.default.isExecutableFile(atPath: shell), ShellIntegration.Kind(path: shell) != nil else { return nil }
+        let service = ShellCompletionService()
         ShellIntegration.forcedShell = shell
         service.prepare()
         ShellIntegration.forcedShell = nil

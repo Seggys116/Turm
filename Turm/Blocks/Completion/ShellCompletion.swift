@@ -188,6 +188,30 @@ nonisolated extension CommandCompleter {
     }
 }
 
+/// How to start the helper, read from the main actor's shell settings so the helper can be started from any thread.
+nonisolated struct ShellHelperLaunch: Sendable {
+    let executable: String
+    let arguments: [String]
+    let environment: [String]
+    let execName: String
+    /// zsh answers through a terminal and a request file; bash and fish read requests from stdin.
+    let usesTerminal: Bool
+    let requestURL: URL
+}
+
+extension ShellIntegration {
+    static func completionHelperLaunch() -> ShellHelperLaunch? {
+        let request = FileManager.default.temporaryDirectory.appendingPathComponent("turm-complete-\(UUID().uuidString).req")
+        guard let launch = try? completionHelper(request: request) else { return nil }
+        let usesTerminal: Bool
+        if case .zsh = launch.kind { usesTerminal = true } else { usesTerminal = false }
+        return ShellHelperLaunch(
+            executable: launch.executable, arguments: launch.arguments, environment: launch.environment,
+            execName: launch.execName, usesTerminal: usesTerminal, requestURL: request
+        )
+    }
+}
+
 /// A hidden copy of the user's shell, loaded with their configuration, that answers one request at a time.
 nonisolated final class ShellCompletionHelper: @unchecked Sendable {
     private let lock = NSLock()
@@ -197,16 +221,15 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
     private var waiterID = 0
     private var busySince: Date?
     private var dead = false
-    private let kind: ShellIntegration.Kind
-    private let requestURL: URL
+    private let launch: ShellHelperLaunch
+    private var requestURL: URL { launch.requestURL }
     private var pty: LocalProcess?
     private var ptyDelegate: PtyDelegate?
     private var process: Process?
     private var input: FileHandle?
 
-    init(kind: ShellIntegration.Kind) {
-        self.kind = kind
-        requestURL = FileManager.default.temporaryDirectory.appendingPathComponent("turm-complete-\(UUID().uuidString).req")
+    init(launch: ShellHelperLaunch) {
+        self.launch = launch
     }
 
     deinit {
@@ -226,8 +249,7 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
     }
 
     func start() throws {
-        let launch = try ShellIntegration.completionHelper(request: requestURL)
-        if kind == .zsh {
+        if launch.usesTerminal {
             let delegate = PtyDelegate(owner: self)
             let local = LocalProcess(delegate: delegate, dispatchQueue: DispatchQueue(label: "turm.completion.zsh"))
             ptyDelegate = delegate
@@ -288,26 +310,12 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
 
     /// The offers for `line` with the cursor after `cursor` characters, or nil when the shell does not answer in time.
     func request(directory: String, cursor: Int, line: String, timeout: Duration) async -> [ShellOffer]? {
-        lock.lock()
-        // an answer that never came would leave the helper waiting forever, so a stuck one is replaced
-        if let since = busySince, Date().timeIntervalSince(since) > 5 {
-            lock.unlock()
-            stop()
-            return nil
-        }
-        guard isReady, !dead, busySince == nil else {
-            lock.unlock()
-            return nil
-        }
-        busySince = Date()
-        waiterID += 1
-        let id = waiterID
-        lock.unlock()
+        guard let id = claim() else { return nil }
 
         var payload = Array(directory.utf8) + [0]
         payload += Array(String(cursor).utf8) + [0]
         payload += Array(line.utf8) + [0]
-        if kind == .zsh {
+        if launch.usesTerminal {
             do {
                 try Data(payload).write(to: requestURL, options: .atomic)
             } catch {
@@ -320,19 +328,40 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
         }
 
         return await withCheckedContinuation { continuation in
-            lock.lock()
-            if waiterID == id, busySince != nil {
-                waiter = continuation
-                lock.unlock()
+            if wait(id: id, with: continuation) {
                 Task.detached { [weak self] in
                     try? await Task.sleep(for: timeout)
                     self?.abandon(id: id)
                 }
             } else {
-                lock.unlock()
                 continuation.resume(returning: nil)
             }
         }
+    }
+
+    /// Takes the helper for one request, or nil when it is not ready or still busy with another.
+    private func claim() -> Int? {
+        lock.lock()
+        // an answer that never came would leave the helper waiting forever, so a stuck one is replaced
+        if let since = busySince, Date().timeIntervalSince(since) > 5 {
+            lock.unlock()
+            stop()
+            return nil
+        }
+        defer { lock.unlock() }
+        guard isReady, !dead, busySince == nil else { return nil }
+        busySince = Date()
+        waiterID += 1
+        return waiterID
+    }
+
+    /// Parks the caller until its answer comes, unless the answer already came.
+    private func wait(id: Int, with continuation: CheckedContinuation<[ShellOffer]?, Never>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard waiterID == id, busySince != nil else { return false }
+        waiter = continuation
+        return true
     }
 
     /// Gives up waiting; the late answer is still read and dropped, and the helper is free once it arrives.
@@ -416,15 +445,25 @@ nonisolated final class ShellCompletionService: @unchecked Sendable {
     private let lock = NSLock()
     private var helper: ShellCompletionHelper?
     private var lastStart: Date?
-    private let kind: ShellIntegration.Kind
+    private var launch: ShellHelperLaunch?
 
-    init(kind: ShellIntegration.Kind = ShellIntegration.userKind) {
-        self.kind = kind
+    /// Reads how to start the user's shell, then starts it in the background so the first completion does not wait
+    /// for their configuration to load. Remote and local sessions share it; only local ones ask.
+    @MainActor func prepare() {
+        if storedLaunch() == nil, let made = ShellIntegration.completionHelperLaunch() { store(made) }
+        Task.detached(priority: .utility) { [self] in _ = current() }
     }
 
-    /// Starts the helper early so the first completion does not wait for the user's configuration to load.
-    func prepare() {
-        _ = current()
+    private func storedLaunch() -> ShellHelperLaunch? {
+        lock.lock()
+        defer { lock.unlock() }
+        return launch
+    }
+
+    private func store(_ made: ShellHelperLaunch) {
+        lock.lock()
+        defer { lock.unlock() }
+        if launch == nil { launch = made }
     }
 
     private func current() -> ShellCompletionHelper? {
@@ -433,8 +472,9 @@ nonisolated final class ShellCompletionService: @unchecked Sendable {
         if let helper, !helper.isDead { return helper }
         // a configuration that kills the shell should not be retried on every keystroke
         if let lastStart, Date().timeIntervalSince(lastStart) < 10 { return nil }
+        guard let launch else { return nil }
         lastStart = Date()
-        let made = ShellCompletionHelper(kind: kind)
+        let made = ShellCompletionHelper(launch: launch)
         do {
             try made.start()
         } catch {
