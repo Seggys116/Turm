@@ -154,6 +154,9 @@ struct InputEditor: NSViewRepresentable {
             super.init()
             parent.completion.onAccept = { [weak self] in self?.accept($0) }
             parent.completion.onPresentation = { [weak self] in self?.refreshTags() }
+            if !parent.isRemote {
+                Task.detached(priority: .utility) { ShellCompletionService.shared.prepare() }
+            }
             NotificationCenter.default.addObserver(
                 self, selector: #selector(environmentChanged), name: .completionEnvironmentChanged, object: nil
             )
@@ -550,7 +553,13 @@ struct InputEditor: NSViewRepresentable {
                 return
             }
             guard !view.ghost.isEmpty else {
-                request(.tab)
+                if completion.isOpen, completion.items.indices.contains(completion.selected),
+                   completion.items[completion.selected].kind != .history,
+                   view.selectedRange().location == (view.string as NSString).length {
+                    accept(completion.selected)
+                } else {
+                    request(.tab)
+                }
                 return
             }
             let text = view.string
@@ -622,7 +631,7 @@ struct InputEditor: NSViewRepresentable {
                     }
                 } else if let line = pinned {
                     ghost = String(line.dropFirst(text.count))
-                } else if let suggestion = CommandHistory.shared.suggestion(for: text) {
+                } else if let suggestion = CommandHistory.shared.suggestion(for: text, directory: parent.directory, environment: environment) {
                     ghost = suggestion
                 } else if let latest, latest.text == text, NSMaxRange(latest.range) == length,
                           let item = SuggestionList.sole(latest.items),
@@ -659,13 +668,25 @@ struct InputEditor: NSViewRepresentable {
             let env = environment
             let cycling: Bool
             if case .cycle = mode { cycling = true } else { cycling = false }
+            let asksShell = !parent.isRemote && !cycling
+            let patience: Duration
+            if case .tab = mode { patience = .milliseconds(1500) } else { patience = .milliseconds(400) }
             generation += 1
             let ticket = generation
             Task { [weak self] in
                 let result = await Task.detached(priority: .userInitiated) {
-                    let found = CommandCompleter.complete(
-                        line: text, cursor: cursor, directory: directory, history: history, environment: env
-                    )
+                    // the user's own shell answers first; Turm's sources cover its own features and anything the shell cannot
+                    var found: CompletionResult?
+                    if asksShell, !CommandCompleter.isTurmFeature(line: text, cursor: cursor, directory: directory, environment: env) {
+                        found = await ShellCompletionService.shared.complete(
+                            line: text, cursor: cursor, directory: directory, timeout: patience
+                        )
+                    }
+                    if found == nil {
+                        found = CommandCompleter.complete(
+                            line: text, cursor: cursor, directory: directory, history: history, environment: env
+                        )
+                    }
                     guard cycling, !SuggestionList.extends(found, line: text) else { return found }
                     return CommandCompleter.siblings(line: text, cursor: cursor, directory: directory, environment: env) ?? found
                 }.value
@@ -705,7 +726,14 @@ struct InputEditor: NSViewRepresentable {
                 completionRange = candidates.range
                 completion.show(candidates.items, engaged: completion.engaged)
             case .auto:
-                completion.close()
+                // the list opens on its own while typing; it is not engaged, so Enter still runs the line
+                let typed = (text as NSString).substring(with: range)
+                if result.items.count == 1, result.items[0].insert == typed {
+                    completion.close()
+                } else {
+                    completionRange = range
+                    completion.show(result.items, engaged: false)
+                }
             case .cycle:
                 break
             case .tab:

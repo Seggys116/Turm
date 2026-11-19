@@ -98,6 +98,38 @@ enum ShellIntegration {
         }
     }
 
+    /// The user's shell started like a session, but answering completion requests instead of showing a prompt.
+    /// zsh reads its requests from `request` and is driven through a terminal; bash and fish read them from stdin.
+    static func completionHelper(request: URL) throws -> Launch {
+        let session = try launch()
+        var environment = session.environment.filter { !$0.hasPrefix("TURM_CMD_FILE=") }
+        switch session.kind {
+        case .zsh:
+            let directory = try install(kind: .zsh, files: [("complete.zsh", ShellScripts.zshCompletion)])
+            environment.append("TURM_COMPLETION_HELPER=\(directory.appendingPathComponent("complete.zsh").path)")
+            environment.append("TURM_COMPLETION_REQUEST=\(request.path)")
+            return Launch(
+                executable: session.executable, execName: session.execName, arguments: ["-i"], environment: environment,
+                submission: session.submission, kind: .zsh
+            )
+        case .bash:
+            let directory = try install(kind: .bash, files: [("complete.bash", ShellScripts.bashCompletion)])
+            let script = directory.appendingPathComponent("complete.bash").path
+            // an interactive shell reads ~/.bashrc, where bash-completion is usually loaded
+            return Launch(
+                executable: session.executable, execName: session.execName, arguments: ["-i", "-c", "source \(quoted(script))"],
+                environment: environment, submission: session.submission, kind: .bash
+            )
+        case .fish:
+            let directory = try install(kind: .fish, files: [("complete.fish", ShellScripts.fishCompletion)])
+            let script = directory.appendingPathComponent("complete.fish").path
+            return Launch(
+                executable: session.executable, execName: session.execName, arguments: ["-c", "source \(fishQuoted(script))"],
+                environment: environment, submission: session.submission, kind: .fish
+            )
+        }
+    }
+
     static func quoted(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
