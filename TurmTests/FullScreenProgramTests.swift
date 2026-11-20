@@ -165,12 +165,15 @@ private final class LivePane {
 
     /// Keeps the window updating while waiting. Other suites can hold the main actor for a long while on a busy
     /// runner, so the deadline is generous.
-    func wait(_ timeout: Duration = .seconds(60), until condition: () -> Bool) async -> Bool {
+    func wait(_ timeout: Duration = .seconds(120), until condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
+        // a stall can swallow the whole deadline, so a few checks are always made after it has passed
+        var late = 0
+        while ContinuousClock.now < deadline || late < 10 {
+            if ContinuousClock.now >= deadline { late += 1 }
             pump()
             if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(late > 0 ? 200 : 50))
         }
         pump()
         return condition()
