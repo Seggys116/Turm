@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.5
+
+- Accepting a completion with Tab, Enter or a click no longer adds a space after it, so you can keep typing the next part of a path or word straight away. An open quote is still closed.
+
 ## 2.1.4
 
 - Control+C copies selected output, as in other terminals, and drops the selection so the next Control+C interrupts as usual. It works in block output, while a command runs and in full-screen programs; with nothing selected it still clears the line or interrupts, and it no longer beeps.
