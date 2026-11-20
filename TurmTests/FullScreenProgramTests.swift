@@ -163,8 +163,32 @@ private final class LivePane {
     func ready(sourceLocation: SourceLocation = #_sourceLocation) async -> Bool {
         let ready = await wait { session.phase == .ready }
         let printed = String(decoding: output.suffix(600), as: UTF8.self).replacingOccurrences(of: "\u{1B}", with: "^[")
-        #expect(ready, "shell not ready: phase \(session.phase), failure \(session.failure ?? "none"), printed: \(printed)", sourceLocation: sourceLocation)
+        #expect(ready, "shell not ready: phase \(session.phase), failure \(session.failure ?? "none"), printed: \(printed), processes: \(ready ? "" : Self.descendants())", sourceLocation: sourceLocation)
         return ready
+    }
+
+    /// Every process this test app started, with its state and what it is waiting on, to show where a shell is stuck.
+    private static func descendants() -> String {
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axo", "pid=,ppid=,stat=,wchan=,etime=,command="]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        guard (try? ps.run()) != nil else { return "ps failed" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        let rows = String(decoding: data, as: UTF8.self).split(separator: "\n").map { $0.split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true) }
+        var family: Set<Substring> = [Substring(String(ProcessInfo.processInfo.processIdentifier))]
+        var grew = true
+        while grew {
+            grew = false
+            for row in rows where row.count >= 6 && family.contains(row[1]) && !family.contains(row[0]) {
+                family.insert(row[0])
+                grew = true
+            }
+        }
+        return rows.filter { $0.count >= 6 && family.contains($0[0]) && $0[0] != Substring(String(ProcessInfo.processInfo.processIdentifier)) }
+            .map { $0.joined(separator: " ").prefix(220) }.joined(separator: " || ")
     }
 
     var sample: String { folder.appendingPathComponent("sample.txt").path }
