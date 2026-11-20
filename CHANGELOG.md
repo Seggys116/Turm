@@ -7,6 +7,7 @@
 - Text in full-screen programs is drawn at the screen's resolution again instead of blurry at 1x on Retina displays.
 - Zoom: Command-= and Command-- make terminal text larger and smaller, and Command-0 returns to the actual size. A short indicator shows the size, and the setting is remembered.
 - Closed tabs and panes no longer leave their shell behind as a zombie process until Turm quits. Enough of them could stop new shells from starting.
+- A bash session no longer gets stuck before its first prompt, or with a finished command still shown as running, when the window is resized while Turm is busy. The resize signal interrupted the shell integration's write part way through, losing the marker Turm waits for.
 
 ## 2.1.4
 

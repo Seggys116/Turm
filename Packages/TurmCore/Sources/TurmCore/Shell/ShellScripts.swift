@@ -11,6 +11,16 @@ public nonisolated enum ShellScripts {
         done
         unset _turm_f _turm_home
 
+        # A window-size signal that arrives while a write is blocked makes printf give up part way, which loses the
+        # marker. Ignored signals interrupt nothing, so the signal is ignored for the write and restored afterwards;
+        # bash still reads the new size after the next command.
+        _turm_write() {
+          local saved
+          saved=$(trap -p WINCH)
+          trap '' WINCH
+          builtin printf "$@"
+          if [[ -n $saved ]]; then eval "$saved"; else trap - WINCH; fi
+        }
         _turm_report_env() {
           local now encoded
           now=$(unset PWD OLDPWD _ SHLVL; export -p)
@@ -21,7 +31,7 @@ public nonisolated enum ShellScripts {
           encoded=$(command env -0 | command base64)
           encoded=${encoded//[$'\n\r']/}
           if (( ${#encoded} > 0 && ${#encoded} <= 262144 )); then
-            printf '\e]7777;E;%s\a' "$encoded"
+            _turm_write '\e]7777;E;%s\a' "$encoded"
           fi
         }
         _turm_drain() {
@@ -41,9 +51,9 @@ public nonisolated enum ShellScripts {
           # keys sent to a program that exited before reading them would land in the next command line
           _turm_drain
           if [[ -n $TURM_REMOTE ]]; then
-            printf '\e]7777;R;%s;%s;%s\a' "$TURM_REMOTE" "$1" "$PWD"
+            _turm_write '\e]7777;R;%s;%s;%s\a' "$TURM_REMOTE" "$1" "$PWD"
           else
-            printf '\e]7777;P;%s;%s\a' "$1" "$PWD"
+            _turm_write '\e]7777;P;%s;%s\a' "$1" "$PWD"
           fi
         }
         _turm_prompt() {
@@ -77,7 +87,7 @@ public nonisolated enum ShellScripts {
           if [[ -n $_turm_armed ]]; then
             _turm_armed=
             _turm_ran=1
-            printf '\e]7777;C\a'
+            _turm_write '\e]7777;C\a'
           fi
         }
 
@@ -104,7 +114,7 @@ public nonisolated enum ShellScripts {
           if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
             bind 'set enable-bracketed-paste on' 2>/dev/null && _turm_kind=bash
           fi
-          printf '\e]7777;H;%s;%s;%s@%s\a' "$TURM_REMOTE" "$_turm_kind" "${USER:-$(id -un)}" "${HOSTNAME:-$(hostname)}"
+          _turm_write '\e]7777;H;%s;%s;%s@%s\a' "$TURM_REMOTE" "$_turm_kind" "${USER:-$(id -un)}" "${HOSTNAME:-$(hostname)}"
           unset _turm_kind
         fi
         _turm_quiet
