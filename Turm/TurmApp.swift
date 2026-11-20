@@ -12,6 +12,8 @@ struct TurmApp: App {
             ContentView(updater: updater)
         }
         .windowStyle(.hiddenTitleBar)
+        .defaultLaunchBehavior(Self.hostsTests ? .suppressed : .automatic)
+        .restorationBehavior(Self.hostsTests ? .disabled : .automatic)
         .commands {
             PaneCommands()
             UpdateCommands(updater: updater)
@@ -20,13 +22,19 @@ struct TurmApp: App {
         Window("Remote Macs", id: RemoteMacsWindow.id) {
             RemoteMacsWindow()
         }
+        .defaultLaunchBehavior(Self.hostsTests ? .suppressed : .automatic)
+        .restorationBehavior(Self.hostsTests ? .disabled : .automatic)
     }
+
+    /// While the app hosts the test suite it opens no window and never comes to the front, so tests stay out of the user's way.
+    static var hostsTests: Bool { WorkspacePersistence.isRunningTests }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        if TurmApp.hostsTests { NSApp.setActivationPolicy(.prohibited) }
         NSAppleEventManager.shared().setEventHandler(
             self, andSelector: #selector(handleURLEvent(_:reply:)),
             forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL)
@@ -73,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !TurmApp.hostsTests
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {

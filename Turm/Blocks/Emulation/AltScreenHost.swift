@@ -33,7 +33,7 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         options.cols = cols
         options.rows = rows
         options.ansi256PaletteStrategy = TerminalPalette.extendedStrategy
-        view = FullScreenTerminalView(frame: .zero, font: nil, options: options, underlay: painter.underlay, overlay: painter.overlay)
+        view = FullScreenTerminalView(frame: .zero, font: TerminalMetrics.font, options: options, underlay: painter.underlay, overlay: painter.overlay)
         super.init()
         view.terminalDelegate = self
         view.notifyUpdateChanges = true
@@ -175,6 +175,13 @@ final class AltScreenHost: NSObject, TerminalViewDelegate {
         view.nativeBackgroundColor = Theme.terminalBackground.resolved(dark: dark)
         view.nativeForegroundColor = Theme.text.resolved(dark: dark)
         view.installColors(TerminalPalette.engineColors(dark: dark))
+    }
+
+    /// Setting the font recomputes the grid and reports it through sizeChanged, which reaches the session's onResize.
+    func apply(zoom size: CGFloat) {
+        guard view.font.pointSize != size else { return }
+        view.font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        refreshGraphics()
     }
 
     func focus() {
@@ -367,11 +374,20 @@ final class FullScreenTerminalView: TerminalView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
+        matchBackingScale()
         onGeometry()
+    }
+
+    /// AppKit leaves a custom backing layer at 1x, which draws the text blurry on a Retina screen; follow the window.
+    private func matchBackingScale() {
+        guard let scale = window?.backingScaleFactor, let layer, layer.contentsScale != scale else { return }
+        layer.contentsScale = scale
+        needsDisplay = true
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        matchBackingScale()
         watchControlC()
         registerForDraggedTypes(AttachmentStore.dragTypes)
         _ = Self.installPointerCursor

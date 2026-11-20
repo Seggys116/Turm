@@ -130,6 +130,9 @@ struct TerminalPaneView: View {
             .onChange(of: proxy.size, initial: true) { _, size in
                 report(size)
             }
+            .onChange(of: TerminalZoom.shared.size) {
+                report(proxy.size)
+            }
             .onChange(of: isFocused, initial: true) { _, focused in
                 session.setPaneFocused(focused)
             }
@@ -193,17 +196,32 @@ struct TerminalPaneView: View {
 }
 
 enum TerminalMetrics {
-    static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    struct Measure {
+        let size: CGFloat
+        let font: NSFont
+        let cellWidth: CGFloat
+        let lineHeight: CGFloat
+    }
 
-    static let cellWidth: CGFloat = {
+    static func measure(size: CGFloat) -> Measure {
+        let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
         let width = ("M" as NSString).size(withAttributes: [.font: font]).width
-        return max(width, 1)
-    }()
-
-    static let lineHeight: CGFloat = {
         let layout = NSLayoutManager()
-        return max(layout.defaultLineHeight(for: font), 1)
-    }()
+        return Measure(size: size, font: font, cellWidth: max(width, 1), lineHeight: max(layout.defaultLineHeight(for: font), 1))
+    }
+
+    private static var cached = measure(size: TerminalZoom.shared.size)
+
+    /// Metrics for the current zoom; reading it inside a view body makes the view follow zoom changes.
+    static var current: Measure {
+        let size = TerminalZoom.shared.size
+        if cached.size != size { cached = measure(size: size) }
+        return cached
+    }
+
+    static var font: NSFont { current.font }
+    static var cellWidth: CGFloat { current.cellWidth }
+    static var lineHeight: CGFloat { current.lineHeight }
 }
 
 private struct AltScreenView: NSViewRepresentable {
@@ -211,6 +229,7 @@ private struct AltScreenView: NSViewRepresentable {
     let isFocused: Bool
     let onFocus: () -> Void
     let stillFocused: () -> Bool
+    var zoom = TerminalZoom.shared.size
     @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> AltContainer {
@@ -220,6 +239,7 @@ private struct AltScreenView: NSViewRepresentable {
     func updateNSView(_ container: AltContainer, context: Context) {
         host.view.onMouseDown = onFocus
         host.apply(dark: colorScheme == .dark)
+        host.apply(zoom: zoom)
         container.wantsFocus = isFocused
         container.stillFocused = stillFocused
         container.focusIfWanted()

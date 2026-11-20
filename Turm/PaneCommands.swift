@@ -20,6 +20,19 @@ struct PaneCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
         }
+        CommandGroup(after: .sidebar) {
+            let zoom = TerminalZoom.shared
+            Divider()
+            Button("Zoom In") { zoom.zoomIn() }
+                .keyboardShortcut("=")
+                .disabled(!zoom.canZoomIn)
+            Button("Zoom Out") { zoom.zoomOut() }
+                .keyboardShortcut("-")
+                .disabled(!zoom.canZoomOut)
+            Button("Actual Size") { zoom.reset() }
+                .keyboardShortcut("0")
+                .disabled(zoom.isDefault)
+        }
         CommandGroup(after: .textEditing) {
             Menu("Find") {
                 Button("Find...") { workspace?.focusedSession?.search.present() }

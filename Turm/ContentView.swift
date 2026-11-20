@@ -44,6 +44,7 @@ struct ContentView: View {
         .background(WindowSurface())
         .onGeometryChange(for: CGSize.self) { $0.size } action: { tileDrag.windowBounds = CGRect(origin: .zero, size: $0) }
         .overlay(alignment: .topLeading) { TileDropOverlay(workspace: workspace, drag: tileDrag) }
+        .overlay(alignment: .top) { ZoomIndicator().padding(.top, 56) }
         .onChange(of: tileDrag.location) {
             if tileDrag.tearsOff { tearOffPanel.show(tileDrag.title, at: NSEvent.mouseLocation) } else { tearOffPanel.hide() }
         }

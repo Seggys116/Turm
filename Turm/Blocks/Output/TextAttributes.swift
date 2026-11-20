@@ -46,15 +46,21 @@ extension NSAttributedString.Key {
 }
 
 enum TerminalFonts {
-    private static let fonts: [NSFont] = (0..<4).map { index in
-        let base = NSFont.monospacedSystemFont(ofSize: TerminalPalette.fontSize, weight: index & 1 != 0 ? .bold : .regular)
-        guard index & 2 != 0 else { return base }
-        let descriptor = base.fontDescriptor.withSymbolicTraits(.italic)
-        return NSFont(descriptor: descriptor, size: TerminalPalette.fontSize) ?? base
+    static func fonts(size: CGFloat) -> [NSFont] {
+        (0..<4).map { index in
+            let base = NSFont.monospacedSystemFont(ofSize: size, weight: index & 1 != 0 ? .bold : .regular)
+            guard index & 2 != 0 else { return base }
+            let descriptor = base.fontDescriptor.withSymbolicTraits(.italic)
+            return NSFont(descriptor: descriptor, size: size) ?? base
+        }
     }
 
+    private static var cached = (size: TerminalZoom.shared.size, fonts: fonts(size: TerminalZoom.shared.size))
+
     static func font(for style: Int) -> NSFont {
-        fonts[min(max(style, 0), 3)]
+        let size = TerminalZoom.shared.size
+        if cached.size != size { cached = (size, fonts(size: size)) }
+        return cached.fonts[min(max(style, 0), 3)]
     }
 }
 

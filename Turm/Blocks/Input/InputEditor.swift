@@ -21,6 +21,8 @@ struct InputEditor: NSViewRepresentable {
     var remoteChannel: RemoteChannel?
     var tagObstacle = CGRect.zero
     var history = CommandHistory.shared
+    /// Read while the parent builds its body, so a zoom change re-runs it and reaches the AppKit view.
+    var zoom = TerminalZoom.shared.size
 
     private static let maxLines: CGFloat = 8
 
@@ -76,9 +78,11 @@ struct InputEditor: NSViewRepresentable {
         let coordinator = context.coordinator
         let wasFocused = coordinator.parent.isFocused
         let wasRemote = coordinator.parent.isRemote
+        let wasZoom = coordinator.parent.zoom
         coordinator.parent = self
         guard let view = coordinator.textView else { return }
         if wasRemote != isRemote { coordinator.environmentChanged() }
+        if wasZoom != zoom { coordinator.zoomChanged() }
         if view.string != text {
             view.string = text
             view.moveToEndOfDocument(nil)
@@ -679,6 +683,13 @@ struct InputEditor: NSViewRepresentable {
                 hinted = SuggestionList.ghost(for: first, typed: typed(in: completionRange, of: text)) == ghost
             }
             if completion.hinted != hinted { completion.hinted = hinted }
+        }
+
+        func zoomChanged() {
+            guard let view = textView else { return }
+            view.font = TerminalMetrics.font
+            restyle()
+            view.needsDisplay = true
         }
 
         private func restyle() {

@@ -8,12 +8,17 @@ struct BlockTextView: NSViewRepresentable {
     var selection: NSRange?
     var cursor: OutputCursor?
     var cursorFocused = false
+    /// Read while the parent builds its body, so a zoom change re-runs it and reaches the AppKit view.
+    var zoom = TerminalZoom.shared.size
 
     func makeNSView(context: Context) -> BlockTextNSView {
-        BlockTextNSView()
+        let view = BlockTextNSView()
+        view.setZoom(zoom)
+        return view
     }
 
     func updateNSView(_ view: BlockTextNSView, context: Context) {
+        view.setZoom(zoom)
         view.setChunk(chunk)
         view.setHighlights(highlights)
         view.setSelection(selection)
@@ -26,7 +31,8 @@ struct BlockTextView: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: BlockTextNSView, context: Context) -> CGSize? {
-        view.fittingSize(width: proposal.width)
+        view.setZoom(zoom)
+        return view.fittingSize(width: proposal.width)
     }
 }
 
@@ -38,6 +44,7 @@ final class BlockTextNSView: NSTextView {
     private var isMaterialized = false
     private var blinkTimer: Timer?
     private var blinkStart = Date()
+    private var zoom = TerminalZoom.shared.size
     private var cachedFit: (width: CGFloat, size: CGSize)?
     private var boundPiece: PieceRef?
     private var cursor: OutputCursor?
@@ -75,6 +82,16 @@ final class BlockTextNSView: NSTextView {
 
     var textLength: Int {
         chunk?.length ?? 0
+    }
+
+    /// Fonts are applied when the text is materialized, so a new size drops the laid-out text and its measured height.
+    func setZoom(_ next: CGFloat) {
+        guard next != zoom else { return }
+        zoom = next
+        cachedFit = nil
+        isMaterialized = false
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
     }
 
     func setChunk(_ next: TextChunk) {

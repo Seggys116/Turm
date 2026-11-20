@@ -48,6 +48,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     private(set) var isAuxiliary: Bool
     private(set) var phase = Phase.starting
     private(set) var altScreen: AltScreenHost?
+    @ObservationIgnored private var leavingAltScreen: Task<Void, Never>?
     private(set) var failure: String?
     private(set) var progress: Terminal.ProgressReport?
     private(set) var textProgress: Double?
@@ -873,17 +874,21 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         answer(TerminalRequestScanner.scan(bytes[...]))
         var rest = bytes[...]
         while !rest.isEmpty {
-            let entering = altScreen == nil
+            // while a close is pending, the program coming back to the alternate screen is what to look for
+            let entering = altScreen == nil || leavingAltScreen != nil
             guard let end = AltScreenSequence.firstSwitch(in: rest, entering: entering) else {
                 deliver(rest.count == bytes.count ? bytes : Array(rest), to: block)
                 break
             }
             deliver(Array(rest[..<end]), to: block)
             rest = rest[end...]
-            if entering {
+            if altScreen == nil {
                 enterAltScreen(for: block)
+            } else if entering {
+                leavingAltScreen?.cancel()
+                leavingAltScreen = nil
             } else {
-                closeAltScreen()
+                closeAltScreenSoon()
             }
         }
     }
@@ -932,6 +937,8 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     private func closeAltScreen() {
+        leavingAltScreen?.cancel()
+        leavingAltScreen = nil
         altScreen = nil
         pointers.isAlternate = false
         if let grid = paneGrid, grid.cols != cols || grid.rows != rows {
@@ -966,12 +973,30 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         }
     }
 
+    /// How long a program may stay out of the alternate screen before the full-screen view closes.
+    static let altScreenExitGrace: Duration = .milliseconds(250)
+
     private func bufferSwitched() {
         guard let block = current else { return }
         if block.emulator.isAlternate {
+            leavingAltScreen?.cancel()
+            leavingAltScreen = nil
             enterAltScreen(for: block)
         } else {
-            closeAltScreen()
+            closeAltScreenSoon()
+        }
+    }
+
+    /// Closes the full-screen view unless the program returns to the alternate screen within the grace period.
+    /// ncurses programs such as nano leave and at once re-enter the alternate screen to redraw after a resize. Closing
+    /// straight away would hand them the block grid's size, which differs, so they would redraw again and the pane would
+    /// flip between the two views without end, mostly showing a freshly cleared screen.
+    private func closeAltScreenSoon() {
+        guard let host = altScreen, leavingAltScreen == nil else { return }
+        leavingAltScreen = Task { [weak self, weak host] in
+            try? await Task.sleep(for: Self.altScreenExitGrace)
+            guard !Task.isCancelled, let self, let host, self.altScreen === host else { return }
+            self.closeAltScreen()
         }
     }
 

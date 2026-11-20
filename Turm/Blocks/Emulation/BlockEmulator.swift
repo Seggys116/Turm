@@ -676,7 +676,6 @@ enum TerminalPalette {
     static let foreground = Theme.text.color
 
     static let textColor = Theme.text.dynamicNS
-    static let fontSize: CGFloat = 13
 
     private static let ansiColors = Theme.ansi.map(\.dynamicNS)
     private static let terminalBackgroundColor = Theme.terminalBackground.dynamicNS
