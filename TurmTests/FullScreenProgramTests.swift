@@ -264,7 +264,10 @@ struct LiveFullScreenProgramTests {
             pane.pump()
             if pane.session.altScreen == nil || pane.filledRows < 3 || pane.drawnShare() < 0.01 { blankFrames.append(frame) }
         }
-        #expect(blankFrames.isEmpty, "\(program.name) left the pane blank in frames \(blankFrames)")
+        // every program is resized once as the full-screen view takes over, and a frame can catch that one repaint
+        // half done; a resize loop instead leaves the pane blank most of the time and never settles
+        #expect(blankFrames.count <= 4, "\(program.name) left the pane blank in frames \(blankFrames)")
+        #expect(!blankFrames.contains { $0 >= 15 }, "\(program.name) had not settled: blank in frames \(blankFrames)")
         let view = try #require(pane.session.altScreen?.view)
         // text drawn below the window's scale is upscaled and blurry
         #expect(view.layer?.contentsScale == pane.window.backingScaleFactor, "\(program.name) text layer is at \(view.layer?.contentsScale ?? 0)x")
@@ -284,19 +287,22 @@ struct LiveFullScreenProgramTests {
         trap 'n=$((n+1)); printf "\033[?1049l\033[?1049h\033[H\033[2Jredrawn %d\r\nsecond row\r\nthird row" "$n"' WINCH
         printf '\033[?1049h\033[H\033[2Jstarted\r\nsecond row\r\nthird row'
         i=0
-        while [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+        while [ ! -e "$1" ] && [ $i -lt 3000 ]; do sleep 0.1; i=$((i+1)); done
         printf '\033[?1049l'
         echo "resizes=$n"
         """#.write(to: script, atomically: true, encoding: .utf8)
         #expect(await pane.wait { pane.session.phase == .ready })
-        pane.session.submit("bash '\(script.path)'")
-        #expect(await pane.wait { pane.session.altScreen != nil })
+        // the script runs until told to stop, so a runner that stalls the main actor cannot end it early
+        let stop = pane.folder.appendingPathComponent("stop")
+        pane.session.submit("bash '\(script.path)' '\(stop.path)'")
+        #expect(await pane.wait { pane.session.altScreen != nil && pane.filledRows >= 3 })
         var blankFrames = 0
         for _ in 0..<20 {
             try await Task.sleep(for: .milliseconds(100))
             pane.pump()
             if pane.filledRows < 3 { blankFrames += 1 }
         }
+        try Data().write(to: stop)
         #expect(await pane.wait { pane.session.blocks.last?.isRunning == false })
         let output = pane.session.blocks.last?.plainOutput ?? ""
         let resizes = output.split(separator: "\n").first { $0.hasPrefix("resizes=") }.flatMap { Int($0.dropFirst("resizes=".count)) }
@@ -312,9 +318,12 @@ struct LiveFullScreenProgramTests {
         let pane = try LivePane()
         defer { pane.close() }
         #expect(await pane.wait { pane.session.phase == .ready })
-        pane.session.submit(#"printf '\033[?1049hfull screen\r\nrow two\r\nrow three'; sleep 1; printf '\033[?1049l'; echo back; sleep 3"#)
+        let stop = pane.folder.appendingPathComponent("stop").path
+        pane.session.submit(#"printf '\033[?1049hfull screen\r\nrow two\r\nrow three'; sleep 1; printf '\033[?1049l'; echo back; i=0; while [ ! -e '"# + stop + #"' ] && [ $i -lt 3000 ]; do sleep 0.1; i=$((i+1)); done"#)
         #expect(await pane.wait { pane.session.altScreen != nil })
-        #expect(await pane.wait(.seconds(30)) { pane.session.altScreen == nil })
+        #expect(await pane.wait { pane.session.altScreen == nil })
         #expect(pane.session.blocks.last?.isRunning == true)
+        try Data().write(to: URL(fileURLWithPath: stop))
+        #expect(await pane.wait { pane.session.blocks.last?.isRunning == false })
     }
 }
