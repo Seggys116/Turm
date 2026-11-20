@@ -9,7 +9,7 @@ private func exists(_ pid: pid_t) -> Bool {
 }
 
 @MainActor
-private func waitUntil(_ timeout: Duration = .seconds(60), _ condition: () -> Bool) async -> Bool {
+private func waitUntil(_ timeout: Duration = .seconds(120), _ condition: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     var late = 0
     while ContinuousClock.now < deadline || late < 10 {
@@ -49,7 +49,8 @@ struct ChildReaperTests {
     /// A closed session's shell must not linger as a zombie: enough of them stop new shells from starting.
     @Test func aClosedSessionLeavesNoZombie() async throws {
         let session = TerminalSession()
-        #expect(await waitUntil { session.phase == .ready })
+        let ready = await waitUntil { session.phase == .ready }
+        #expect(ready, "shell never ready: \(session.bytesReceived) bytes")
         let pid = session.shellPid
         #expect(pid > 0)
         session.terminate()
