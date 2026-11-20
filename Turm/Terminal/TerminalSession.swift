@@ -327,6 +327,10 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         isRunningAction || (hasSubmittedCommand && hasRunningJobs)
     }
 
+    /// How much the shell has written, and its last bytes, to explain a session that never becomes ready.
+    @ObservationIgnored private(set) var bytesReceived = 0
+    @ObservationIgnored private(set) var recentOutput: [UInt8] = []
+
     /// The shell's process id, or 0 before it starts.
     var shellPid: pid_t { process.shellPid }
 
@@ -1196,6 +1200,9 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
     }
 
     func dataReceived(slice: ArraySlice<UInt8>) {
+        bytesReceived += slice.count
+        recentOutput.append(contentsOf: slice)
+        if recentOutput.count > 512 { recentOutput.removeFirst(recentOutput.count - 512) }
         for piece in parser.consume(slice) {
             handle(piece)
         }

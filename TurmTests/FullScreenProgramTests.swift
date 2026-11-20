@@ -142,8 +142,6 @@ private final class LivePane {
     let session = TerminalSession()
     let window: NSWindow
     let folder: URL
-    /// Everything the shell printed, kept to explain a session that never becomes ready.
-    private var output: [UInt8] = []
 
     init() throws {
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("turm-live-\(UUID().uuidString)")
@@ -154,15 +152,12 @@ private final class LivePane {
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = NSHostingView(rootView: TerminalPaneView(session: session, isFocused: true).frame(width: 640, height: 400))
-        session.companionTap = { [weak self] event in
-            if case .output(_, let bytes) = event { self?.output.append(contentsOf: bytes) }
-        }
     }
 
     /// Waits for the shell's first prompt, and on failure says what the shell printed instead.
     func ready(sourceLocation: SourceLocation = #_sourceLocation) async -> Bool {
         let ready = await wait { session.phase == .ready }
-        let printed = String(decoding: output.suffix(600), as: UTF8.self).replacingOccurrences(of: "\u{1B}", with: "^[")
+        let printed = "\(session.bytesReceived) bytes from shell \(session.shellPid), last: " + String(decoding: session.recentOutput, as: UTF8.self).replacingOccurrences(of: "\u{1B}", with: "^[").replacingOccurrences(of: "\u{7}", with: "^G")
         #expect(ready, "shell not ready: phase \(session.phase), failure \(session.failure ?? "none"), printed: \(printed), processes: \(ready ? "" : Self.descendants())", sourceLocation: sourceLocation)
         return ready
     }
