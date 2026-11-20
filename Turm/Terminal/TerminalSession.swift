@@ -327,6 +327,9 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         isRunningAction || (hasSubmittedCommand && hasRunningJobs)
     }
 
+    /// The shell's process id, or 0 before it starts.
+    var shellPid: pid_t { process.shellPid }
+
     func terminate() {
         runner.dismiss()
         guard !didExit else { return }
@@ -336,6 +339,7 @@ final class TerminalSession: NSObject, LocalProcessDelegate {
         process.terminate()
         // interactive shells ignore SIGTERM, and the pty stays open until the shell hangs up
         if pid > 0 { kill(pid, SIGHUP) }
+        ChildReaper.collect(pid)
     }
 
     func focus() {

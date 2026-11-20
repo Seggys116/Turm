@@ -6,6 +6,7 @@
 - nano and other ncurses programs stay on screen instead of flickering to black. They briefly leave and re-enter the alternate screen to redraw after a resize, and Turm used to treat that as the program finishing, resize it back and start the cycle again.
 - Text in full-screen programs is drawn at the screen's resolution again instead of blurry at 1x on Retina displays.
 - Zoom: Command-= and Command-- make terminal text larger and smaller, and Command-0 returns to the actual size. A short indicator shows the size, and the setting is remembered.
+- Closed tabs and panes no longer leave their shell behind as a zombie process until Turm quits. Enough of them could stop new shells from starting.
 
 ## 2.1.4
 

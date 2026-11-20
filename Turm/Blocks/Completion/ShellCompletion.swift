@@ -296,6 +296,8 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
         lock.lock()
         let local = pty
         let child = process
+        // once the shell has died, SwiftTerm has collected it and the pid may belong to someone else
+        let exited = dead
         pty = nil
         process = nil
         dead = true
@@ -303,7 +305,9 @@ nonisolated final class ShellCompletionHelper: @unchecked Sendable {
         waiter = nil
         lock.unlock()
         pending?.resume(returning: nil)
+        let pid = local?.shellPid ?? 0
         local?.terminate()
+        if !exited { ChildReaper.collect(pid) }
         if let child, child.isRunning { child.terminate() }
         try? FileManager.default.removeItem(at: requestURL)
     }
