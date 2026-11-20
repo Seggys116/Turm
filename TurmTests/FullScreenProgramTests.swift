@@ -142,6 +142,8 @@ private final class LivePane {
     let session = TerminalSession()
     let window: NSWindow
     let folder: URL
+    /// Everything the shell printed, kept to explain a session that never becomes ready.
+    private var output: [UInt8] = []
 
     init() throws {
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("turm-live-\(UUID().uuidString)")
@@ -152,6 +154,17 @@ private final class LivePane {
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = NSHostingView(rootView: TerminalPaneView(session: session, isFocused: true).frame(width: 640, height: 400))
+        session.companionTap = { [weak self] event in
+            if case .output(_, let bytes) = event { self?.output.append(contentsOf: bytes) }
+        }
+    }
+
+    /// Waits for the shell's first prompt, and on failure says what the shell printed instead.
+    func ready(sourceLocation: SourceLocation = #_sourceLocation) async -> Bool {
+        let ready = await wait { session.phase == .ready }
+        let printed = String(decoding: output.suffix(600), as: UTF8.self).replacingOccurrences(of: "\u{1B}", with: "^[")
+        #expect(ready, "shell not ready: phase \(session.phase), failure \(session.failure ?? "none"), printed: \(printed)", sourceLocation: sourceLocation)
+        return ready
     }
 
     var sample: String { folder.appendingPathComponent("sample.txt").path }
@@ -224,7 +237,9 @@ private final class LivePane {
     }
 }
 
+/// One at a time: each test runs a shell and a window, and a busy runner starting many at once can starve them.
 @MainActor
+@Suite(.serialized)
 struct LiveFullScreenProgramTests {
     struct Program: CustomTestStringConvertible, Sendable {
         let name: String
@@ -255,7 +270,7 @@ struct LiveFullScreenProgramTests {
     func staysDrawnAndQuitsCleanly(_ program: Program) async throws {
         let pane = try LivePane()
         defer { pane.close() }
-        #expect(await pane.wait { pane.session.phase == .ready })
+        guard await pane.ready() else { return }
         let path = try #require(program.path)
         // LESS and similar settings from the user's shell would change what the pager does with a short file
         pane.session.submit("env -u LESS -u LESSOPEN '\(path)' " + program.arguments.replacingOccurrences(of: "SAMPLE", with: "'\(pane.sample)'"))
@@ -294,7 +309,7 @@ struct LiveFullScreenProgramTests {
         printf '\033[?1049l'
         echo "resizes=$n"
         """#.write(to: script, atomically: true, encoding: .utf8)
-        #expect(await pane.wait { pane.session.phase == .ready })
+        guard await pane.ready() else { return }
         // the script runs until told to stop, so a runner that stalls the main actor cannot end it early
         let stop = pane.folder.appendingPathComponent("stop")
         pane.session.submit("bash '\(script.path)' '\(stop.path)'")
@@ -320,7 +335,7 @@ struct LiveFullScreenProgramTests {
     @Test func leavingTheAlternateScreenForGoodClosesTheFullScreenView() async throws {
         let pane = try LivePane()
         defer { pane.close() }
-        #expect(await pane.wait { pane.session.phase == .ready })
+        guard await pane.ready() else { return }
         let stop = pane.folder.appendingPathComponent("stop").path
         pane.session.submit(#"printf '\033[?1049hfull screen\r\nrow two\r\nrow three'; sleep 1; printf '\033[?1049l'; echo back; i=0; while [ ! -e '"# + stop + #"' ] && [ $i -lt 3000 ]; do sleep 0.1; i=$((i+1)); done"#)
         #expect(await pane.wait { pane.session.altScreen != nil })
