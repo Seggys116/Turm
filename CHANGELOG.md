@@ -3,6 +3,9 @@
 ## 2.1.5
 
 - Accepting a completion with Tab, Enter or a click no longer adds a space after it, so you can keep typing the next part of a path or word straight away. An open quote is still closed.
+- nano and other ncurses programs stay on screen instead of flickering to black. They briefly leave and re-enter the alternate screen to redraw after a resize, and Turm used to treat that as the program finishing, resize it back and start the cycle again.
+- Text in full-screen programs is drawn at the screen's resolution again instead of blurry at 1x on Retina displays.
+- Zoom: Command-= and Command-- make terminal text larger and smaller, and Command-0 returns to the actual size. A short indicator shows the size, and the setting is remembered.
 
 ## 2.1.4
 
