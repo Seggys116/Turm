@@ -404,6 +404,7 @@ struct CommandCompleterTests {
         let result = try #require(complete("cat \"my"))
         #expect(inserts(result) == ["\"my file.txt"])
         #expect(result.items[0].terminator == "\" ")
+        #expect(result.items[0].accepted == "\"my file.txt\"")
     }
 
     @Test func terminatedQuotedWordAndCommentsGiveNothing() {

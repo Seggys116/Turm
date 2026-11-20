@@ -807,7 +807,7 @@ struct InputEditor: NSViewRepresentable {
             guard NSMaxRange(completionRange) <= (view.string as NSString).length else { return }
             autoTask?.cancel()
             suppressAuto = true
-            view.insertText(item.insert + item.terminator, replacementRange: completionRange)
+            view.insertText(item.accepted, replacementRange: completionRange)
             suppressAuto = false
             view.window?.makeFirstResponder(view)
         }

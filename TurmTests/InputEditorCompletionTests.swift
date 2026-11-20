@@ -92,7 +92,27 @@ struct InputEditorCompletionTests {
         #expect(!rig.completion.engaged)
         let chosen = rig.completion.items[rig.completion.selected]
         rig.press(#selector(NSResponder.insertTab(_:)))
-        #expect(rig.textView?.string == "cat " + chosen.insert + chosen.terminator)
+        #expect(rig.textView?.string == "cat " + chosen.insert)
+        #expect(rig.textView?.string.hasSuffix(" ") == false)
+    }
+
+    /// A file completed with Tab gets no trailing space: the user may still be adding to the word.
+    @Test func tabOnAUniqueFileAddsNoSpace() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("turm-nospace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data().write(to: folder.appendingPathComponent("unique-report.txt"))
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let rig = EditorRig(folder: folder)
+        defer { rig.close() }
+        var line = ""
+        for _ in 0..<10 where line != "cat unique-report.txt" {
+            rig.textView?.string = ""
+            rig.type("cat uniq")
+            rig.press(#selector(NSResponder.insertTab(_:)))
+            _ = await rig.wait(timeout: .seconds(3)) { rig.textView?.string != "cat uniq" }
+            line = rig.textView?.string ?? ""
+        }
+        #expect(line == "cat unique-report.txt")
     }
 
     /// Typing on from a folder whose list is already open must narrow it at once, and Tab must never take an entry

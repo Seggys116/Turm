@@ -140,6 +140,14 @@ nonisolated struct CompletionItem: Equatable, Identifiable, Sendable {
     }
 
     var id: String { kind.rawValue + "\u{0}" + insert }
+
+    /// What accepting the item types: the text plus any closing quote, never a trailing space, so the user decides
+    /// when the word is finished and can keep typing the next part of a path or option straight away.
+    var accepted: String {
+        var closing = Substring(terminator)
+        while closing.last == " " { closing = closing.dropLast() }
+        return insert + closing
+    }
 }
 
 nonisolated struct CompletionResult: Equatable, Sendable {
